@@ -693,14 +693,27 @@ function loadLlm() {
     fetch('/api/investigations/' + investigationId + '/llm-summary', { method: 'POST' })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            var summary = data.llmSummary || data.llmAnalysis || 'No LLM output returned';
+            var lines = [];
+            if (data.executive_summary) lines.push('## Executive Summary\n' + data.executive_summary);
+            if (data.reasoning_narrative) lines.push('## Reasoning\n' + data.reasoning_narrative);
+            if (data.uncertainty_explanation) lines.push('## Uncertainty\n' + data.uncertainty_explanation);
+            if (data.next_steps_explanation) lines.push('## Next Steps\n' + data.next_steps_explanation);
+            if (data.limitations) lines.push('## Limitations\n' + data.limitations);
+            if (data.unverified_proposals && data.unverified_proposals.length > 0) {
+                lines.push('## Unverified Proposals\n' + data.unverified_proposals.join(', '));
+            }
+            if (data.evidence_scope_note) lines.push(data.evidence_scope_note);
+            var modelInfo = data.model_provider ? ('Provider: ' + data.model_provider) : '';
+            var summary = lines.length > 0 ? lines.join('\n\n') : 'No LLM output returned';
+            var advisoryHtml = '<div class="llm-advisory">'
+                + '&#9888; This is advisory only. LLM does not modify scores, decisions, or evidence. '
+                + 'The investigation decision is deterministic and was made before LLM synthesis.'
+                + (modelInfo ? '<br>' + modelInfo : '')
+                + '</div>';
             el.innerHTML = '<div class="llm-box">'
                 + '<div class="llm-label">LLM Advisory Analysis</div>'
                 + '<div class="llm-text">' + summary.replace(/\n/g, '<br>') + '</div>'
-                + '<div class="llm-advisory">'
-                + '&#9888; This is advisory only. LLM does not modify scores, decisions, or evidence. '
-                + 'The investigation decision is deterministic and was made before LLM synthesis.'
-                + '</div>'
+                + advisoryHtml
                 + '</div>';
         })
         .catch(function() {
