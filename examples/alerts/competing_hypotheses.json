@@ -1,0 +1,16 @@
+{
+  "id": "inc_20260428_1008",
+  "alert_name": "HighErrorRate",
+  "service": "order-service",
+  "namespace": "demo",
+  "severity": "warning",
+  "started_at": "2026-04-28T10:08:00Z",
+  "labels": {
+    "team": "order-platform",
+    "env": "demo"
+  },
+  "annotations": {
+    "description": "order-service error rate exceeded 5% for 5 minutes",
+    "runbook": "https://wiki/internal/order-service-high-error-rate"
+  }
+}

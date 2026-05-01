@@ -1,0 +1,12 @@
+package ai.sreagent.server;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class SreAgentApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(SreAgentApplication.class, args);
+    }
+}

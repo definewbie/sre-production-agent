@@ -1,0 +1,119 @@
+[
+  {
+    "id": "ev_001",
+    "incident_id": "inc_20260428_1008",
+    "source": "deploy",
+    "evidence_type": "deploy_event_near_alert_window",
+    "service": "order-service",
+    "timestamp": "2026-04-28T10:00:00Z",
+    "content": "order-service v1.2.3 deployed to demo namespace by ci-pipeline",
+    "attributes": {
+      "image": "order-service:v1.2.3",
+      "previous_image": "order-service:v1.2.2"
+    },
+    "strength": 0.85
+  },
+  {
+    "id": "ev_002",
+    "incident_id": "inc_20260428_1008",
+    "source": "metric",
+    "evidence_type": "error_rate_spike_after_deploy",
+    "service": "order-service",
+    "timestamp": "2026-04-28T10:03:00Z",
+    "content": "order-service HTTP 5xx rate increased from 0.2% to 8.7% within 3 minutes of deployment",
+    "attributes": {
+      "before_error_rate": "0.2%",
+      "after_error_rate": "8.7%",
+      "window_minutes": 3
+    },
+    "strength": 0.90
+  },
+  {
+    "id": "ev_003",
+    "incident_id": "inc_20260428_1008",
+    "source": "log",
+    "evidence_type": "dependency_timeout_logs",
+    "service": "order-service",
+    "timestamp": "2026-04-28T10:04:00Z",
+    "content": "Repeated payment timeout errors: 'payment timeout after 500ms' appearing every 2-3 seconds in order-service logs",
+    "attributes": {
+      "error_message": "payment timeout after 500ms",
+      "frequency": "every 2-3s",
+      "downstream": "payment-service"
+    },
+    "strength": 0.80
+  },
+  {
+    "id": "ev_004",
+    "incident_id": "inc_20260428_1008",
+    "source": "git",
+    "evidence_type": "retry_timeout_config_change",
+    "service": "order-service",
+    "timestamp": "2026-04-28T09:55:00Z",
+    "content": "Git diff in v1.2.3 shows payment client timeout changed from 2000ms to 500ms in commit abc1234",
+    "attributes": {
+      "commit": "abc1234",
+      "file": "src/main/resources/application.yml",
+      "before": "2000ms",
+      "after": "500ms"
+    },
+    "strength": 0.88
+  },
+  {
+    "id": "ev_005",
+    "incident_id": "inc_20260428_1008",
+    "source": "metric",
+    "evidence_type": "downstream_latency_spike",
+    "service": "payment-service",
+    "timestamp": "2026-04-28T10:06:00Z",
+    "content": "payment-service P95 latency increased moderately from 120ms to 450ms",
+    "attributes": {
+      "before_p95": "120ms",
+      "after_p95": "450ms"
+    },
+    "strength": 0.70
+  },
+  {
+    "id": "ev_006",
+    "incident_id": "inc_20260428_1008",
+    "source": "metric",
+    "evidence_type": "downstream_5xx_absent",
+    "service": "payment-service",
+    "timestamp": "2026-04-28T10:08:00Z",
+    "content": "payment-service HTTP 5xx rate remained normal at 0.1%, no significant increase observed",
+    "attributes": {
+      "5xx_rate": "0.1%",
+      "change": "none"
+    },
+    "strength": 0.75
+  },
+  {
+    "id": "ev_007",
+    "incident_id": "inc_20260428_1008",
+    "source": "log",
+    "evidence_type": "historical_timeout_logs_present",
+    "service": "order-service",
+    "timestamp": "2026-04-28T09:45:00Z",
+    "content": "Same payment timeout errors appeared at low frequency (1-2 per hour) before deployment, indicating pre-existing condition",
+    "attributes": {
+      "frequency_before": "1-2 per hour",
+      "frequency_after": "every 2-3s"
+    },
+    "strength": 0.65
+  },
+  {
+    "id": "ev_008",
+    "incident_id": "inc_20260428_1008",
+    "source": "topology",
+    "evidence_type": "service_dependency_match",
+    "service": "order-service",
+    "timestamp": "2026-04-28T10:08:00Z",
+    "content": "Service topology shows order-service has a synchronous dependency on payment-service for checkout flow",
+    "attributes": {
+      "dependency_type": "synchronous",
+      "downstream": "payment-service",
+      "call_path": "order-service → payment-service"
+    },
+    "strength": 0.80
+  }
+]

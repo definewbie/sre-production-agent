@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SRE Production Agent MVP / SRE 生产智能体 MVP</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; color: #f8fafc; }
+        h1 span { color: #38bdf8; }
+        .subtitle { color: #94a3b8; margin-bottom: 1.5rem; font-size: 0.875rem; }
+        .zh { color: #94a3b8; font-size: 0.8rem; margin-top: 0.1rem; }
+        button { background: #2563eb; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: 600; }
+        button:hover { background: #1d4ed8; }
+        button:disabled { background: #475569; cursor: not-allowed; }
+        button.secondary { background: #7c3aed; }
+        button.secondary:hover { background: #6d28d9; }
+        .btn-row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+        .status { margin-top: 0.5rem; font-size: 0.875rem; color: #94a3b8; }
+        #result { margin-top: 2rem; display: none; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem; }
+        .card h2 { font-size: 1rem; color: #38bdf8; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .card h2.authoritative { color: #22c55e; }
+        .card h2.advisory { color: #a78bfa; }
+        .card h2.guardrail { color: #f59e0b; }
+        .decision-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+        .metric { text-align: center; padding: 0.75rem; }
+        .metric .value { font-size: 1.5rem; font-weight: 700; color: #f8fafc; }
+        .metric .label { font-size: 0.75rem; color: #94a3b8; margin-top: 0.25rem; text-transform: uppercase; }
+        .metric.value-good .value { color: #22c55e; }
+        .metric.value-warn .value { color: #f59e0b; }
+        .metric.value-bad .value { color: #ef4444; }
+        .score-bar { display: flex; align-items: center; margin-bottom: 0.5rem; gap: 0.75rem; }
+        .score-bar .name { width: 280px; font-size: 0.8rem; font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .score-bar .bar-bg { flex: 1; height: 20px; background: #334155; border-radius: 4px; overflow: hidden; position: relative; }
+        .score-bar .bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+        .score-bar .score-text { width: 50px; text-align: right; font-size: 0.85rem; font-weight: 600; }
+        .trace-table { width: 100%; font-size: 0.8rem; border-collapse: collapse; }
+        .trace-table th { text-align: left; color: #94a3b8; padding: 0.5rem; border-bottom: 1px solid #334155; }
+        .trace-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid #1e293b; }
+        .trace-table .evt-type { font-family: monospace; color: #38bdf8; font-size: 0.75rem; }
+        .report-content { white-space: pre-wrap; font-family: monospace; font-size: 0.8rem; background: #0f172a; padding: 1rem; border-radius: 6px; max-height: 600px; overflow-y: auto; line-height: 1.6; }
+        .competing { color: #f59e0b; font-weight: 600; }
+        .leading { color: #22c55e; font-weight: 600; }
+        .gap-warn { color: #f59e0b; }
+        .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .badge-authoritative { background: #166534; color: #bbf7d0; }
+        .badge-advisory { background: #4c1d95; color: #ddd6fe; }
+        .badge-mock { background: #1e3a5f; color: #93c5fd; }
+        .llm-section { margin-bottom: 0.75rem; }
+        .llm-section h3 { font-size: 0.85rem; color: #c4b5fd; margin-bottom: 0.4rem; }
+        .llm-section p { font-size: 0.85rem; line-height: 1.6; color: #cbd5e1; }
+        .guardrail-notice { background: #422006; border: 1px solid #92400e; border-radius: 6px; padding: 1rem; margin-top: 0.75rem; }
+        .guardrail-notice p { font-size: 0.8rem; color: #fbbf24; line-height: 1.5; }
+        .evidence-scope { background: #0c4a6e; border: 1px solid #0e7490; border-radius: 6px; padding: 1rem; margin-top: 0.5rem; }
+        .evidence-scope p { font-size: 0.8rem; color: #67e8f9; line-height: 1.5; }
+        #llmResult { margin-top: 1rem; display: none; }
+    </style>
+</head>
+<body>
+    <h1>SRE Production Agent <span>MVP</span></h1>
+    <p class="subtitle">Verification-first RCA Agent — Evidence → Hypothesis → Verification → Confidence → Decision</p>
+    <p class="subtitle zh">验证优先的 RCA 智能体 — 证据 → 假设 → 验证 → 置信度 → 决策</p>
+
+    <div class="btn-row">
+        <button id="runBtn" onclick="runInvestigation()">▶ Run Scenario E / 运行场景 E</button>
+        <button id="llmBtn" class="secondary" onclick="runLlmSummary()" disabled>✦ Generate LLM Explanation / 生成 LLM 解释</button>
+    </div>
+    <div class="status" id="status"></div>
+
+    <div id="result">
+        <!-- Deterministic RCA Result / 确定性 RCA 结果 -->
+        <div class="card">
+            <h2 class="authoritative">Deterministic RCA Result <span class="badge badge-authoritative">Authoritative / 权威</span></h2>
+            <p class="zh" style="margin-bottom:0.5rem">确定性 RCA 结果 — 由验证链路自动生成，不经过 LLM</p>
+            <div class="decision-grid" id="decisionGrid"></div>
+        </div>
+
+        <!-- Hypothesis Scores / 假设评分 -->
+        <div class="card">
+            <h2>Hypothesis Scores / 假设置信度评分</h2>
+            <div id="scoresChart"></div>
+        </div>
+
+        <!-- Event Trace / 事件追踪 -->
+        <div class="card">
+            <h2>Evidence / Verification Trace / 证据与验证追踪</h2>
+            <table class="trace-table">
+                <thead><tr><th>Time / 时间</th><th>Event / 事件</th><th>Detail / 详情</th></tr></thead>
+                <tbody id="traceBody"></tbody>
+            </table>
+        </div>
+
+        <!-- Deterministic Markdown Report / 确定性 Markdown 报告 -->
+        <div class="card">
+            <h2>Deterministic Markdown Report / 确定性 Markdown 报告</h2>
+            <div class="report-content" id="reportContent"></div>
+        </div>
+
+        <!-- LLM-assisted Explanation / LLM 辅助解释 -->
+        <div id="llmResult">
+            <div class="card">
+                <h2 class="advisory">LLM-assisted Explanation <span class="badge badge-advisory">Advisory Only / 仅供参考</span> <span class="badge badge-mock">Mock Provider</span></h2>
+                <p class="zh" style="margin-bottom:0.5rem">LLM 辅助解释 — 由 LLM 生成，不改变决策、评分或证据</p>
+                <div id="llmContent"></div>
+            </div>
+        </div>
+
+        <!-- Guardrail Notice / 护栏声明 -->
+        <div class="card">
+            <h2 class="guardrail">Guardrail Notice / 护栏声明</h2>
+            <div class="guardrail-notice">
+                <p><strong>⚠ LLM Boundary / LLM 边界：</strong> The LLM explains the verified investigation result. It cannot change the decision, scores, evidence, or event trace. Any new idea from the LLM is treated as an <strong>unverified proposal</strong> and must go through verification before affecting RCA. Deterministic workflow = decision authority. LLM assistant = explanation and proposal layer.</p>
+                <p class="zh" style="margin-top:0.5rem">LLM 只解释已验证的调查结果。它不能改变决策、评分、证据或事件追踪。LLM 提出的任何新想法都视为<strong>未验证的提议</strong>，必须经过验证链路才能影响 RCA。确定性工作流 = 决策权威。LLM = 解释和提议层。</p>
+            </div>
+            <div class="evidence-scope">
+                <p><strong>📡 Evidence Scope / 证据范围：</strong> Current demo evidence is static JSON. The same evidence model can be fed by K8s, Prometheus, Loki, EC2, RDS, ElastiCache, ALB, CMDB, or service topology providers in future steps. LLM explanations are limited to the evidence currently provided.</p>
+                <p class="zh" style="margin-top:0.5rem">当前 demo 证据为静态 JSON。同一证据模型未来可接入 K8s、Prometheus、Loki、EC2、RDS、ElastiCache、ALB、CMDB 或服务拓扑提供者。LLM 解释仅限于当前提供的证据。</p>
+            </div>
+        </div>
+    </div>
+
+<script>
+let latestIncidentId = null;
+
+async function runInvestigation() {
+    const btn = document.getElementById('runBtn');
+    const status = document.getElementById('status');
+    const result = document.getElementById('result');
+    const llmResult = document.getElementById('llmResult');
+    btn.disabled = true;
+    status.textContent = 'Running investigation... / 正在执行调查...';
+    result.style.display = 'none';
+    llmResult.style.display = 'none';
+
+    try {
+        const resp = await fetch('/api/investigations/scenario-e', { method: 'POST' });
+        if (!resp.ok) throw new Error('Investigation failed: ' + resp.status);
+        const data = await resp.json();
+        latestIncidentId = data.incidentId;
+        status.textContent = 'Investigation complete / 调查完成: ' + data.incidentId;
+
+        // Decision
+        const grid = document.getElementById('decisionGrid');
+        const gapClass = data.scoreGap < 0.1 ? 'value-warn' : 'value-good';
+        grid.innerHTML = `
+            <div class="metric"><div class="value">${data.decisionType.replace(/_/g, ' ')}</div><div class="label">Decision / 决策</div></div>
+            <div class="metric"><div class="value">${data.selectedHypothesisId.replace(/_/g, ' ')}</div><div class="label">Selected Hypothesis / 选定假设</div></div>
+            <div class="metric ${gapClass}"><div class="value">${data.scoreGap.toFixed(2)}</div><div class="label">Score Gap / 评分差距</div></div>
+            <div class="metric"><div class="value">${data.confidenceScore.toFixed(2)}</div><div class="label">Confidence / 置信度</div></div>
+        `;
+
+        // Scores chart
+        const chart = document.getElementById('scoresChart');
+        const sorted = Object.entries(data.scores).sort((a, b) => b[1] - a[1]);
+        const maxScore = Math.max(...sorted.map(s => s[1]));
+        chart.innerHTML = sorted.map(([id, score]) => {
+            const pct = maxScore > 0 ? (score / maxScore * 100) : 0;
+            const isLeading = id === data.selectedHypothesisId;
+            const isCompeting = data.competingHypotheses.includes(id);
+            const color = isLeading ? '#22c55e' : (isCompeting ? '#f59e0b' : '#475569');
+            const cls = isLeading ? 'leading' : (isCompeting ? 'competing' : '');
+            return `<div class="score-bar">
+                <div class="name ${cls}">${id.replace(/_/g, ' ')}</div>
+                <div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div>
+                <div class="score-text ${cls}">${score.toFixed(2)}</div>
+            </div>`;
+        }).join('');
+
+        // Fetch trace — API returns snake_case fields (event_type, event_id, incident_id)
+        const traceResp = await fetch(data.traceUrl);
+        if (traceResp.ok) {
+            const trace = await traceResp.json();
+            const tbody = document.getElementById('traceBody');
+            tbody.innerHTML = trace.map(e => {
+                const ts = e.timestamp ? e.timestamp.split('T')[1].split('.')[0] : '';
+                const evtType = e.event_type || e.eventType || '';
+                const detail = formatPayload(evtType, e.payload);
+                return `<tr><td>${ts}</td><td class="evt-type">${evtType}</td><td>${detail}</td></tr>`;
+            }).join('');
+        }
+
+        // Fetch report
+        const reportResp = await fetch(data.reportUrl);
+        if (reportResp.ok) {
+            document.getElementById('reportContent').textContent = await reportResp.text();
+        }
+
+        result.style.display = 'block';
+        document.getElementById('llmBtn').disabled = false;
+    } catch (err) {
+        status.textContent = 'Error / 错误: ' + err.message;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function runLlmSummary() {
+    const btn = document.getElementById('llmBtn');
+    const llmResult = document.getElementById('llmResult');
+    const status = document.getElementById('status');
+    btn.disabled = true;
+    status.textContent = 'Generating LLM-assisted explanation... / 正在生成 LLM 解释...';
+
+    try {
+        const resp = await fetch('/api/investigations/scenario-e/llm-summary', { method: 'POST' });
+        if (!resp.ok) throw new Error('LLM synthesis failed: ' + resp.status);
+        const data = await resp.json();
+        status.textContent = 'LLM explanation generated / LLM 解释已生成 (provider: ' + data.model_provider + ', advisory: ' + data.advisory_only + ')';
+
+        const content = document.getElementById('llmContent');
+        content.innerHTML = `
+            <div class="llm-section"><h3>Executive Summary / 执行摘要</h3><p>${escHtml(data.executive_summary)}</p></div>
+            <div class="llm-section"><h3>Reasoning Narrative / 推理叙述</h3><p>${escHtml(data.reasoning_narrative)}</p></div>
+            <div class="llm-section"><h3>Uncertainty Explanation / 不确定性说明</h3><p>${escHtml(data.uncertainty_explanation)}</p></div>
+            <div class="llm-section"><h3>Next Steps / 后续步骤</h3><p>${escHtml(data.next_steps_explanation)}</p></div>
+            <div class="llm-section"><h3>Limitations / 局限性</h3><p>${escHtml(data.limitations)}</p></div>
+            <div class="llm-section"><h3>Unverified Proposals / 未验证提议</h3><p>${(data.unverified_proposals || []).map(p => '• ' + escHtml(p)).join('<br>') || 'None / 无'}</p></div>
+            <div class="llm-section"><p style="color:#94a3b8;font-size:0.75rem">Provider / 提供者: ${escHtml(data.model_provider)} | Advisory Only / 仅供参考: ${data.advisory_only}</p></div>
+        `;
+
+        llmResult.style.display = 'block';
+    } catch (err) {
+        status.textContent = 'LLM Error / LLM 错误: ' + err.message;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function formatPayload(type, p) {
+    if (!p) return '';
+    switch (type) {
+        case 'INCIDENT_CREATED': return `${p.alert} on ${p.service} / 告警: ${p.alert}，服务: ${p.service}`;
+        case 'EVIDENCE_LOADED': return `${p.count} items / ${p.count} 条证据`;
+        case 'HYPOTHESES_GENERATED': return `${p.count} hypotheses / ${p.count} 个假设`;
+        case 'HYPOTHESIS_VERIFIED': return `${p.hypothesisId} sup=${p.supporting} ctr=${p.counter} / 支持=${p.supporting} 反驳=${p.counter}`;
+        case 'CONFIDENCE_SCORED': return `${p.hypothesisId} = ${Number(p.score).toFixed(2)}`;
+        case 'HYPOTHESES_COMPARED': return `lead=${p.leading} gap=${p.gap} / 领先=${p.leading} 差距=${p.gap}`;
+        case 'DECISION_MADE': return `${p.decisionType} / 决策类型: ${p.decisionType}`;
+        case 'REPORT_GENERATED': return 'done / 完成';
+        default: return JSON.stringify(p);
+    }
+}
+</script>
+</body>
+</html>
