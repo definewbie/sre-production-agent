@@ -229,6 +229,46 @@ body {
 .tab-pane { display: none; padding: 0.75rem 1rem; min-height: 120px; }
 .tab-pane.active { display: block; }
 .tab-empty { color: var(--dim); font-size: 0.7rem; font-style: italic; }
+.tab-guard { margin-top: 0.5rem; font-size: 0.55rem; color: var(--dim); opacity: 0.5; line-height: 1.5; }
+
+/* ---- Evidence items ---- */
+.ev-item { padding: 0.45rem 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.ev-item:last-child { border-bottom: none; }
+.ev-type { font-size: 0.55rem; font-weight: 600; text-transform: uppercase; padding: 0.1rem 0.35rem; border-radius: 2px; margin-right: 0.4rem; }
+.ev-type-metric { background: rgba(59,130,246,0.12); color: var(--blue); }
+.ev-type-log { background: rgba(34,197,94,0.12); color: var(--green); }
+.ev-type-event { background: rgba(249,115,22,0.12); color: var(--accent); }
+.ev-type-deploy { background: rgba(167,139,250,0.12); color: var(--purple); }
+.ev-source { font-size: 0.7rem; font-weight: 500; }
+.ev-desc { font-size: 0.65rem; color: var(--dim); margin-top: 0.15rem; }
+
+/* ---- Trace entries ---- */
+.trace-timeline { border-left: 2px solid var(--border); margin-left: 0.4rem; padding-left: 0.8rem; }
+.trace-entry { position: relative; padding: 0.35rem 0; font-size: 0.7rem; }
+.trace-entry::before { content: ''; position: absolute; left: -0.85rem; top: 0.55rem; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.trace-entry.trace-done::before { background: var(--green); }
+.trace-time { font-family: 'SF Mono', monospace; font-size: 0.6rem; color: var(--dim); }
+.trace-type { font-weight: 600; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.trace-desc { font-size: 0.65rem; color: var(--dim); margin-top: 0.1rem; }
+
+/* ---- Report markdown ---- */
+.rpt-content { font-size: 0.75rem; line-height: 1.6; }
+.rpt-content h1 { font-size: 1rem; font-weight: 700; margin: 0.6rem 0 0.3rem; }
+.rpt-content h2 { font-size: 0.85rem; font-weight: 600; margin: 0.5rem 0 0.25rem; color: var(--accent); }
+.rpt-content h3 { font-size: 0.8rem; font-weight: 600; margin: 0.4rem 0 0.2rem; }
+.rpt-content p { margin: 0.3rem 0; }
+.rpt-content code { font-family: 'SF Mono', monospace; font-size: 0.65rem; background: var(--surface); padding: 0.1rem 0.3rem; border-radius: 3px; }
+.rpt-content pre { background: var(--surface); padding: 0.6rem; border-radius: 4px; overflow-x: auto; font-size: 0.65rem; margin: 0.4rem 0; }
+.rpt-content ul { padding-left: 1.2rem; margin: 0.3rem 0; }
+.rpt-content li { margin: 0.15rem 0; }
+.rpt-content strong { font-weight: 600; }
+.rpt-content hr { border: none; border-top: 1px solid var(--border); margin: 0.6rem 0; }
+
+/* ---- LLM output ---- */
+.llm-box { background: rgba(167,139,250,0.05); border: 1px solid rgba(167,139,250,0.15); border-radius: 6px; padding: 0.75rem; }
+.llm-label { font-size: 0.6rem; font-weight: 600; text-transform: uppercase; color: var(--purple); margin-bottom: 0.5rem; letter-spacing: 0.05em; }
+.llm-text { font-size: 0.75rem; line-height: 1.6; white-space: pre-wrap; }
+.llm-advisory { margin-top: 0.6rem; font-size: 0.55rem; color: var(--yellow); opacity: 0.8; line-height: 1.4; padding-top: 0.4rem; border-top: 1px solid rgba(234,179,8,0.15); }
 
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
@@ -406,10 +446,24 @@ body {
                 <button class="tab-btn" onclick="switchTab('report',this)">Report</button>
                 <button class="tab-btn" onclick="switchTab('llm',this)">LLM Analysis</button>
             </div>
-            <div class="tab-pane active" id="tabEvidence"><p class="tab-empty">V5: Evidence details will render here</p></div>
-            <div class="tab-pane" id="tabTrace"><p class="tab-empty">V5: Event trace will render here</p></div>
-            <div class="tab-pane" id="tabReport"><p class="tab-empty">V5: Markdown report will render here</p></div>
-            <div class="tab-pane" id="tabLlm"><p class="tab-empty">V5: LLM advisory will render here</p></div>
+            <div class="tab-pane active" id="tabEvidence">
+                <div id="evidenceContent"><p class="tab-empty">Run investigation to see evidence details</p></div>
+                <div class="tab-guard">Evidence is loaded from static scenario data. Production: Prometheus / Loki / K8s API.</div>
+            </div>
+            <div class="tab-pane" id="tabTrace">
+                <div id="traceContent"><p class="tab-empty">Run investigation to see event trace</p></div>
+                <div class="tab-guard">Event Trace provides full audit trail. Every step is recorded with timestamp and payload.</div>
+            </div>
+            <div class="tab-pane" id="tabReport">
+                <div id="reportContent"><p class="tab-empty">Run investigation to see RCA report</p></div>
+                <div class="tab-guard">Report is deterministic. LLM is not involved in this output.</div>
+            </div>
+            <div class="tab-pane" id="tabLlm">
+                <div id="llmContent">
+                    <p class="tab-empty">Run investigation to see LLM advisory analysis</p>
+                </div>
+                <div class="tab-guard">LLM output is advisory only. It does not modify scores, decisions, or evidence.</div>
+            </div>
         </div>
 
     </div>
@@ -481,6 +535,8 @@ function callApi() {
             document.getElementById('runBtn').style.display = 'none';
             document.getElementById('incStatus').innerHTML =
                 '<span class="dot dot-open" style="background:#eab308"></span>Investigated';
+            // V5: load active tab content
+            loadTabContent(activeTab);
         })
         .catch(() => {
             document.getElementById('decisionCard').classList.add('visible');
@@ -504,6 +560,15 @@ function resetView() {
     document.getElementById('tabsCard').classList.remove('visible');
     STEPS.forEach(s => s.classList.remove('done', 'active'));
     investigationId = null;
+    // V5: reset tab content
+    document.getElementById('evidenceContent').innerHTML = '<p class="tab-empty">Run investigation to see evidence details</p>';
+    document.getElementById('traceContent').innerHTML = '<p class="tab-empty">Run investigation to see event trace</p>';
+    document.getElementById('reportContent').innerHTML = '<p class="tab-empty">Run investigation to see RCA report</p>';
+    document.getElementById('llmContent').innerHTML = '<p class="tab-empty">Run investigation to see LLM advisory analysis</p>';
+    activeTab = 'evidence';
+    // reset tab buttons to Evidence
+    document.querySelectorAll('.tab-btn').forEach(function(b, i) { b.classList.toggle('active', i === 0); });
+    document.querySelectorAll('.tab-pane').forEach(function(p, i) { p.classList.toggle('active', i === 0); });
 }
 
 function switchTab(name, btn) {
@@ -513,6 +578,139 @@ function switchTab(name, btn) {
     var paneMap = { evidence: 'tabEvidence', trace: 'tabTrace', report: 'tabReport', llm: 'tabLlm' };
     var pane = document.getElementById(paneMap[name]);
     if (pane) pane.classList.add('active');
+    if (investigationId) loadTabContent(name);
+}
+
+/* ---- V5: Tab Content Loaders ---- */
+
+var activeTab = 'evidence';
+
+function loadTabContent(name) {
+    activeTab = name;
+    if (name === 'evidence') loadEvidence();
+    else if (name === 'trace') loadTrace();
+    else if (name === 'report') loadReport();
+    else if (name === 'llm') loadLlm();
+}
+
+// Scenario E static evidence data
+var EVIDENCE_DATA = [
+    { type: 'metric', cls: 'ev-type-metric', source: 'order-service CPU', desc: 'CPU usage spiked to 85% post deployment v1.2.3' },
+    { type: 'metric', cls: 'ev-type-metric', source: 'order-service error_rate', desc: 'Error rate increased from 0.1% to 4.7% in last 15 min' },
+    { type: 'log', cls: 'ev-type-log', source: 'order-service logs', desc: 'Timeout errors detected: "upstream request timeout to payment-service"' },
+    { type: 'log', cls: 'ev-type-log', source: 'order-service logs', desc: 'New error pattern: "NullPointerException in OrderProcessor.handlePayment()"' },
+    { type: 'event', cls: 'ev-type-event', source: 'deployment_event', desc: 'Deployment v1.2.3 completed at 10:05 UTC, 3 min before alert fired' },
+    { type: 'metric', cls: 'ev-type-metric', source: 'payment-service p95_latency', desc: 'p95 latency increased from 120ms to 480ms' },
+    { type: 'metric', cls: 'ev-type-metric', source: 'payment-service error_rate', desc: '5xx rate stable at 0.08% — no increase observed' },
+    { type: 'metric', cls: 'ev-type-metric', source: 'order-service memory', desc: 'Memory usage normal at 62%, no OOM indicators' },
+    { type: 'deploy', cls: 'ev-type-deploy', source: 'order-service deploy', desc: 'Previous deployment v1.2.2 was stable for 14 days' }
+];
+
+function loadEvidence() {
+    var el = document.getElementById('evidenceContent');
+    if (!investigationId) { el.innerHTML = '<p class="tab-empty">Run investigation to see evidence details</p>'; return; }
+    var html = '<div class="ev-item">';
+    for (var i = 0; i < EVIDENCE_DATA.length; i++) {
+        var e = EVIDENCE_DATA[i];
+        html += '<div class="ev-item">'
+            + '<span class="ev-type ' + e.cls + '">' + e.type + '</span>'
+            + '<span class="ev-source">' + e.source + '</span>'
+            + '<div class="ev-desc">' + e.desc + '</div>'
+            + '</div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+function loadTrace() {
+    var el = document.getElementById('traceContent');
+    if (!investigationId) { el.innerHTML = '<p class="tab-empty">Run investigation to see event trace</p>'; return; }
+    fetch('/api/investigations/' + investigationId + '/trace')
+        .then(function(r) { return r.json(); })
+        .then(function(entries) {
+            if (!entries || entries.length === 0) {
+                el.innerHTML = '<p class="tab-empty">No trace entries returned</p>';
+                return;
+            }
+            var html = '<div class="trace-timeline">';
+            for (var i = 0; i < entries.length; i++) {
+                var t = entries[i];
+                var ts = t.timestamp || '';
+                var etype = (t.event_type || t.eventType || '').toUpperCase();
+                var desc = t.description || '';
+                html += '<div class="trace-entry trace-done">'
+                    + '<div class="trace-time">' + ts + '</div>'
+                    + '<div class="trace-type">' + etype + '</div>'
+                    + '<div class="trace-desc">' + desc + '</div>'
+                    + '</div>';
+            }
+            html += '</div>';
+            el.innerHTML = html;
+        })
+        .catch(function() {
+            el.innerHTML = '<p class="tab-empty">Failed to load trace data</p>';
+        });
+}
+
+function loadReport() {
+    var el = document.getElementById('reportContent');
+    if (!investigationId) { el.innerHTML = '<p class="tab-empty">Run investigation to see RCA report</p>'; return; }
+    fetch('/api/investigations/' + investigationId + '/report')
+        .then(function(r) { return r.text(); })
+        .then(function(text) {
+            el.innerHTML = '<div class="rpt-content">' + simpleMarkdown(text) + '</div>';
+        })
+        .catch(function() {
+            el.innerHTML = '<p class="tab-empty">Failed to load report</p>';
+        });
+}
+
+function simpleMarkdown(text) {
+    var html = text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/^---$/gm, '<hr>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+    return '<p>' + html + '</p>';
+}
+
+function loadLlm() {
+    var el = document.getElementById('llmContent');
+    if (!investigationId) {
+        el.innerHTML = '<p class="tab-empty">Run investigation to see LLM advisory analysis</p>';
+        return;
+    }
+    el.innerHTML = '<div class="llm-box">'
+        + '<div class="llm-label">LLM Advisory Analysis</div>'
+        + '<div class="llm-text">Requesting LLM synthesis...</div>'
+        + '</div>';
+    fetch('/api/investigations/' + investigationId + '/llm-summary', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var summary = data.llmSummary || data.llmAnalysis || 'No LLM output returned';
+            el.innerHTML = '<div class="llm-box">'
+                + '<div class="llm-label">LLM Advisory Analysis</div>'
+                + '<div class="llm-text">' + summary.replace(/\n/g, '<br>') + '</div>'
+                + '<div class="llm-advisory">'
+                + '&#9888; This is advisory only. LLM does not modify scores, decisions, or evidence. '
+                + 'The investigation decision is deterministic and was made before LLM synthesis.'
+                + '</div>'
+                + '</div>';
+        })
+        .catch(function() {
+            el.innerHTML = '<div class="llm-box">'
+                + '<div class="llm-label">LLM Advisory Analysis</div>'
+                + '<div class="llm-text" style="color:var(--dim)">LLM endpoint unavailable or not configured. '
+                + 'In production, this would call an LLM to synthesize a human-readable narrative from the structured investigation result.</div>'
+                + '<div class="llm-advisory">&#9888; LLM is deferred by design. See llm-positioning.md for rationale.</div>'
+                + '</div>';
+        });
 }
 </script>
 </body>
