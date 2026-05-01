@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SRE Agent</title>
+<title>SRE Production Agent</title>
 <style>
+/* ---- Variables ---- */
 :root {
     --bg: #0a0a0b;
-    --card: #141416;
-    --border: #1e1e22;
+    --surface: #111113;
+    --card: #161618;
+    --border: #232326;
     --text: #e4e4e7;
     --dim: #71717a;
     --accent: #f97316;
@@ -16,528 +18,195 @@
     --yellow: #eab308;
     --red: #ef4444;
     --purple: #a78bfa;
+    --blue: #3b82f6;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
     background: var(--bg);
     color: var(--text);
-    min-height: 100vh;
+    height: 100vh;
     -webkit-font-smoothing: antialiased;
-}
-
-/* ---- Empty state ---- */
-.empty-state {
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+}
+
+/* ---- Header ---- */
+.header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 1.25rem;
+    height: 44px;
+    display: flex;
     align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    padding: 2rem;
-    text-align: center;
+    justify-content: space-between;
+    flex-shrink: 0;
 }
-.empty-icon {
-    width: 56px; height: 56px;
-    border-radius: 16px;
-    background: linear-gradient(135deg, #f97316 0%, #dc2626 100%);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.5rem;
-    margin-bottom: 1.5rem;
-    box-shadow: 0 0 40px rgba(249,115,22,0.15);
+.header-left { display: flex; align-items: baseline; gap: 0.75rem; }
+.header-title { font-size: 0.85rem; font-weight: 600; }
+.header-sub { font-size: 0.7rem; color: var(--dim); }
+.header-badges { display: flex; gap: 0.35rem; }
+.badge {
+    font-size: 0.6rem; font-weight: 500;
+    padding: 0.15rem 0.45rem; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.03em;
 }
-.empty-state h1 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--text);
-    margin-bottom: 0.4rem;
+.badge-demo { background: rgba(59,130,246,0.12); color: var(--blue); }
+.badge-det { background: rgba(34,197,94,0.12); color: var(--green); }
+.badge-llm { background: rgba(167,139,250,0.12); color: var(--purple); }
+.badge-static { background: rgba(113,113,122,0.12); color: var(--dim); }
+
+/* ---- Two-column Layout ---- */
+.layout { display: flex; flex: 1; overflow: hidden; }
+
+/* ---- Sidebar ---- */
+.sidebar {
+    width: 260px; flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
 }
-.empty-state .sub {
+.sidebar-hdr {
+    padding: 0.6rem 1rem;
+    font-size: 0.65rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--dim);
-    font-size: 0.85rem;
-    margin-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
 }
-.btn-start {
-    background: #fff;
-    color: #000;
-    border: none;
-    padding: 0.75rem 2rem;
-    border-radius: 100px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.btn-start:hover { background: #e4e4e7; transform: scale(1.02); }
-.btn-start:active { transform: scale(0.98); }
-.btn-start:disabled { background: var(--dim); color: var(--bg); cursor: not-allowed; transform: none; }
+.inc-list { flex: 1; overflow-y: auto; }
 
-/* ---- Result state ---- */
-.result-view { display: none; max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem; }
-.result-view.visible { display: block; }
-
-/* Status bar */
-.status-bar {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.6rem 0;
-    margin-bottom: 0.5rem;
-    font-size: 0.8rem; color: var(--dim);
-}
-.status-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--green);
-    animation: pulse 2s infinite;
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-}
-
-/* Alert card - the hero */
-.alert-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 0.75rem;
-}
-.alert-badge {
-    display: inline-flex; align-items: center; gap: 0.3rem;
-    font-size: 0.7rem; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--red);
-    background: rgba(239,68,68,0.1);
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
-    margin-bottom: 0.6rem;
-}
-.alert-title {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-bottom: 0.3rem;
-}
-.alert-meta {
-    font-size: 0.8rem;
-    color: var(--dim);
-}
-
-/* Conclusion card */
-.conclusion-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 0.75rem;
-}
-.conclusion-label {
-    font-size: 0.7rem; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--dim);
-    margin-bottom: 0.6rem;
-}
-.conclusion-text {
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: var(--text);
-}
-.conclusion-text strong { color: var(--accent); }
-
-/* Hypothesis bars */
-.hypo-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.25rem;
-    margin-bottom: 0.75rem;
-}
-.hypo-row {
-    display: flex; align-items: center; gap: 0.6rem;
-    margin-bottom: 0.6rem;
-}
-.hypo-row:last-child { margin-bottom: 0; }
-.hypo-label {
-    width: 200px;
-    font-size: 0.8rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.hypo-bar-wrap {
-    flex: 1; height: 24px;
-    background: rgba(255,255,255,0.04);
-    border-radius: 6px;
-    overflow: hidden;
-    position: relative;
-}
-.hypo-bar {
-    height: 100%;
-    border-radius: 6px;
-    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.hypo-bar.leading { background: var(--green); }
-.hypo-bar.competing { background: var(--yellow); }
-.hypo-bar.eliminated { background: var(--dim); opacity: 0.3; }
-.hypo-score {
-    width: 40px;
-    text-align: right;
-    font-size: 0.85rem;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-}
-.hypo-tag {
-    font-size: 0.6rem; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 0.1rem 0.35rem; border-radius: 3px;
-    margin-left: 0.3rem;
-}
-.hypo-tag.lead { background: rgba(34,197,94,0.15); color: var(--green); }
-.hypo-tag.comp { background: rgba(234,179,8,0.15); color: var(--yellow); }
-
-/* Collapsible sections */
-.section {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    margin-bottom: 0.75rem;
-    overflow: hidden;
-}
-.section-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0.9rem 1.25rem;
-    cursor: pointer;
-    user-select: none;
-    transition: background 0.15s;
-}
-.section-header:hover { background: rgba(255,255,255,0.02); }
-.section-title {
-    font-size: 0.85rem; font-weight: 500;
-}
-.section-chevron {
-    font-size: 0.7rem; color: var(--dim);
-    transition: transform 0.2s;
-}
-.section.open .section-chevron { transform: rotate(90deg); }
-.section-body {
-    display: none;
-    padding: 0 1.25rem 1.25rem;
-}
-.section.open .section-body { display: block; }
-
-/* Trace table */
-.trace-table { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
-.trace-table th {
-    text-align: left; color: var(--dim); font-weight: 500;
-    padding: 0.4rem 0; border-bottom: 1px solid var(--border);
-}
-.trace-table td {
-    padding: 0.5rem 0.25rem;
+/* Incident items */
+.inc-item {
+    padding: 0.7rem 1rem;
     border-bottom: 1px solid rgba(255,255,255,0.03);
-    vertical-align: top;
-}
-.trace-table .evt-type {
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.7rem;
-    color: var(--accent);
-    white-space: nowrap;
-}
-.trace-table .evt-detail {
-    color: var(--dim);
-    line-height: 1.4;
-}
-.trace-table .evt-time {
-    color: var(--dim);
-    font-size: 0.7rem;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    width: 70px;
-}
-
-/* Report */
-.report-content {
-    white-space: pre-wrap;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.75rem;
-    line-height: 1.7;
-    color: var(--dim);
-    max-height: 500px;
-    overflow-y: auto;
-}
-
-/* LLM */
-.llm-block { margin-bottom: 0.75rem; }
-.llm-block h4 {
-    font-size: 0.8rem; font-weight: 600;
-    color: var(--purple);
-    margin-bottom: 0.3rem;
-}
-.llm-block p {
-    font-size: 0.8rem; line-height: 1.6;
-    color: var(--text);
-}
-.llm-advisory {
-    font-size: 0.7rem; color: var(--dim);
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--border);
-    margin-top: 0.75rem;
-}
-.llm-btn {
-    background: rgba(167,139,250,0.1);
-    color: var(--purple);
-    border: 1px solid rgba(167,139,250,0.2);
-    padding: 0.5rem 1rem;
-    border-radius: 100px;
-    font-size: 0.8rem; font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
-    margin-top: 0.75rem;
+    transition: background 0.12s;
+    border-left: 2px solid transparent;
 }
-.llm-btn:hover { background: rgba(167,139,250,0.2); }
-.llm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.inc-item:hover:not(.disabled) { background: rgba(255,255,255,0.02); }
+.inc-item.active {
+    background: rgba(249,115,22,0.05);
+    border-left-color: var(--accent);
+}
+.inc-item.disabled { opacity: 0.3; cursor: not-allowed; }
+.inc-name { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.15rem; }
+.inc-meta { font-size: 0.65rem; color: var(--dim); }
+.inc-status { font-size: 0.6rem; color: var(--dim); margin-top: 0.2rem; }
+.inc-status .dot {
+    display: inline-block; width: 5px; height: 5px;
+    border-radius: 50%; margin-right: 0.25rem; vertical-align: middle;
+}
+.dot-open { background: var(--yellow); }
+.dot-soon { background: var(--dim); }
+.sev {
+    font-size: 0.55rem; font-weight: 600;
+    padding: 0.1rem 0.3rem; border-radius: 2px;
+    text-transform: uppercase; margin-left: 0.3rem;
+}
+.sev-warn { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.sev-high { background: rgba(239,68,68,0.15); color: var(--red); }
 
-/* Footer action */
-.footer-action {
-    text-align: center;
-    padding: 1.5rem 0;
+/* ---- Main Workspace ---- */
+.workspace {
+    flex: 1; overflow-y: auto; padding: 1.25rem 1.5rem;
+    display: flex; flex-direction: column; gap: 1rem;
 }
-.btn-reset {
-    background: none;
-    color: var(--dim);
-    border: none;
-    font-size: 0.8rem;
-    cursor: pointer;
-    padding: 0.5rem 1rem;
+.ws-empty {
+    display: flex; align-items: center; justify-content: center;
+    flex: 1; color: var(--dim); font-size: 0.8rem;
 }
-.btn-reset:hover { color: var(--text); }
 
-/* Responsive */
-@media (max-width: 640px) {
-    .hypo-label { width: 120px; font-size: 0.7rem; }
-    .result-view { padding: 1rem 0.75rem; }
+/* ---- Shared card ---- */
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+}
+.card-label {
+    font-size: 0.6rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--dim); margin-bottom: 0.5rem;
+}
+
+/* ---- Buttons ---- */
+.btn {
+    padding: 0.45rem 1rem; border-radius: 5px;
+    font-size: 0.75rem; font-weight: 500;
+    cursor: pointer; transition: all 0.15s; border: none;
+}
+.btn-primary { background: #fff; color: #000; }
+.btn-primary:hover { background: #d4d4d8; }
+.btn-primary:disabled { background: var(--dim); color: var(--bg); cursor: not-allowed; }
+.btn-ghost { background: none; color: var(--dim); border: 1px solid var(--border); }
+.btn-ghost:hover { color: var(--text); border-color: var(--dim); }
+
+/* ---- Responsive ---- */
+@media (max-width: 768px) {
+    .sidebar { width: 200px; }
+    .header-badges { display: none; }
 }
 </style>
 </head>
 <body>
 
-<!-- Empty State -->
-<div class="empty-state" id="emptyState">
-    <div class="empty-icon">⚠</div>
-    <h1>SRE Agent</h1>
-    <p class="sub">Verification-first RCA · Incident Investigation</p>
-    <button class="btn-start" id="startBtn" onclick="runAnalysis()">Start Analysis</button>
+<!-- Header -->
+<div class="header">
+    <div class="header-left">
+        <span class="header-title">SRE Production Agent</span>
+        <span class="header-sub">Verification-first RCA Console</span>
+    </div>
+    <div class="header-badges">
+        <span class="badge badge-demo">Local Demo</span>
+        <span class="badge badge-det">Deterministic Decision</span>
+        <span class="badge badge-llm">LLM Advisory</span>
+        <span class="badge badge-static">Static Evidence</span>
+    </div>
 </div>
 
-<!-- Result View -->
-<div class="result-view" id="resultView">
-    <div class="status-bar">
-        <div class="status-dot"></div>
-        <span id="statusText">Analysis complete</span>
-    </div>
+<!-- Two-column Layout -->
+<div class="layout">
 
-    <!-- Alert -->
-    <div class="alert-card">
-        <div class="alert-badge">● HIGH ERROR RATE</div>
-        <div class="alert-title">order-service</div>
-        <div class="alert-meta">HighErrorRate alert triggered</div>
-    </div>
-
-    <!-- Conclusion -->
-    <div class="conclusion-card" id="conclusionCard">
-        <div class="conclusion-label">Conclusion</div>
-        <div class="conclusion-text" id="conclusionText"></div>
-    </div>
-
-    <!-- Hypotheses -->
-    <div class="hypo-card" id="hypoCard"></div>
-
-    <!-- Trace -->
-    <div class="section" id="traceSection">
-        <div class="section-header" onclick="toggleSection('traceSection')">
-            <span class="section-title">Investigation Trace</span>
-            <span class="section-chevron">▶</span>
-        </div>
-        <div class="section-body">
-            <table class="trace-table">
-                <thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead>
-                <tbody id="traceBody"></tbody>
-            </table>
+    <!-- Sidebar: Incident List -->
+    <div class="sidebar">
+        <div class="sidebar-hdr">Incidents</div>
+        <div class="inc-list">
+            <div class="inc-item active" data-inc="scenario-e" onclick="selectIncident(this)">
+                <div class="inc-name">HighErrorRate <span class="sev sev-warn">warning</span></div>
+                <div class="inc-meta">order-service · demo</div>
+                <div class="inc-status"><span class="dot dot-open"></span>open</div>
+            </div>
+            <div class="inc-item disabled">
+                <div class="inc-name">LatencySpike <span class="sev sev-high">high</span></div>
+                <div class="inc-meta">checkout-service · demo</div>
+                <div class="inc-status"><span class="dot dot-soon"></span>coming soon</div>
+            </div>
+            <div class="inc-item disabled">
+                <div class="inc-name">OOMKilled <span class="sev sev-high">high</span></div>
+                <div class="inc-meta">recommend-service · demo</div>
+                <div class="inc-status"><span class="dot dot-soon"></span>coming soon</div>
+            </div>
         </div>
     </div>
 
-    <!-- Report -->
-    <div class="section" id="reportSection">
-        <div class="section-header" onclick="toggleSection('reportSection')">
-            <span class="section-title">Full RCA Report</span>
-            <span class="section-chevron">▶</span>
-        </div>
-        <div class="section-body">
-            <div class="report-content" id="reportContent"></div>
-        </div>
+    <!-- Main Workspace -->
+    <div class="workspace" id="workspace">
+        <!-- V2-V5 sections will be inserted here -->
+        <div class="ws-empty" id="wsEmpty">Incident selected · Awaiting investigation</div>
     </div>
 
-    <!-- LLM -->
-    <div class="section" id="llmSection" style="display:none">
-        <div class="section-header" onclick="toggleSection('llmSection')">
-            <span class="section-title">AI Analysis</span>
-            <span class="section-chevron">▶</span>
-        </div>
-        <div class="section-body" id="llmBody"></div>
-    </div>
-    <button class="llm-btn" id="llmBtn" onclick="runLlm()" style="display:none">Generate AI Analysis</button>
-
-    <div class="footer-action">
-        <button class="btn-reset" onclick="resetView()">↺ New Analysis</button>
-    </div>
 </div>
 
 <script>
-let incidentId = null;
-let traceData = null;
+let currentIncident = 'scenario-e';
 
-async function runAnalysis() {
-    const btn = document.getElementById('startBtn');
-    btn.disabled = true;
-    btn.textContent = 'Analyzing…';
-
-    try {
-        const resp = await fetch('/api/investigations/scenario-e', { method: 'POST' });
-        if (!resp.ok) throw new Error(resp.status);
-        const data = await resp.json();
-        incidentId = data.incidentId;
-
-        // Render conclusion
-        const conclusionText = document.getElementById('conclusionText');
-        if (data.decisionType === 'competing_hypotheses') {
-            const lead = data.selectedHypothesisId.replace('hyp_', '').replace(/_/g, ' ');
-            const gap = data.scoreGap.toFixed(2);
-            conclusionText.innerHTML =
-                `Two plausible hypotheses found. <strong>${lead}</strong> leads, but score gap is only <strong>${gap}</strong> — not decisive enough for single RCA. Treating as competing hypotheses.`;
-        } else {
-            const lead = data.selectedHypothesisId.replace('hyp_', '').replace(/_/g, ' ');
-            conclusionText.innerHTML = `Root cause identified: <strong>${lead}</strong> (confidence: ${data.confidenceScore.toFixed(2)})`;
-        }
-
-        // Render hypotheses
-        const hypoCard = document.getElementById('hypoCard');
-        const sorted = Object.entries(data.scores).sort((a, b) => b[1] - a[1]);
-        const max = Math.max(...sorted.map(s => s[1]));
-        hypoCard.innerHTML = sorted.map(([id, score]) => {
-            const name = id.replace('hyp_', '').replace(/_/g, ' ');
-            const pct = max > 0 ? (score / max * 100) : 0;
-            const isLead = id === data.selectedHypothesisId;
-            const isComp = (data.competingHypotheses || []).includes(id);
-            const cls = isLead ? 'leading' : (isComp ? 'competing' : 'eliminated');
-            const tag = isLead ? '<span class="hypo-tag lead">lead</span>' :
-                        (isComp ? '<span class="hypo-tag comp">competing</span>' : '');
-            return `<div class="hypo-row">
-                <div class="hypo-label">${name}${tag}</div>
-                <div class="hypo-bar-wrap"><div class="hypo-bar ${cls}" style="width:${pct}%"></div></div>
-                <div class="hypo-score">${score.toFixed(2)}</div>
-            </div>`;
-        }).join('');
-
-        // Fetch trace (background, for expand)
-        const traceResp = await fetch(data.traceUrl);
-        if (traceResp.ok) traceData = await traceResp.json();
-        renderTrace();
-
-        // Fetch report (background)
-        const reportResp = await fetch(data.reportUrl);
-        if (reportResp.ok) {
-            document.getElementById('reportContent').textContent = await reportResp.text();
-        }
-
-        // Switch view
-        document.getElementById('emptyState').style.display = 'none';
-        document.getElementById('resultView').classList.add('visible');
-        document.getElementById('llmBtn').style.display = 'inline-block';
-    } catch (err) {
-        btn.disabled = false;
-        btn.textContent = 'Retry Analysis';
-        console.error(err);
-    }
-}
-
-function renderTrace() {
-    if (!traceData) return;
-    const tbody = document.getElementById('traceBody');
-    tbody.innerHTML = traceData.map(e => {
-        const ts = e.timestamp ? e.timestamp.split('T')[1].split('.')[0] : '';
-        const type = e.event_type || e.eventType || '';
-        const detail = fmtPayload(type, e.payload);
-        return `<tr>
-            <td class="evt-time">${ts}</td>
-            <td class="evt-type">${type.replace(/_/g, ' ')}</td>
-            <td class="evt-detail">${detail}</td>
-        </tr>`;
-    }).join('');
-}
-
-function fmtPayload(type, p) {
-    if (!p) return '';
-    switch (type) {
-        case 'INCIDENT_CREATED': return `${p.alert} on ${p.service}`;
-        case 'EVIDENCE_LOADED': return `${p.count} items`;
-        case 'HYPOTHESES_GENERATED': return `${p.count} hypotheses`;
-        case 'HYPOTHESIS_VERIFIED': return `${(p.hypothesisId||'').replace('hyp_','').replace(/_/g,' ')} — ${p.supporting} supporting, ${p.counter} counter`;
-        case 'CONFIDENCE_SCORED': return `${(p.hypothesisId||'').replace('hyp_','').replace(/_/g,' ')} = ${Number(p.score).toFixed(2)}`;
-        case 'HYPOTHESES_COMPARED': return `leading: ${(p.leading||'').replace('hyp_','').replace(/_/g,' ')}, gap: ${p.gap}`;
-        case 'DECISION_MADE': return `${(p.decisionType||'').replace(/_/g,' ')}`;
-        case 'REPORT_GENERATED': return '✓';
-        default: return JSON.stringify(p);
-    }
-}
-
-async function runLlm() {
-    const btn = document.getElementById('llmBtn');
-    btn.disabled = true;
-    btn.textContent = 'Generating…';
-
-    try {
-        const resp = await fetch('/api/investigations/scenario-e/llm-summary', { method: 'POST' });
-        if (!resp.ok) throw new Error(resp.status);
-        const d = await resp.json();
-
-        const body = document.getElementById('llmBody');
-        body.innerHTML = `
-            <div class="llm-block"><h4>Summary</h4><p>${esc(d.executive_summary)}</p></div>
-            <div class="llm-block"><h4>Reasoning</h4><p>${esc(d.reasoning_narrative)}</p></div>
-            <div class="llm-block"><h4>Why Uncertain</h4><p>${esc(d.uncertainty_explanation)}</p></div>
-            <div class="llm-block"><h4>Next Steps</h4><p>${esc(d.next_steps_explanation)}</p></div>
-            ${(d.unverified_proposals||[]).length ? `<div class="llm-block"><h4>Unverified Ideas</h4><p>${d.unverified_proposals.map(p=>'• '+esc(p)).join('<br>')}</p></div>` : ''}
-            <div class="llm-advisory">Advisory only · Does not override deterministic decision · Provider: ${esc(d.model_provider)}</div>
-        `;
-        document.getElementById('llmSection').style.display = 'block';
-        toggleSection('llmSection');
-        btn.style.display = 'none';
-    } catch (err) {
-        btn.disabled = false;
-        btn.textContent = 'Retry AI Analysis';
-        console.error(err);
-    }
-}
-
-function toggleSection(id) {
-    document.getElementById(id).classList.toggle('open');
-}
-
-function resetView() {
-    document.getElementById('emptyState').style.display = '';
-    document.getElementById('resultView').classList.remove('visible');
-    const btn = document.getElementById('startBtn');
-    btn.disabled = false;
-    btn.textContent = 'Start Analysis';
-    document.getElementById('llmBtn').style.display = 'none';
-    document.getElementById('llmSection').style.display = 'none';
-    document.getElementById('llmBody').innerHTML = '';
-    ['traceSection', 'reportSection', 'llmSection'].forEach(id => {
-        document.getElementById(id).classList.remove('open');
-    });
-    incidentId = null;
-    traceData = null;
-}
-
-function esc(s) {
-    if (!s) return '';
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function selectIncident(el) {
+    if (el.classList.contains('disabled')) return;
+    document.querySelectorAll('.inc-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    currentIncident = el.dataset.inc;
+    // V2 will populate workspace content based on currentIncident
 }
 </script>
 </body>
