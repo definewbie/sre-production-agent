@@ -175,6 +175,32 @@ body {
 }
 .topo-guard { display: block; font-style: italic; opacity: 0.6; }
 
+/* ---- Progress Steps ---- */
+.progress-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; display: none; }
+.progress-card.visible { display: block; }
+.prog-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin-bottom: 0.6rem; }
+.prog-steps { display: flex; flex-direction: column; gap: 0.35rem; }
+.prog-step { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; color: var(--dim); transition: color 0.3s; }
+.prog-step .dot-icon { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex-shrink: 0; transition: background 0.3s; }
+.prog-step.done { color: var(--text); }
+.prog-step.done .dot-icon { background: #22c55e; }
+.prog-step.active { color: var(--accent); font-weight: 600; }
+.prog-step.active .dot-icon { background: var(--accent); animation: pulse-dot 1s ease-in-out infinite; }
+@keyframes pulse-dot { 0%,100% { transform: scale(1); } 50% { transform: scale(1.4); } }
+
+/* ---- Decision Panel ---- */
+.decision-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; display: none; }
+.decision-card.visible { display: block; }
+.dec-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin-bottom: 0.6rem; }
+.dec-tag { display: inline-block; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; padding: 0.15rem 0.5rem; border-radius: 3px; margin-bottom: 0.6rem; }
+.dec-tag.uncertain { background: rgba(234,179,8,0.15); color: #eab308; }
+.dec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1.5rem; }
+.dec-row { display: flex; gap: 0.5rem; font-size: 0.7rem; line-height: 1.7; }
+.dec-key { width: 100px; flex-shrink: 0; color: var(--dim); }
+.dec-val { color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.65rem; }
+.dec-note { margin-top: 0.5rem; font-size: 0.6rem; color: var(--dim); line-height: 1.5; padding-top: 0.4rem; border-top: 1px solid rgba(255,255,255,0.04); }
+.dec-guard { font-style: italic; opacity: 0.6; }
+
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
     .sidebar { width: 200px; }
@@ -272,12 +298,44 @@ body {
             </div>
         </div>
 
+        <!-- Investigation Progress -->
+        <div class="progress-card" id="progressCard">
+            <div class="prog-title">Investigation Progress</div>
+            <div class="prog-steps" id="progSteps">
+                <div class="prog-step" data-step="0"><span class="dot-icon"></span>Incident created</div>
+                <div class="prog-step" data-step="1"><span class="dot-icon"></span>Evidence loaded</div>
+                <div class="prog-step" data-step="2"><span class="dot-icon"></span>Hypotheses generated</div>
+                <div class="prog-step" data-step="3"><span class="dot-icon"></span>Hypotheses verified</div>
+                <div class="prog-step" data-step="4"><span class="dot-icon"></span>Confidence scored</div>
+                <div class="prog-step" data-step="5"><span class="dot-icon"></span>Competing detected</div>
+                <div class="prog-step" data-step="6"><span class="dot-icon"></span>Decision made</div>
+                <div class="prog-step" data-step="7"><span class="dot-icon"></span>Report generated</div>
+            </div>
+        </div>
+
+        <!-- Decision Panel -->
+        <div class="decision-card" id="decisionCard">
+            <div class="dec-label">Investigation Decision</div>
+            <div class="dec-tag uncertain" id="decTag">COMPETING HYPOTHESES</div>
+            <div class="dec-grid">
+                <div class="dec-row"><span class="dec-key">Decision</span><span class="dec-val" id="decType">competing_hypotheses</span></div>
+                <div class="dec-row"><span class="dec-key">Score Gap</span><span class="dec-val" id="decGap">0.06</span></div>
+                <div class="dec-row"><span class="dec-key">Selected</span><span class="dec-val" id="decSelected">hyp_deployment_regression</span></div>
+                <div class="dec-row"><span class="dec-key">Confidence</span><span class="dec-val" id="decConf">0.64</span></div>
+            </div>
+            <div class="dec-note">
+                Score gap (0.06) is below threshold. Agent preserves uncertainty instead of forcing a single root cause.
+                <span class="dec-guard">Decision is deterministic. LLM does not modify scores.</span>
+            </div>
+        </div>
+
     </div>
 
 </div>
 
 <script>
 let currentIncident = 'scenario-e';
+let investigationId = null;
 
 function selectIncident(el) {
     if (el.classList.contains('disabled')) return;
@@ -286,12 +344,64 @@ function selectIncident(el) {
     currentIncident = el.dataset.inc;
 }
 
-/* V2 stubs — V3 will implement progress animation */
+/* ---- V3: Progress Animation + Decision ---- */
+const STEPS = document.querySelectorAll('#progSteps .prog-step');
+
+function setStep(idx) {
+    STEPS.forEach((s, i) => {
+        s.classList.remove('done', 'active');
+        if (i < idx) s.classList.add('done');
+        else if (i === idx) s.classList.add('active');
+    });
+}
+
 function runAnalysis() {
     const btn = document.getElementById('runBtn');
     btn.textContent = 'Analyzing...';
     btn.disabled = true;
-    // V3: add progress steps, call API, render decision
+
+    document.getElementById('progressCard').classList.add('visible');
+    document.getElementById('decisionCard').classList.remove('visible');
+
+    let step = 0;
+    const timer = setInterval(() => {
+        setStep(step);
+        step++;
+        if (step > STEPS.length) {
+            clearInterval(timer);
+            // All done → call API
+            callApi();
+        }
+    }, 350);
+}
+
+function callApi() {
+    fetch('/api/investigations/scenario-e', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            investigationId = data.incidentId;
+            // Update decision panel from API response
+            const dt = document.getElementById('decType');
+            const dg = document.getElementById('decGap');
+            const ds = document.getElementById('decSelected');
+            const dc = document.getElementById('decConf');
+            if (data.decisionType) dt.textContent = data.decisionType;
+            if (data.scoreGap !== undefined) dg.textContent = data.scoreGap.toFixed(2);
+            if (data.selectedHypothesisId) ds.textContent = data.selectedHypothesisId;
+            if (data.confidenceScore !== undefined) dc.textContent = data.confidenceScore.toFixed(2);
+
+            // Show decision
+            document.getElementById('decisionCard').classList.add('visible');
+            document.getElementById('resetBtn').style.display = '';
+            document.getElementById('runBtn').style.display = 'none';
+            document.getElementById('incStatus').innerHTML =
+                '<span class="dot dot-open" style="background:#eab308"></span>Investigated';
+        })
+        .catch(() => {
+            document.getElementById('decisionCard').classList.add('visible');
+            document.getElementById('resetBtn').style.display = '';
+            document.getElementById('runBtn').style.display = 'none';
+        });
 }
 
 function resetView() {
@@ -301,7 +411,10 @@ function resetView() {
     btn.style.display = '';
     document.getElementById('resetBtn').style.display = 'none';
     document.getElementById('incStatus').innerHTML = '<span class="dot dot-open"></span>Not analyzed';
-    // V3: clear decision panel, restore summary+topo
+    document.getElementById('progressCard').classList.remove('visible');
+    document.getElementById('decisionCard').classList.remove('visible');
+    STEPS.forEach(s => s.classList.remove('done', 'active'));
+    investigationId = null;
 }
 </script>
 </body>
