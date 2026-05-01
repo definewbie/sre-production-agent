@@ -142,6 +142,39 @@ body {
 .btn-ghost { background: none; color: var(--dim); border: 1px solid var(--border); }
 .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
 
+/* ---- Incident Summary ---- */
+.sum-grid { display: grid; gap: 0.25rem; }
+.sum-row { display: flex; gap: 0.75rem; font-size: 0.75rem; line-height: 1.6; }
+.sum-key { width: 72px; flex-shrink: 0; color: var(--dim); }
+.sum-val { color: var(--text); }
+.sum-val.alert-name { font-weight: 600; }
+.sum-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px solid var(--border); }
+.mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.7rem; }
+
+/* ---- Service Topology ---- */
+.topo { display: flex; align-items: flex-start; gap: 0; padding: 0.5rem 0; }
+.topo-node {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.6rem 0.8rem; min-width: 180px;
+}
+.topo-name { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+.topo-tags { display: flex; gap: 0.3rem; margin-bottom: 0.3rem; }
+.topo-tag { font-size: 0.55rem; font-weight: 600; text-transform: uppercase; padding: 0.1rem 0.35rem; border-radius: 2px; }
+.topo-alert { background: rgba(249,115,22,0.15); color: var(--accent); }
+.topo-dep { background: rgba(59,130,246,0.15); color: var(--blue); }
+.topo-details { list-style: none; font-size: 0.65rem; color: var(--dim); line-height: 1.5; }
+.topo-details li::before { content: "· "; color: var(--border); }
+.topo-arrow {
+    display: flex; align-items: center; padding: 1.5rem 0.75rem 0;
+    font-size: 0.85rem; color: var(--dim); letter-spacing: 0.05em;
+    font-family: 'SF Mono', monospace;
+}
+.topo-note {
+    margin-top: 0.5rem; font-size: 0.6rem; color: var(--dim);
+    line-height: 1.5; padding-top: 0.4rem; border-top: 1px solid rgba(255,255,255,0.03);
+}
+.topo-guard { display: block; font-style: italic; opacity: 0.6; }
+
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
     .sidebar { width: 200px; }
@@ -192,8 +225,53 @@ body {
 
     <!-- Main Workspace -->
     <div class="workspace" id="workspace">
-        <!-- V2-V5 sections will be inserted here -->
-        <div class="ws-empty" id="wsEmpty">Incident selected · Awaiting investigation</div>
+
+        <!-- Incident Summary -->
+        <div class="card" id="incSummary">
+            <div class="card-label">Incident Summary</div>
+            <div class="sum-grid">
+                <div class="sum-row"><span class="sum-key">Alert</span><span class="sum-val alert-name">HighErrorRate</span></div>
+                <div class="sum-row"><span class="sum-key">Service</span><span class="sum-val">order-service</span></div>
+                <div class="sum-row"><span class="sum-key">Namespace</span><span class="sum-val">demo</span></div>
+                <div class="sum-row"><span class="sum-key">Severity</span><span class="sum-val"><span class="sev sev-warn" style="margin-left:0">warning</span></span></div>
+                <div class="sum-row"><span class="sum-key">Started</span><span class="sum-val mono">2026-04-28T10:08:00Z</span></div>
+                <div class="sum-row"><span class="sum-key">Status</span><span class="sum-val" id="incStatus"><span class="dot dot-open"></span>Not analyzed</span></div>
+            </div>
+            <div class="sum-actions">
+                <button class="btn btn-primary" id="runBtn" onclick="runAnalysis()">Run Investigation</button>
+                <button class="btn btn-ghost" id="resetBtn" onclick="resetView()" style="display:none">Reset</button>
+            </div>
+        </div>
+
+        <!-- Service Topology -->
+        <div class="card" id="topoCard">
+            <div class="card-label">Service Topology</div>
+            <div class="topo">
+                <div class="topo-node">
+                    <div class="topo-name">order-service</div>
+                    <div class="topo-tags"><span class="topo-tag topo-alert">alert target</span></div>
+                    <ul class="topo-details">
+                        <li>deploy v1.2.3</li>
+                        <li>timeout logs detected</li>
+                        <li>error rate spike</li>
+                    </ul>
+                </div>
+                <div class="topo-arrow">───▶</div>
+                <div class="topo-node">
+                    <div class="topo-name">payment-service</div>
+                    <div class="topo-tags"><span class="topo-tag topo-dep">downstream dep</span></div>
+                    <ul class="topo-details">
+                        <li>p95 latency increased</li>
+                        <li>5xx did not increase</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="topo-note">
+                Topology evidence explains why downstream_dependency_latency remains a competing hypothesis.
+                <span class="topo-guard">Topology is evidence context, not decision authority.</span>
+            </div>
+        </div>
+
     </div>
 
 </div>
@@ -206,7 +284,24 @@ function selectIncident(el) {
     document.querySelectorAll('.inc-item').forEach(i => i.classList.remove('active'));
     el.classList.add('active');
     currentIncident = el.dataset.inc;
-    // V2 will populate workspace content based on currentIncident
+}
+
+/* V2 stubs — V3 will implement progress animation */
+function runAnalysis() {
+    const btn = document.getElementById('runBtn');
+    btn.textContent = 'Analyzing...';
+    btn.disabled = true;
+    // V3: add progress steps, call API, render decision
+}
+
+function resetView() {
+    const btn = document.getElementById('runBtn');
+    btn.textContent = 'Run Investigation';
+    btn.disabled = false;
+    btn.style.display = '';
+    document.getElementById('resetBtn').style.display = 'none';
+    document.getElementById('incStatus').innerHTML = '<span class="dot dot-open"></span>Not analyzed';
+    // V3: clear decision panel, restore summary+topo
 }
 </script>
 </body>
