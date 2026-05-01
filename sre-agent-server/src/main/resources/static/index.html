@@ -201,6 +201,35 @@ body {
 .dec-note { margin-top: 0.5rem; font-size: 0.6rem; color: var(--dim); line-height: 1.5; padding-top: 0.4rem; border-top: 1px solid rgba(255,255,255,0.04); }
 .dec-guard { font-style: italic; opacity: 0.6; }
 
+/* ---- Hypothesis Table ---- */
+.hyp-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.75rem; display: none; }
+.hyp-card.visible { display: block; }
+.hyp-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin-bottom: 0.5rem; }
+.hyp-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+.hyp-table th { text-align: left; font-weight: 600; color: var(--dim); padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.hyp-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
+.hyp-table tr:hover td { background: rgba(255,255,255,0.02); }
+.hyp-name { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.65rem; }
+.score-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; width: 100px; }
+.score-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.score-fill.high { background: #22c55e; }
+.score-fill.mid { background: #eab308; }
+.score-fill.low { background: var(--border); }
+.score-num { font-family: 'SF Mono', monospace; font-size: 0.6rem; }
+.hyp-count { font-family: 'SF Mono', monospace; font-size: 0.6rem; text-align: center; }
+.hyp-note { margin-top: 0.4rem; font-size: 0.6rem; color: var(--dim); }
+
+/* ---- Tabs ---- */
+.tabs-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.75rem; display: none; }
+.tabs-card.visible { display: block; }
+.tab-bar { display: flex; border-bottom: 1px solid var(--border); }
+.tab-btn { font-size: 0.65rem; padding: 0.5rem 0.8rem; background: none; border: none; color: var(--dim); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab-pane { display: none; padding: 0.75rem 1rem; min-height: 120px; }
+.tab-pane.active { display: block; }
+.tab-empty { color: var(--dim); font-size: 0.7rem; font-style: italic; }
+
 /* ---- Responsive ---- */
 @media (max-width: 768px) {
     .sidebar { width: 200px; }
@@ -329,6 +358,60 @@ body {
             </div>
         </div>
 
+        <!-- Hypothesis Comparison -->
+        <div class="hyp-card" id="hypCard">
+            <div class="hyp-label">Hypothesis Comparison</div>
+            <table class="hyp-table">
+                <thead>
+                    <tr>
+                        <th>Hypothesis</th>
+                        <th>Score</th>
+                        <th>Support</th>
+                        <th>Counter</th>
+                        <th>Contradictions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="hyp-name">deployment_regression</td>
+                        <td><div style="display:flex;align-items:center;gap:0.4rem"><div class="score-bar"><div class="score-fill mid" style="width:64%"></div></div><span class="score-num">0.64</span></div></td>
+                        <td class="hyp-count">4</td>
+                        <td class="hyp-count">2</td>
+                        <td class="hyp-count">2</td>
+                    </tr>
+                    <tr>
+                        <td class="hyp-name">downstream_dependency_latency</td>
+                        <td><div style="display:flex;align-items:center;gap:0.4rem"><div class="score-bar"><div class="score-fill mid" style="width:58%"></div></div><span class="score-num">0.58</span></div></td>
+                        <td class="hyp-count">3</td>
+                        <td class="hyp-count">2</td>
+                        <td class="hyp-count">2</td>
+                    </tr>
+                    <tr>
+                        <td class="hyp-name">pod_oom_killed</td>
+                        <td><div style="display:flex;align-items:center;gap:0.4rem"><div class="score-bar"><div class="score-fill low" style="width:5%"></div></div><span class="score-num">0.05</span></div></td>
+                        <td class="hyp-count">0</td>
+                        <td class="hyp-count">0</td>
+                        <td class="hyp-count">1</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="hyp-note">Score gap between top 2 hypotheses is 0.06 — below decision threshold. Agent preserves competing_hypotheses.</div>
+        </div>
+
+        <!-- Detail Tabs -->
+        <div class="tabs-card" id="tabsCard">
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab('evidence',this)">Evidence</button>
+                <button class="tab-btn" onclick="switchTab('trace',this)">Event Trace</button>
+                <button class="tab-btn" onclick="switchTab('report',this)">Report</button>
+                <button class="tab-btn" onclick="switchTab('llm',this)">LLM Analysis</button>
+            </div>
+            <div class="tab-pane active" id="tabEvidence"><p class="tab-empty">V5: Evidence details will render here</p></div>
+            <div class="tab-pane" id="tabTrace"><p class="tab-empty">V5: Event trace will render here</p></div>
+            <div class="tab-pane" id="tabReport"><p class="tab-empty">V5: Markdown report will render here</p></div>
+            <div class="tab-pane" id="tabLlm"><p class="tab-empty">V5: LLM advisory will render here</p></div>
+        </div>
+
     </div>
 
 </div>
@@ -392,6 +475,8 @@ function callApi() {
 
             // Show decision
             document.getElementById('decisionCard').classList.add('visible');
+            document.getElementById('hypCard').classList.add('visible');
+            document.getElementById('tabsCard').classList.add('visible');
             document.getElementById('resetBtn').style.display = '';
             document.getElementById('runBtn').style.display = 'none';
             document.getElementById('incStatus').innerHTML =
@@ -399,6 +484,8 @@ function callApi() {
         })
         .catch(() => {
             document.getElementById('decisionCard').classList.add('visible');
+            document.getElementById('hypCard').classList.add('visible');
+            document.getElementById('tabsCard').classList.add('visible');
             document.getElementById('resetBtn').style.display = '';
             document.getElementById('runBtn').style.display = 'none';
         });
@@ -413,8 +500,19 @@ function resetView() {
     document.getElementById('incStatus').innerHTML = '<span class="dot dot-open"></span>Not analyzed';
     document.getElementById('progressCard').classList.remove('visible');
     document.getElementById('decisionCard').classList.remove('visible');
+    document.getElementById('hypCard').classList.remove('visible');
+    document.getElementById('tabsCard').classList.remove('visible');
     STEPS.forEach(s => s.classList.remove('done', 'active'));
     investigationId = null;
+}
+
+function switchTab(name, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    var paneMap = { evidence: 'tabEvidence', trace: 'tabTrace', report: 'tabReport', llm: 'tabLlm' };
+    var pane = document.getElementById(paneMap[name]);
+    if (pane) pane.classList.add('active');
 }
 </script>
 </body>
