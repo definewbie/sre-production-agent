@@ -24,7 +24,7 @@ Alert
   ↓
 Evidence Collection (8 items from deploy logs, metrics, git diff, service topology)
   ↓
-Diagnostic Pattern Matching (3 built-in patterns)
+Diagnostic Pattern Matching (4 built-in patterns)
   ↓
 Hypothesis Generation (1 hypothesis per pattern)
   ↓
@@ -63,6 +63,22 @@ This is the key differentiator: **the agent knows when it doesn't know.**
 
 ---
 
+## Demo: Scenario F — CrashLoopBackOff Detection
+
+`recommend-service` in the `demo` namespace enters CrashLoopBackOff. The agent collects K8s evidence (pod status, container restarts, exit codes) and identifies the root cause with high confidence.
+
+```
+pod_crash_loop                 score = 0.95
+deployment_regression          score = 0.00
+downstream_dependency_latency  score = 0.00
+```
+
+**Decision: `likely_root_cause`** — `pod_crash_loop` dominates with a clear margin.
+
+This demonstrates the K8s evidence provider module (`sre-agent-k8s-provider`) feeding fixture-based K8s data into the same deterministic RCA workflow.
+
+---
+
 ## Architecture Overview
 
 ```
@@ -91,16 +107,17 @@ This is the key differentiator: **the agent knows when it doesn't know.**
 │  │                                               │        │
 │  │  Zero Spring dependency                       │        │
 │  └───────────────────────────────────────────────┘        │
-│                  ↓ (optional)                             │
-│  ┌─────────── sre-agent-llm ────────────────────┐        │
-│  │                                               │        │
-│  │  MockLlmClient → LlmPromptBuilder             │        │
-│  │       ↓                                       │        │
-│  │  LlmReportSynthesizer → LlmEnhancedReport     │        │
-│  │                                               │        │
-│  │  Guardrails: no auto-action, no data exfil    │        │
-│  │  Zero Spring dependency                       │        │
-│  └───────────────────────────────────────────────┘        │
+│          ↑               ↓ (optional)                     │
+│  ┌──── sre-agent-k8s-provider ────┐  ┌──── sre-agent-llm ────────┐
+│  │                                │  │                            │
+│  │  Fixture-based K8s evidence    │  │  MockLlmClient → LlmPrompt │
+│  │  provider (pod status,         │  │       ↓                    │
+│  │  container restarts, exit      │  │  LlmReportSynthesizer →    │
+│  │  codes)                        │  │  LlmEnhancedReport         │
+│  │                                │  │                            │
+│  │  Zero Spring dependency        │  │  Guardrails: no auto-act.  │
+│  │  Zero K8s client dependency    │  │  Zero Spring dependency    │
+│  └────────────────────────────────┘  └────────────────────────────┘
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -109,11 +126,12 @@ This is the key differentiator: **the agent knows when it doesn't know.**
 | Module | Purpose | Spring Dependency |
 |---|---|---|
 | `sre-agent-core` | Deterministic RCA workflow engine | **None** |
+| `sre-agent-k8s-provider` | Fixture-based K8s evidence provider (pod status, restarts, exit codes) | **None** |
 | `sre-agent-llm` | LLM report synthesis (MockLlmClient, prompt building, report enhancement) | **None** |
 | `sre-agent-cli` | Command-line adapter (Picocli) | None |
 | `sre-agent-server` | Spring Boot REST API + Web UI | Spring Boot 3.x |
 
-**Key constraint:** `sre-agent-core` and `sre-agent-llm` have zero Spring dependency. The workflow is pure Java. CLI and Server are thin adapters that call the same `InvestigationWorkflow`. The LLM module is optional — it enhances reports with AI-synthesized narratives while respecting guardrails (no auto-action, no data exfiltration).
+**Key constraint:** `sre-agent-core`, `sre-agent-k8s-provider`, and `sre-agent-llm` have zero Spring dependency. `sre-agent-k8s-provider` also has zero K8s client library dependency — it uses fixture-based evidence. The workflow is pure Java. CLI and Server are thin adapters that call the same `InvestigationWorkflow`. The LLM module is optional — it enhances reports with AI-synthesized narratives while respecting guardrails (no auto-action, no data exfiltration).
 
 ---
 
@@ -130,9 +148,11 @@ This is the key differentiator: **the agent knows when it doesn't know.**
 mvn test
 ```
 
-Expected: 111 tests passing.
+Expected: 162 tests passing.
 
 ### Run CLI Demo
+
+**Scenario E — Competing Hypotheses:**
 
 ```bash
 mvn -pl sre-agent-cli package -DskipTests
@@ -141,6 +161,17 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
   --alert examples/alerts/competing_hypotheses.json \
   --evidence examples/evidence/competing_hypotheses.json \
   --output /tmp/rca-report.md \
+  --show-trace
+```
+
+**Scenario F — CrashLoopBackOff:**
+
+```bash
+java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  investigate \
+  --alert examples/alerts/k8s_crashloop.json \
+  --evidence examples/evidence/k8s_crashloop_evidence.json \
+  --output /tmp/rca-crashloop-report.md \
   --show-trace
 ```
 
@@ -180,6 +211,31 @@ Response:
   "competingHypotheses": ["hyp_downstream_dependency_latency"],
   "reportUrl": "/api/investigations/inc_20260428T100800Z/report",
   "traceUrl": "/api/investigations/inc_20260428T100800Z/trace"
+}
+```
+
+### Run Scenario F
+
+```bash
+curl -X POST http://localhost:8080/api/investigations/scenario-f
+```
+
+Response:
+```json
+{
+  "incidentId": "inc_20260430T120000Z",
+  "decisionType": "likely_root_cause",
+  "selectedHypothesisId": "hyp_pod_crash_loop",
+  "confidenceScore": 0.95,
+  "scoreGap": 0.95,
+  "scores": {
+    "hyp_pod_crash_loop": 0.95,
+    "hyp_deployment_regression": 0.00,
+    "hyp_downstream_dependency_latency": 0.00
+  },
+  "competingHypotheses": [],
+  "reportUrl": "/api/investigations/inc_20260430T120000Z/report",
+  "traceUrl": "/api/investigations/inc_20260430T120000Z/trace"
 }
 ```
 
@@ -247,7 +303,7 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven multi-module
 - Jackson (JSON serialization)
 - Picocli (CLI framework)
-- JUnit 5 + AssertJ (111 tests)
+- JUnit 5 + AssertJ (162 tests)
 - Static HTML + vanilla JS (minimal Web UI)
 
 ---
@@ -258,8 +314,8 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - **Manual confidence weights** — weights are based on SRE diagnostic experience, not learned from data
 - **In-memory store** — investigation results are not persisted across server restarts
 - **No real LLM provider** — current LLM integration uses MockLlmClient; swap in a real provider by implementing the LlmClient interface
-- **3 diagnostic patterns** — covers deployment regression, dependency latency, and resource pressure only
-- **Single scenario** — Scenario E is the only demo scenario
+- **4 diagnostic patterns** — covers deployment regression, dependency latency, resource pressure, and CrashLoopBackOff
+- **2 demo scenarios** — Scenario E (competing hypotheses) and Scenario F (CrashLoopBackOff)
 
 ---
 
@@ -280,19 +336,25 @@ sre-production-agent/
 │   └── future-roadmap.md
 ├── examples/
 │   ├── alerts/competing_hypotheses.json
+│   ├── alerts/k8s_crashloop.json
 │   ├── evidence/competing_hypotheses.json
+│   ├── evidence/k8s_crashloop_evidence.json
 │   └── reports/competing_hypotheses_report.md
 ├── sre-agent-core/                  # Pure Java RCA engine
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/core/
 │       ├── domain/                  # 10 domain records
 │       ├── evidence/                # EvidenceLoader, StaticEvidenceProvider
-│       ├── patterns/                # PatternRegistry, BuiltinPatterns
+│       ├── patterns/                # PatternRegistry, BuiltinPatterns (4 patterns incl. pod_crash_loop)
 │       ├── hypothesis/              # HypothesisEngine
 │       ├── verification/            # VerificationEngine, ConfidenceScorer, HypothesisComparator
 │       ├── report/                  # MarkdownReporter
 │       ├── eventtrace/              # EventTraceStore, InMemoryEventTraceStore
 │       └── workflow/                # InvestigationWorkflow, InvestigationResult
+├── sre-agent-k8s-provider/          # K8s evidence provider (fixture-based)
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/k8s/
+│       └── K8sEvidenceProvider.java
 ├── sre-agent-llm/                   # LLM report synthesis (optional)
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/llm/
@@ -328,8 +390,9 @@ See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 | E | REST API + minimal Web UI | ✅ Done |
 | F | Interview packaging + documentation | ✅ Done |
 | G | LLM report synthesis | ✅ Done |
-| H | Local Kubernetes (kind) setup | Planned |
-| I | Prometheus / Loki / K8s evidence providers | Planned |
+| H | Local K8s provider module setup (sre-agent-k8s-provider) | ✅ Done |
+| I | K8s evidence provider (fixture-based) + pod_crash_loop pattern | ✅ Done |
+| J | Wire K8s evidence into RCA workflow + Scenario F | ✅ Done |
 
 ---
 
@@ -367,7 +430,7 @@ Alert
   ↓
 Evidence Collection (8 items from deploy logs, metrics, git diff, service topology)
   ↓
-Diagnostic Pattern Matching (3 built-in patterns)
+Diagnostic Pattern Matching (4 built-in patterns)
   ↓
 Hypothesis Generation (1 hypothesis per pattern)
   ↓
@@ -406,6 +469,22 @@ pod_oom_killed                score = 0.05
 
 ---
 
+## 演示：场景 F —— CrashLoopBackOff 检测
+
+`demo` 命名空间中的 `recommend-service` 进入 CrashLoopBackOff 状态。智能体收集 K8s 证据（Pod 状态、容器重启、退出码）并以高置信度识别根因。
+
+```
+pod_crash_loop                 score = 0.95
+deployment_regression          score = 0.00
+downstream_dependency_latency  score = 0.00
+```
+
+**决策：`likely_root_cause`** —— `pod_crash_loop` 以明显优势领先。
+
+这展示了 K8s 证据提供器模块（`sre-agent-k8s-provider`）将基于固件的 K8s 数据输入到同一确定性根因分析工作流中。
+
+---
+
 ## 架构概览
 
 ```
@@ -434,16 +513,17 @@ pod_oom_killed                score = 0.05
 │  │                                               │        │
 │  │  Zero Spring dependency                       │        │
 │  └───────────────────────────────────────────────┘        │
-│                  ↓ (optional)                             │
-│  ┌─────────── sre-agent-llm ────────────────────┐        │
-│  │                                               │        │
-│  │  MockLlmClient → LlmPromptBuilder             │        │
-│  │       ↓                                       │        │
-│  │  LlmReportSynthesizer → LlmEnhancedReport     │        │
-│  │                                               │        │
-│  │  Guardrails: no auto-action, no data exfil    │        │
-│  │  Zero Spring dependency                       │        │
-│  └───────────────────────────────────────────────┘        │
+│          ↑               ↓ (optional)                     │
+│  ┌──── sre-agent-k8s-provider ────┐  ┌──── sre-agent-llm ────────┐
+│  │                                │  │                            │
+│  │  Fixture-based K8s evidence    │  │  MockLlmClient → LlmPrompt │
+│  │  provider (pod status,         │  │       ↓                    │
+│  │  container restarts, exit      │  │  LlmReportSynthesizer →    │
+│  │  codes)                        │  │  LlmEnhancedReport         │
+│  │                                │  │                            │
+│  │  Zero Spring dependency        │  │  Guardrails: no auto-act.  │
+│  │  Zero K8s client dependency    │  │  Zero Spring dependency    │
+│  └────────────────────────────────┘  └────────────────────────────┘
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -452,11 +532,12 @@ pod_oom_killed                score = 0.05
 | 模块 | 用途 | Spring 依赖 |
 |---|---|---|
 | `sre-agent-core` | 确定性根因分析工作流引擎 | **无** |
+| `sre-agent-k8s-provider` | 基于 Fixture 的 K8s 证据提供器（Pod 状态、重启、退出码） | **无** |
 | `sre-agent-llm` | LLM 报告综合（MockLlmClient、提示词构建、报告增强） | **无** |
 | `sre-agent-cli` | 命令行适配器（Picocli） | 无 |
 | `sre-agent-server` | Spring Boot REST API + Web UI | Spring Boot 3.x |
 
-**关键约束：** `sre-agent-core` 和 `sre-agent-llm` 零 Spring 依赖。工作流是纯 Java 实现。CLI 和 Server 是薄适配层，调用同一个 `InvestigationWorkflow`。LLM 模块是可选的——它在遵守护栏（不自动执行操作、不泄露数据）的前提下，用 AI 综合叙述来增强报告。
+**关键约束：** `sre-agent-core`、`sre-agent-k8s-provider` 和 `sre-agent-llm` 零 Spring 依赖。`sre-agent-k8s-provider` 也零 K8s 客户端库依赖——使用基于 Fixture 的证据。工作流是纯 Java 实现。CLI 和 Server 是薄适配层，调用同一个 `InvestigationWorkflow`。LLM 模块是可选的——它在遵守护栏（不自动执行操作、不泄露数据）的前提下，用 AI 综合叙述来增强报告。
 
 ---
 
@@ -473,9 +554,11 @@ pod_oom_killed                score = 0.05
 mvn test
 ```
 
-预期结果：111 个测试全部通过。
+预期结果：162 个测试全部通过。
 
 ### 运行 CLI 演示
+
+**场景 E —— 竞争性假设：**
 
 ```bash
 mvn -pl sre-agent-cli package -DskipTests
@@ -484,6 +567,17 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
   --alert examples/alerts/competing_hypotheses.json \
   --evidence examples/evidence/competing_hypotheses.json \
   --output /tmp/rca-report.md \
+  --show-trace
+```
+
+**场景 F —— CrashLoopBackOff：**
+
+```bash
+java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  investigate \
+  --alert examples/alerts/k8s_crashloop.json \
+  --evidence examples/evidence/k8s_crashloop_evidence.json \
+  --output /tmp/rca-crashloop-report.md \
   --show-trace
 ```
 
@@ -523,6 +617,31 @@ curl -X POST http://localhost:8080/api/investigations/scenario-e
   "competingHypotheses": ["hyp_downstream_dependency_latency"],
   "reportUrl": "/api/investigations/inc_20260428T100800Z/report",
   "traceUrl": "/api/investigations/inc_20260428T100800Z/trace"
+}
+```
+
+### 运行场景 F
+
+```bash
+curl -X POST http://localhost:8080/api/investigations/scenario-f
+```
+
+响应：
+```json
+{
+  "incidentId": "inc_20260430T120000Z",
+  "decisionType": "likely_root_cause",
+  "selectedHypothesisId": "hyp_pod_crash_loop",
+  "confidenceScore": 0.95,
+  "scoreGap": 0.95,
+  "scores": {
+    "hyp_pod_crash_loop": 0.95,
+    "hyp_deployment_regression": 0.00,
+    "hyp_downstream_dependency_latency": 0.00
+  },
+  "competingHypotheses": [],
+  "reportUrl": "/api/investigations/inc_20260430T120000Z/report",
+  "traceUrl": "/api/investigations/inc_20260430T120000Z/trace"
 }
 ```
 
@@ -590,7 +709,7 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven 多模块
 - Jackson（JSON 序列化）
 - Picocli（CLI 框架）
-- JUnit 5 + AssertJ（111 个测试）
+- JUnit 5 + AssertJ（162 个测试）
 - 静态 HTML + 原生 JS（轻量 Web UI）
 
 ---
@@ -601,8 +720,8 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - **手动置信度权重** —— 权重基于 SRE 诊断经验设定，未通过数据学习
 - **内存存储** —— 排查结果不会在服务器重启后持久化
 - **无真实 LLM 提供商** —— 当前 LLM 集成使用 MockLlmClient；可通过实现 LlmClient 接口替换为真实提供商
-- **3 种诊断模式** —— 仅覆盖部署回退、依赖延迟和资源压力
-- **单一场景** —— 场景 E 是唯一的演示场景
+- **4 种诊断模式** —— 覆盖部署回退、依赖延迟、资源压力和 CrashLoopBackOff
+- **2 个演示场景** —— 场景 E（竞争性假设）和场景 F（CrashLoopBackOff）
 
 ---
 
@@ -623,19 +742,25 @@ sre-production-agent/
 │   └── future-roadmap.md
 ├── examples/
 │   ├── alerts/competing_hypotheses.json
+│   ├── alerts/k8s_crashloop.json
 │   ├── evidence/competing_hypotheses.json
+│   ├── evidence/k8s_crashloop_evidence.json
 │   └── reports/competing_hypotheses_report.md
 ├── sre-agent-core/                  # 纯 Java 根因分析引擎
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/core/
 │       ├── domain/                  # 10 个领域 record
 │       ├── evidence/                # EvidenceLoader, StaticEvidenceProvider
-│       ├── patterns/                # PatternRegistry, BuiltinPatterns
+│       ├── patterns/                # PatternRegistry, BuiltinPatterns（4 个模式，含 pod_crash_loop）
 │       ├── hypothesis/              # HypothesisEngine
 │       ├── verification/            # VerificationEngine, ConfidenceScorer, HypothesisComparator
 │       ├── report/                  # MarkdownReporter
 │       ├── eventtrace/              # EventTraceStore, InMemoryEventTraceStore
 │       └── workflow/                # InvestigationWorkflow, InvestigationResult
+├── sre-agent-k8s-provider/          # K8s 证据提供器（基于 Fixture）
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/k8s/
+│       └── K8sEvidenceProvider.java
 ├── sre-agent-llm/                   # LLM 报告综合（可选）
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/llm/
@@ -671,5 +796,6 @@ sre-production-agent/
 | E | REST API + 轻量 Web UI | ✅ 已完成 |
 | F | 面试包装 + 文档 | ✅ 已完成 |
 | G | LLM 报告综合 | ✅ 已完成 |
-| H | 本地 Kubernetes (kind) 环境搭建 | 计划中 |
-| I | Prometheus / Loki / K8s 证据提供器 | 计划中 |
+| H | 本地 K8s 提供器模块搭建（sre-agent-k8s-provider） | ✅ 已完成 |
+| I | K8s 证据提供器（基于 Fixture）+ pod_crash_loop 模式 | ✅ 已完成 |
+| J | 将 K8s 证据接入 RCA 工作流 + 场景 F | ✅ 已完成 |

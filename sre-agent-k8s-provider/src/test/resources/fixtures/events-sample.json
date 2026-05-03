@@ -1,0 +1,106 @@
+{
+  "apiVersion": "v1",
+  "kind": "EventList",
+  "metadata": {
+    "resourceVersion": "184731500",
+    "selfLink": "/api/v1/namespaces/production/events"
+  },
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Event",
+      "metadata": {
+        "name": "payment-service-7d9f8b6c4-x2k9p.18472936a1b2c3d4",
+        "namespace": "production",
+        "uid": "aa11bb22-cc33-dd44-ee55-ff6677889900",
+        "resourceVersion": "184729400",
+        "creationTimestamp": "2026-05-03T15:12:52Z"
+      },
+      "involvedObject": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "payment-service-7d9f8b6c4-x2k9p",
+        "namespace": "production",
+        "uid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "fieldPath": "spec.containers{payment-service}"
+      },
+      "reason": "BackOff",
+      "message": "Back-off restarting failed container payment-service in pod payment-service-7d9f8b6c4-x2k9p_production(a1b2c3d4-e5f6-7890-abcd-ef1234567890)",
+      "source": {
+        "component": "kubelet",
+        "host": "worker-node-03"
+      },
+      "firstTimestamp": "2026-05-03T15:12:52Z",
+      "lastTimestamp": "2026-05-03T15:17:52Z",
+      "count": 6,
+      "type": "Warning",
+      "eventTime": null,
+      "reportingComponent": "kubelet",
+      "reportingInstance": "worker-node-03"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Event",
+      "metadata": {
+        "name": "payment-service-7d9f8b6c4-x2k9p.18472937d5e6f7a8",
+        "namespace": "production",
+        "uid": "bb22cc33-dd44-ee55-ff66-778899001122",
+        "resourceVersion": "184729410",
+        "creationTimestamp": "2026-05-03T15:13:01Z"
+      },
+      "involvedObject": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "payment-service-7d9f8b6c4-x2k9p",
+        "namespace": "production",
+        "uid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "fieldPath": "spec.containers{payment-service}"
+      },
+      "reason": "Unhealthy",
+      "message": "Readiness probe failed: HTTP probe failed with statuscode: 503",
+      "source": {
+        "component": "kubelet",
+        "host": "worker-node-03"
+      },
+      "firstTimestamp": "2026-05-03T15:13:01Z",
+      "lastTimestamp": "2026-05-03T15:16:31Z",
+      "count": 8,
+      "type": "Warning",
+      "eventTime": null,
+      "reportingComponent": "kubelet",
+      "reportingInstance": "worker-node-03"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Event",
+      "metadata": {
+        "name": "payment-service-7d9f8b6c4-x2k9p.18472935b9c0d1e2",
+        "namespace": "production",
+        "uid": "cc33dd44-ee55-ff66-7788-990011223344",
+        "resourceVersion": "184729380",
+        "creationTimestamp": "2026-05-03T15:12:47Z"
+      },
+      "involvedObject": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "name": "payment-service-7d9f8b6c4-x2k9p",
+        "namespace": "production",
+        "uid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "fieldPath": "spec.containers{payment-service}"
+      },
+      "reason": "Killing",
+      "message": "Stopping container payment-service",
+      "source": {
+        "component": "kubelet",
+        "host": "worker-node-03"
+      },
+      "firstTimestamp": "2026-05-03T15:12:47Z",
+      "lastTimestamp": "2026-05-03T15:12:47Z",
+      "count": 1,
+      "type": "Warning",
+      "eventTime": null,
+      "reportingComponent": "kubelet",
+      "reportingInstance": "worker-node-03"
+    }
+  ]
+}

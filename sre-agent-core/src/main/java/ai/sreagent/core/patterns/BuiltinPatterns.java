@@ -103,6 +103,38 @@ public final class BuiltinPatterns {
         );
     }
 
+    public static DiagnosticPattern podCrashLoop() {
+        return new DiagnosticPattern(
+            "pod_crash_loop",
+            "Service instability caused by container crash loop or repeated pod restarts",
+            List.of(
+                "Kubernetes must report CrashLoopBackOff status on pod",
+                "Pod restart count must be elevated"
+            ),
+            List.of(
+                "container_crash_loop_backoff",
+                "pod_restart_count_increased",
+                "pod_not_ready",
+                "deployment_metadata"
+            ),
+            List.of(
+                "no_restart_observed",
+                "pod_ready",
+                "container_running_normal"
+            ),
+            Map.of(
+                "container_crash_loop_backoff", 0.30,
+                "pod_restart_count_increased", 0.20,
+                "pod_not_ready", 0.15,
+                "deployment_metadata", 0.05,
+                "no_restart_observed", 0.30,
+                "pod_ready", 0.20,
+                "container_running_normal", 0.20
+            ),
+            0.25
+        );
+    }
+
     /**
      * Register all built-in patterns into a registry.
      */
@@ -111,6 +143,7 @@ public final class BuiltinPatterns {
         registry.register(deploymentRegression());
         registry.register(downstreamDependencyLatency());
         registry.register(podOomKilled());
+        registry.register(podCrashLoop());
         return registry;
     }
 }

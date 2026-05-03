@@ -129,6 +129,15 @@ public class VerificationEngine {
                     );
                 }
             }
+            case "pod_crash_loop" -> {
+                boolean hasCrashEvidence = evidenceTypes.stream()
+                        .anyMatch(t -> t.contains("crash") || t.contains("restart") || t.contains("not_ready"));
+                if (!hasCrashEvidence) {
+                    contradictions.add(
+                            "No crash loop, restart, or pod-not-ready evidence was found."
+                    );
+                }
+            }
         }
 
         return contradictions;

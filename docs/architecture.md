@@ -58,20 +58,22 @@ The SRE Production Agent follows a **hexagonal architecture** pattern: the core 
 
 ```
 sre-production-agent (parent POM)
-├── sre-agent-core        ← Pure Java, zero Spring
-├── sre-agent-llm         ← Depends on core, zero Spring (LLM synthesis)
-├── sre-agent-cli         ← Depends on core, uses Picocli
-└── sre-agent-server      ← Depends on core + llm, uses Spring Boot
+├── sre-agent-core           ← Pure Java, zero Spring
+├── sre-agent-llm            ← Depends on core, zero Spring (LLM synthesis)
+├── sre-agent-k8s-provider   ← Depends on core, zero Spring, zero K8s client lib (fixture-based K8s evidence)
+├── sre-agent-cli            ← Depends on core + k8s-provider, uses Picocli
+└── sre-agent-server         ← Depends on core + llm + k8s-provider, uses Spring Boot
 ```
 
-### Why Four Modules?
+### Why Five Modules?
 
 | Module | Responsibility | Key Dependency |
 |---|---|---|
 | `sre-agent-core` | Domain model, RCA workflow, scoring, reporting | Jackson only |
 | `sre-agent-llm` | LLM-assisted synthesis (advisory-only narrative) | core + Jackson |
-| `sre-agent-cli` | Command-line interface | Picocli + core |
-| `sre-agent-server` | REST API + Web UI + LLM endpoints | Spring Boot + core + llm |
+| `sre-agent-k8s-provider` | K8s fixture evidence provider | core + Jackson |
+| `sre-agent-cli` | Command-line interface | Picocli + core + k8s-provider |
+| `sre-agent-server` | REST API + Web UI + LLM endpoints | Spring Boot + core + llm + k8s-provider |
 
 ### Why Core Has Zero Spring Dependency
 
@@ -84,9 +86,11 @@ sre-production-agent (parent POM)
 
 ```
 core ← llm
-core ← cli
-core ← server
+core ← k8s-provider
+k8s-provider ← cli
+k8s-provider ← server
 llm  ← server
+core ← cli (also via k8s-provider)
 cli  ↗   ↖ server  (no dependency between adapters)
 ```
 
@@ -218,6 +222,12 @@ InvestigationController (REST)
     → InvestigationWorkflow.run(alert, evidence)
     → InMemoryInvestigationStore.save(result)
     → Return InvestigationResponse DTO
+
+InvestigationController (REST)
+  → InvestigationService.runScenarioF()    // NEW — K8s CrashLoopBackOff
+    → InvestigationWorkflow.run(k8s_alert, k8s_evidence)
+    → InMemoryInvestigationStore.save(result)
+    → Return InvestigationResponse DTO
 ```
 
 The server adds an `InMemoryInvestigationStore` to cache results for subsequent GET requests (report, trace, summary).
@@ -257,7 +267,8 @@ The architecture is designed for controlled extension:
 |---|---|---|
 | Real Prometheus metrics | `PrometheusEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | Real Loki logs | `LokiEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
-| K8s events | `KubernetesEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
+| K8s events (fixtures) | `K8sFixtureEvidenceProvider` | `sre-agent-k8s-provider/` |
+| Real K8s API | `KubernetesEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | EC2 instance metrics | `Ec2EvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | AWS managed services (RDS, ElastiCache, ALB) | `AwsManagedServiceEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | CMDB / service topology | `CmdbTopologyProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
@@ -286,6 +297,14 @@ The current MVP is K8s-centric in naming and scenarios. The core pipeline (verif
 | `IncidentTask` (missing `platform`) | No way to distinguish K8s vs EC2 vs managed service | → Add `platform` field (`"kubernetes"` / `"ec2"` / `"managed_service"`) |
 | `Evidence.service` | Semantically wrong for RDS, ElastiCache, ALB, etc. | → `entity` (generic resource identifier) |
 | `Evidence` (missing `entityType`) | No way to classify what kind of resource this evidence belongs to | → Add `entityType` (`"service"` / `"instance"` / `"database"` / `"cache"` / `"load_balancer"`) |
+
+**Implemented K8s diagnostic pattern (Step J):**
+
+| Pattern | baseScore | Supporting Evidence Types | Counter Evidence Types | Root Cause Type |
+|---|---|---|---|---|
+| `pod_crash_loop` | 0.25 | `container_crash_loop_backoff` (0.30), `pod_restart_count_increased` (0.20), `pod_not_ready` (0.15), `deployment_metadata` (0.05) | `no_restart_observed` (0.30), `pod_ready` (0.20), `container_running_normal` (0.20) | `container_crash_loop` |
+
+Scenario F (`recommend-service` CrashLoopBackOff in `demo` namespace) validates this pattern, producing a `likely_root_cause` decision with score 0.95 (gap ≥ 0.15).
 
 **New diagnostic patterns for non-K8s scenarios:**
 
@@ -361,20 +380,22 @@ SRE Production Agent 采用**六边形架构**模式：核心 RCA（根因分析
 
 ```
 sre-production-agent (parent POM)
-├── sre-agent-core        ← 纯 Java，零 Spring 依赖
-├── sre-agent-llm         ← 依赖 core，零 Spring 依赖（LLM 综合分析）
-├── sre-agent-cli         ← 依赖 core，使用 Picocli
-└── sre-agent-server      ← 依赖 core + llm，使用 Spring Boot
+├── sre-agent-core           ← 纯 Java，零 Spring 依赖
+├── sre-agent-llm            ← 依赖 core，零 Spring 依赖（LLM 综合分析）
+├── sre-agent-k8s-provider   ← 依赖 core，零 Spring 依赖，零 K8s 客户端库（基于 fixture 的 K8s 证据）
+├── sre-agent-cli            ← 依赖 core + k8s-provider，使用 Picocli
+└── sre-agent-server         ← 依赖 core + llm + k8s-provider，使用 Spring Boot
 ```
 
-### 为什么是四个模块？
+### 为什么是五个模块？
 
 | 模块 | 职责 | 关键依赖 |
 |---|---|---|
 | `sre-agent-core` | 领域模型、RCA 工作流、评分、报告 | 仅 Jackson |
 | `sre-agent-llm` | LLM 辅助综合分析（仅限咨询性叙述） | core + Jackson |
-| `sre-agent-cli` | 命令行界面 | Picocli + core |
-| `sre-agent-server` | REST API + Web UI + LLM 端点 | Spring Boot + core + llm |
+| `sre-agent-k8s-provider` | K8s fixture 证据提供者 | core + Jackson |
+| `sre-agent-cli` | 命令行界面 | Picocli + core + k8s-provider |
+| `sre-agent-server` | REST API + Web UI + LLM 端点 | Spring Boot + core + llm + k8s-provider |
 
 ### 为什么 Core 零 Spring 依赖
 
@@ -387,9 +408,11 @@ sre-production-agent (parent POM)
 
 ```
 core ← llm
-core ← cli
-core ← server
+core ← k8s-provider
+k8s-provider ← cli
+k8s-provider ← server
 llm  ← server
+core ← cli (also via k8s-provider)
 cli  ↗   ↖ server  (适配器之间无依赖)
 ```
 
@@ -521,6 +544,12 @@ InvestigationController (REST)
     → InvestigationWorkflow.run(alert, evidence)
     → InMemoryInvestigationStore.save(result)
     → Return InvestigationResponse DTO
+
+InvestigationController (REST)
+  → InvestigationService.runScenarioF()    // 新增 — K8s CrashLoopBackOff
+    → InvestigationWorkflow.run(k8s_alert, k8s_evidence)
+    → InMemoryInvestigationStore.save(result)
+    → Return InvestigationResponse DTO
 ```
 
 Server 额外添加了 `InMemoryInvestigationStore` 来缓存结果，供后续 GET 请求使用（报告、追踪、摘要）。
@@ -560,7 +589,8 @@ EventTraceEntry {
 |---|---|---|
 | 真实 Prometheus 指标 | `PrometheusEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | 真实 Loki 日志 | `LokiEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
-| K8s 事件 | `KubernetesEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
+| K8s 事件（fixtures） | `K8sFixtureEvidenceProvider` | `sre-agent-k8s-provider/` |
+| 真实 K8s API | `KubernetesEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | EC2 实例指标 | `Ec2EvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | AWS 托管服务（RDS、ElastiCache、ALB） | `AwsManagedServiceEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | CMDB / 服务拓扑 | `CmdbTopologyProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
@@ -589,6 +619,14 @@ EventTraceEntry {
 | `IncidentTask`（缺少 `platform`） | 无法区分 K8s vs EC2 vs 托管服务 | → 添加 `platform` 字段（`"kubernetes"` / `"ec2"` / `"managed_service"`） |
 | `Evidence.service` | 对 RDS、ElastiCache、ALB 等语义不正确 | → `entity`（通用资源标识符） |
 | `Evidence`（缺少 `entityType`） | 无法分类证据所属的资源类型 | → 添加 `entityType`（`"service"` / `"instance"` / `"database"` / `"cache"` / `"load_balancer"`） |
+
+**已实现的 K8s 诊断模式（Step J）：**
+
+| 模式 | baseScore | 支持证据类型 | 反对证据类型 | 根因类型 |
+|---|---|---|---|---|
+| `pod_crash_loop` | 0.25 | `container_crash_loop_backoff` (0.30)、`pod_restart_count_increased` (0.20)、`pod_not_ready` (0.15)、`deployment_metadata` (0.05) | `no_restart_observed` (0.30)、`pod_ready` (0.20)、`container_running_normal` (0.20) | `container_crash_loop` |
+
+场景 F（`demo` 命名空间中 `recommend-service` 的 CrashLoopBackOff）验证了此模式，产生 `likely_root_cause` 决策，分数 0.95（差距 ≥ 0.15）。
 
 **非 K8s 场景的新诊断模式：**
 

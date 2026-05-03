@@ -1,0 +1,76 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "payment-service",
+    "namespace": "production",
+    "uid": "d1e2f3a4-b5c6-7890-defa-23456789abcd",
+    "resourceVersion": "172839100",
+    "creationTimestamp": "2026-04-15T09:30:01Z",
+    "labels": {
+      "app": "payment-service"
+    },
+    "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Service\",\"metadata\":{\"annotations\":{},\"labels\":{\"app\":\"payment-service\"},\"name\":\"payment-service\",\"namespace\":\"production\"},\"spec\":{\"ports\":[{\"port\":8080,\"targetPort\":8080}],\"selector\":{\"app\":\"payment-service\"},\"type\":\"ClusterIP\"}}"
+    },
+    "managedFields": [
+      {
+        "manager": "kubectl-client-side-apply",
+        "operation": "Update",
+        "apiVersion": "v1",
+        "time": "2026-04-15T09:30:01Z",
+        "fieldsType": "FieldsV1",
+        "fieldsV1": {
+          "f:metadata": {
+            "f:annotations": {
+              ".": {},
+              "f:kubectl.kubernetes.io/last-applied-configuration": {}
+            },
+            "f:labels": {
+              ".": {},
+              "f:app": {}
+            }
+          },
+          "f:spec": {
+            "f:internalTrafficPolicy": {},
+            "f:ports": {
+              ".": {},
+              "k:{\"port\":8080,\"protocol\":\"TCP\"}": {
+                ".": {},
+                "f:port": {},
+                "f:protocol": {},
+                "f:targetPort": {}
+              }
+            },
+            "f:selector": {},
+            "f:sessionAffinity": {},
+            "f:type": {}
+          }
+        }
+      }
+    ]
+  },
+  "spec": {
+    "ports": [
+      {
+        "protocol": "TCP",
+        "port": 8080,
+        "targetPort": 8080
+      }
+    ],
+    "selector": {
+      "app": "payment-service"
+    },
+    "clusterIP": "10.96.142.28",
+    "clusterIPs": [
+      "10.96.142.28"
+    ],
+    "type": "ClusterIP",
+    "sessionAffinity": "None",
+    "publishNotReadyAddresses": false,
+    "internalTrafficPolicy": "Cluster"
+  },
+  "status": {
+    "loadBalancer": {}
+  }
+}

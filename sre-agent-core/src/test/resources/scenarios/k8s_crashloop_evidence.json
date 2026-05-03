@@ -1,0 +1,66 @@
+[
+  {
+    "id": "ev_k8s_001",
+    "incident_id": "inc_k8s_20260428_1120",
+    "source": "kubernetes",
+    "evidence_type": "container_crash_loop_backoff",
+    "service": "recommend-service",
+    "timestamp": "2026-04-28T11:20:30Z",
+    "content": "Pod recommend-service-7d9f8b6c4d-x2k1p is in CrashLoopBackOff state. Container exiting with code 137 after 12 seconds.",
+    "attributes": {
+      "pod_name": "recommend-service-7d9f8b6c4d-x2k1p",
+      "container": "recommend-service",
+      "exit_code": 137,
+      "reason": "CrashLoopBackOff",
+      "restart_count": 7
+    },
+    "strength": 0.95
+  },
+  {
+    "id": "ev_k8s_002",
+    "incident_id": "inc_k8s_20260428_1120",
+    "source": "kubernetes",
+    "evidence_type": "pod_restart_count_increased",
+    "service": "recommend-service",
+    "timestamp": "2026-04-28T11:21:00Z",
+    "content": "Pod has restarted 7 times in the last 15 minutes. Restart count is abnormally high.",
+    "attributes": {
+      "restart_count": 7,
+      "window_minutes": 15,
+      "pod_name": "recommend-service-7d9f8b6c4d-x2k1p"
+    },
+    "strength": 0.90
+  },
+  {
+    "id": "ev_k8s_003",
+    "incident_id": "inc_k8s_20260428_1120",
+    "source": "kubernetes",
+    "evidence_type": "pod_not_ready",
+    "service": "recommend-service",
+    "timestamp": "2026-04-28T11:21:30Z",
+    "content": "Pod readiness probe failing. Pod has been not ready for 12 minutes.",
+    "attributes": {
+      "ready": false,
+      "not_ready_duration_minutes": 12,
+      "pod_name": "recommend-service-7d9f8b6c4d-x2k1p"
+    },
+    "strength": 0.85
+  },
+  {
+    "id": "ev_k8s_004",
+    "incident_id": "inc_k8s_20260428_1120",
+    "source": "kubernetes",
+    "evidence_type": "deployment_metadata",
+    "service": "recommend-service",
+    "timestamp": "2026-04-28T11:22:00Z",
+    "content": "Deployment recommend-service has 3/3 desired replicas. Updated at 2026-04-28T11:15:00Z with image recommend-service:v2.1.0.",
+    "attributes": {
+      "deployment_name": "recommend-service",
+      "replicas": 3,
+      "updated_replicas": 3,
+      "image": "recommend-service:v2.1.0",
+      "updated_at": "2026-04-28T11:15:00Z"
+    },
+    "strength": 0.70
+  }
+]

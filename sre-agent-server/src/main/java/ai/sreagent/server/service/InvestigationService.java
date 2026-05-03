@@ -39,6 +39,21 @@ public class InvestigationService {
     }
 
     /**
+     * Run Scenario F investigation — K8s CrashLoopBackOff evidence.
+     */
+    public InvestigationResponse runScenarioF() throws Exception {
+        File alertFile = resolveProjectFile("examples/alerts/k8s_crashloop.json");
+        File evidenceFile = resolveProjectFile("examples/evidence/k8s_crashloop.json");
+
+        InvestigationWorkflow workflow = new InvestigationWorkflow();
+        InvestigationResult result = workflow.run(alertFile, evidenceFile);
+
+        store.save(result);
+
+        return toResponse(result);
+    }
+
+    /**
      * Build response DTO from investigation result.
      */
     private InvestigationResponse toResponse(InvestigationResult r) {

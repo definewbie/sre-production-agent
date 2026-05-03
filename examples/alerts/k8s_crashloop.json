@@ -1,0 +1,16 @@
+{
+  "id": "inc_k8s_20260428_1120",
+  "alert_name": "PodCrashLooping",
+  "service": "recommend-service",
+  "namespace": "demo",
+  "severity": "warning",
+  "started_at": "2026-04-28T11:20:00Z",
+  "labels": {
+    "scenario": "F",
+    "platform": "kubernetes"
+  },
+  "annotations": {
+    "summary": "recommend-service pod is crash looping",
+    "source": "kubernetes"
+  }
+}

@@ -17,11 +17,12 @@ class PatternRegistryTest {
     void defaultRegistryHasAllPatterns() {
         PatternRegistry registry = BuiltinPatterns.defaultRegistry();
 
-        assertThat(registry.size()).isEqualTo(3);
+        assertThat(registry.size()).isEqualTo(4);
         assertThat(registry.patternIds()).containsExactlyInAnyOrder(
                 "deployment_regression",
                 "downstream_dependency_latency",
-                "pod_oom_killed"
+                "pod_oom_killed",
+                "pod_crash_loop"
         );
     }
 
@@ -96,11 +97,14 @@ class PatternRegistryTest {
         PatternRegistry registry = BuiltinPatterns.defaultRegistry();
 
         for (DiagnosticPattern pattern : registry.all()) {
-            double sum = pattern.baseScore() + pattern.confidenceWeights().values().stream()
-                    .mapToDouble(Double::doubleValue).sum();
-            // Total score should be bounded [0, 1]
-            assertThat(sum)
-                    .as("Total score for %s should be between 0 and 1, got %f", pattern.id(), sum)
+            // Only supporting evidence types contribute positively;
+            // counter evidence types are subtracted during scoring.
+            double supportingSum = pattern.supportingEvidenceTypes().stream()
+                    .mapToDouble(t -> pattern.confidenceWeights().getOrDefault(t, 0.0))
+                    .sum();
+            double maxPossibleScore = pattern.baseScore() + supportingSum;
+            assertThat(maxPossibleScore)
+                    .as("Max possible score for %s should be between 0 and 1, got %f", pattern.id(), maxPossibleScore)
                     .isBetween(0.0, 1.0);
         }
     }

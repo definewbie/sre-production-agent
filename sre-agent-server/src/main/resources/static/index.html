@@ -310,10 +310,10 @@ body {
                 <div class="inc-meta">checkout-service · demo</div>
                 <div class="inc-status"><span class="dot dot-soon"></span>coming soon</div>
             </div>
-            <div class="inc-item disabled">
-                <div class="inc-name">OOMKilled <span class="sev sev-high">high</span></div>
+            <div class="inc-item" data-inc="scenario-f" onclick="selectIncident(this)">
+                <div class="inc-name">PodCrashLooping <span class="sev sev-warn">warning</span></div>
                 <div class="inc-meta">recommend-service · demo</div>
-                <div class="inc-status"><span class="dot dot-soon"></span>coming soon</div>
+                <div class="inc-status"><span class="dot dot-open"></span>open <span style="font-size:0.55rem;color:#3b82f6;margin-left:0.3rem">kubernetes</span></div>
             </div>
         </div>
     </div>
@@ -479,6 +479,66 @@ function selectIncident(el) {
     document.querySelectorAll('.inc-item').forEach(i => i.classList.remove('active'));
     el.classList.add('active');
     currentIncident = el.dataset.inc;
+    updateIncidentPanel();
+    resetView();
+}
+
+var SCENARIOS = {
+    'scenario-e': {
+        alert: 'HighErrorRate', service: 'order-service', namespace: 'demo',
+        severity: 'warning', severityClass: 'sev-warn',
+        started: '2026-04-28T10:08:00Z',
+        topoPrimary: { name: 'order-service', tags: '<span class="topo-tag topo-alert">alert target</span>',
+            details: ['deploy v1.2.3', 'timeout logs detected', 'error rate spike'] },
+        topoSecondary: { name: 'payment-service', tags: '<span class="topo-tag topo-dep">downstream dep</span>',
+            details: ['p95 latency increased', '5xx did not increase'] },
+        topoNote: 'Topology evidence explains why downstream_dependency_latency remains a competing hypothesis.',
+        evidenceSource: 'static evidence',
+        evidenceBadge: 'Static Evidence'
+    },
+    'scenario-f': {
+        alert: 'PodCrashLooping', service: 'recommend-service', namespace: 'demo',
+        severity: 'warning', severityClass: 'sev-warn',
+        started: '2026-04-28T11:20:00Z',
+        topoPrimary: { name: 'recommend-service', tags: '<span class="topo-tag topo-alert">alert target</span>',
+            details: ['CrashLoopBackOff detected', '7 restarts in 15 min', 'readiness probe failing'] },
+        topoSecondary: null,
+        topoNote: 'Kubernetes pod runtime evidence shows direct container crash loop.',
+        evidenceSource: 'kubernetes provider',
+        evidenceBadge: 'Kubernetes Provider'
+    }
+};
+
+function updateIncidentPanel() {
+    var s = SCENARIOS[currentIncident];
+    if (!s) return;
+    document.querySelector('#incSummary .sum-val.alert-name').textContent = s.alert;
+    document.querySelectorAll('#incSummary .sum-row')[1].querySelector('.sum-val').textContent = s.service;
+    document.querySelectorAll('#incSummary .sum-row')[2].querySelector('.sum-val').textContent = s.namespace;
+    document.querySelectorAll('#incSummary .sum-row')[3].querySelector('.sum-val').innerHTML = '<span class="' + s.severityClass + '" style="margin-left:0">' + s.severity + '</span>';
+    document.querySelectorAll('#incSummary .sum-row')[4].querySelector('.sum-val').textContent = s.started;
+    // Update topology
+    var topoHtml = '<div class="topo-node"><div class="topo-name">' + s.topoPrimary.name + '</div>'
+        + '<div class="topo-tags">' + s.topoPrimary.tags + '</div><ul class="topo-details">';
+    for (var i = 0; i < s.topoPrimary.details.length; i++) {
+        topoHtml += '<li>' + s.topoPrimary.details[i] + '</li>';
+    }
+    topoHtml += '</ul></div>';
+    if (s.topoSecondary) {
+        topoHtml += '<div class="topo-arrow">───▶</div><div class="topo-node"><div class="topo-name">'
+            + s.topoSecondary.name + '</div><div class="topo-tags">' + s.topoSecondary.tags
+            + '</div><ul class="topo-details">';
+        for (var j = 0; j < s.topoSecondary.details.length; j++) {
+            topoHtml += '<li>' + s.topoSecondary.details[j] + '</li>';
+        }
+        topoHtml += '</ul></div>';
+    }
+    document.querySelector('#topoCard .topo').innerHTML = topoHtml;
+    document.querySelector('#topoCard .topo-note').innerHTML = s.topoNote
+        + ' <span class="topo-guard">Topology is evidence context, not decision authority.</span>';
+    // Update evidence badge
+    var evidenceGuard = document.querySelector('#tabEvidence .tab-guard');
+    if (evidenceGuard) evidenceGuard.textContent = 'Evidence source: ' + s.evidenceSource + '. Production: Prometheus / Loki / K8s API.';
 }
 
 /* ---- V3: Progress Animation + Decision ---- */
@@ -513,7 +573,8 @@ function runAnalysis() {
 }
 
 function callApi() {
-    fetch('/api/investigations/scenario-e', { method: 'POST' })
+    var endpoint = currentIncident === 'scenario-f' ? '/api/investigations/scenario-f' : '/api/investigations/scenario-e';
+    fetch(endpoint, { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             investigationId = data.incidentId;
@@ -593,8 +654,7 @@ function loadTabContent(name) {
     else if (name === 'llm') loadLlm();
 }
 
-// Scenario E static evidence data
-var EVIDENCE_DATA = [
+var EVIDENCE_DATA_E = [
     { type: 'metric', cls: 'ev-type-metric', source: 'order-service CPU', desc: 'CPU usage spiked to 85% post deployment v1.2.3' },
     { type: 'metric', cls: 'ev-type-metric', source: 'order-service error_rate', desc: 'Error rate increased from 0.1% to 4.7% in last 15 min' },
     { type: 'log', cls: 'ev-type-log', source: 'order-service logs', desc: 'Timeout errors detected: "upstream request timeout to payment-service"' },
@@ -606,19 +666,29 @@ var EVIDENCE_DATA = [
     { type: 'deploy', cls: 'ev-type-deploy', source: 'order-service deploy', desc: 'Previous deployment v1.2.2 was stable for 14 days' }
 ];
 
+var EVIDENCE_DATA_F = [
+    { type: 'event', cls: 'ev-type-event', source: 'kubernetes pod status', desc: 'Pod recommend-service-7d9f8b6c4d-x2k1p is in CrashLoopBackOff state, exit code 137' },
+    { type: 'metric', cls: 'ev-type-metric', source: 'kubernetes restart_count', desc: 'Pod has restarted 7 times in the last 15 minutes' },
+    { type: 'event', cls: 'ev-type-event', source: 'kubernetes readiness', desc: 'Pod readiness probe failing — not ready for 12 minutes' },
+    { type: 'deploy', cls: 'ev-type-deploy', source: 'kubernetes deployment', desc: 'Deployment recommend-service updated to v2.1.0 at 11:15 UTC, 5 min before alert' }
+];
+
 function loadEvidence() {
     var el = document.getElementById('evidenceContent');
     if (!investigationId) { el.innerHTML = '<p class="tab-empty">Run investigation to see evidence details</p>'; return; }
-    var html = '<div class="ev-item">';
-    for (var i = 0; i < EVIDENCE_DATA.length; i++) {
-        var e = EVIDENCE_DATA[i];
+    var data = currentIncident === 'scenario-f' ? EVIDENCE_DATA_F : EVIDENCE_DATA_E;
+    var sourceTag = currentIncident === 'scenario-f'
+        ? '<div style="margin-bottom:0.5rem;font-size:0.6rem;color:#3b82f6;font-weight:600">Evidence source: Kubernetes provider</div>'
+        : '<div style="margin-bottom:0.5rem;font-size:0.6rem;color:var(--dim);font-weight:600">Evidence source: static scenario data</div>';
+    var html = sourceTag;
+    for (var i = 0; i < data.length; i++) {
+        var e = data[i];
         html += '<div class="ev-item">'
             + '<span class="ev-type ' + e.cls + '">' + e.type + '</span>'
             + '<span class="ev-source">' + e.source + '</span>'
             + '<div class="ev-desc">' + e.desc + '</div>'
             + '</div>';
     }
-    html += '</div>';
     el.innerHTML = html;
 }
 

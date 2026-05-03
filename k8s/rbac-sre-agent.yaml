@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sre-agent
+  namespace: sre-system
+  labels:
+    app: sre-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sre-agent-reader
+  namespace: sre-system
+  labels:
+    app: sre-agent
+rules:
+  # Read pods and pod status
+  - apiGroups: [""]
+    resources: ["pods", "pods/status"]
+    verbs: ["get", "list"]
+  # Read deployments and deployment status
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/status"]
+    verbs: ["get", "list"]
+  # Read services
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  # Read events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+  # Read configmaps (non-sensitive configuration)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  # Read namespaces (for discovery)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sre-agent-reader-binding
+  namespace: sre-system
+  labels:
+    app: sre-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sre-agent-reader
+subjects:
+  - kind: ServiceAccount
+    name: sre-agent
+    namespace: sre-system
+---
+# ClusterRole for cross-namespace evidence collection
+# Use with caution — only bind to namespaces the agent needs to observe
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sre-agent-reader-cluster
+  labels:
+    app: sre-agent
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/status", "services", "events", "namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/status"]
+    verbs: ["get", "list"]
+---
+# Example: bind ClusterRole to specific namespaces
+# Uncomment and adjust namespace as needed
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: ClusterRoleBinding
+# metadata:
+#   name: sre-agent-reader-cluster-binding
+#   labels:
+#     app: sre-agent
+# roleRef:
+#   apiGroup: rbac.authorization.k8s.io
+#   kind: ClusterRole
+#   name: sre-agent-reader-cluster
+# subjects:
+#   - kind: ServiceAccount
+#     name: sre-agent
+#     namespace: sre-system

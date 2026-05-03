@@ -1,0 +1,175 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "order-processor-5c8d7f9b2-m3n7q",
+    "namespace": "production",
+    "uid": "f1e2d3c4-b5a6-7890-fedc-ba0987654321",
+    "resourceVersion": "184731204",
+    "creationTimestamp": "2026-05-03T13:45:08Z",
+    "labels": {
+      "app": "order-processor",
+      "version": "v1.8.0",
+      "pod-template-hash": "5c8d7f9b2"
+    },
+    "ownerReferences": [
+      {
+        "apiVersion": "apps/v1",
+        "kind": "ReplicaSet",
+        "name": "order-processor-5c8d7f9b2",
+        "uid": "e2d3c4b5-a6f7-8901-edcb-a09876543210",
+        "controller": true,
+        "blockOwnerDeletion": true
+      }
+    ]
+  },
+  "spec": {
+    "volumes": [
+      {
+        "name": "config-volume",
+        "configMap": {
+          "name": "order-processor-config"
+        }
+      }
+    ],
+    "containers": [
+      {
+        "name": "order-processor",
+        "image": "registry.internal.example.com/order-processor:v1.8.0",
+        "ports": [
+          {
+            "containerPort": 8080,
+            "protocol": "TCP"
+          }
+        ],
+        "resources": {
+          "requests": {
+            "cpu": "200m",
+            "memory": "256Mi"
+          },
+          "limits": {
+            "cpu": "500m",
+            "memory": "512Mi"
+          }
+        },
+        "volumeMounts": [
+          {
+            "name": "config-volume",
+            "mountPath": "/etc/config"
+          }
+        ],
+        "livenessProbe": {
+          "httpGet": {
+            "path": "/healthz",
+            "port": 8080
+          },
+          "initialDelaySeconds": 20,
+          "timeoutSeconds": 5,
+          "periodSeconds": 15,
+          "successThreshold": 1,
+          "failureThreshold": 3
+        },
+        "readinessProbe": {
+          "httpGet": {
+            "path": "/ready",
+            "port": 8080
+          },
+          "initialDelaySeconds": 10,
+          "timeoutSeconds": 3,
+          "periodSeconds": 5,
+          "successThreshold": 1,
+          "failureThreshold": 3
+        },
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "imagePullPolicy": "IfNotPresent"
+      }
+    ],
+    "restartPolicy": "Always",
+    "terminationGracePeriodSeconds": 30,
+    "dnsPolicy": "ClusterFirst",
+    "serviceAccountName": "order-processor-sa",
+    "serviceAccount": "order-processor-sa",
+    "nodeName": "worker-node-05",
+    "securityContext": {},
+    "schedulerName": "default-scheduler",
+    "tolerations": [
+      {
+        "key": "node.kubernetes.io/not-ready",
+        "operator": "Exists",
+        "effect": "NoExecute",
+        "tolerationSeconds": 300
+      },
+      {
+        "key": "node.kubernetes.io/unreachable",
+        "operator": "Exists",
+        "effect": "NoExecute",
+        "tolerationSeconds": 300
+      }
+    ],
+    "priority": 0,
+    "enableServiceLinks": true,
+    "preemptionPolicy": "PreemptLowerPriority"
+  },
+  "status": {
+    "phase": "Running",
+    "conditions": [
+      {
+        "type": "Initialized",
+        "status": "True",
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-05-03T13:45:08Z"
+      },
+      {
+        "type": "Ready",
+        "status": "False",
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-05-03T14:10:33Z",
+        "reason": "ContainersNotReady",
+        "message": "containers with unready status: [order-processor]"
+      },
+      {
+        "type": "ContainersReady",
+        "status": "False",
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-05-03T14:10:33Z",
+        "reason": "ContainersNotReady",
+        "message": "containers with unready status: [order-processor]"
+      },
+      {
+        "type": "PodScheduled",
+        "status": "True",
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-05-03T13:45:08Z"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "name": "order-processor",
+        "state": {
+          "running": {
+            "startedAt": "2026-05-03T15:05:19Z"
+          }
+        },
+        "lastState": {
+          "terminated": {
+            "exitCode": 137,
+            "reason": "OOMKilled",
+            "message": null,
+            "startedAt": "2026-05-03T14:55:01Z",
+            "finishedAt": "2026-05-03T15:05:18Z",
+            "containerID": "containerd://d4e5f6a7b8c9-0123-4567-890a-bcdef1234567"
+          }
+        },
+        "ready": true,
+        "restartCount": 3,
+        "image": "registry.internal.example.com/order-processor:v1.8.0",
+        "imageID": "registry.internal.example.com/order-processor@sha256:123abc456def789ghi012jkl345mno678pqr901stu234vwx567yza890bcd1234",
+        "containerID": "containerd://e5f6a7b8c9d0-1234-5678-90ab-cdef12345678",
+        "started": true
+      }
+    ],
+    "qosClass": "Burstable",
+    "startTime": "2026-05-03T13:45:08Z"
+  }
+}

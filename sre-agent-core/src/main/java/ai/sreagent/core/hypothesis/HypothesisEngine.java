@@ -35,6 +35,12 @@ public class HypothesisEngine {
                 "resource_pressure",
                 "Pod memory pressure or OOMKilled events caused instability"
         ));
+        TEMPLATES.put("pod_crash_loop", new HypothesisTemplate(
+                "hyp_pod_crash_loop",
+                "Container crash loop caused service instability",
+                "kubernetes_crash_loop",
+                "Container is repeatedly crashing or restarting in Kubernetes"
+        ));
     }
 
     /**

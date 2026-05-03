@@ -33,6 +33,12 @@ public class InvestigationController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/scenario-f")
+    public ResponseEntity<InvestigationResponse> runScenarioF() throws Exception {
+        InvestigationResponse response = service.runScenarioF();
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/{incidentId}")
     public ResponseEntity<InvestigationResponse> getSummary(@PathVariable String incidentId) {
         return service.getSummary(incidentId)
