@@ -410,13 +410,16 @@ Multi-signal evidence → RCA → Decision
 ```
 
 **REST API:**
-- `POST /api/live-scenario/simulate` — run Scenario G (simulation or live mode)
+- `GET /api/live-scenario/simulate` — run Scenario G in simulation mode (fixture clients)
+- `POST /api/live-scenario/run` — run Scenario G with live fault injection
 - `GET /api/live-scenario/{id}` — get scenario status and results
-- `POST /api/live-scenario/{id}/reset` — clear fault injection and results
+- `GET /api/live-scenario/latest` — get latest scenario result
+- `GET /api/live-scenario` — list all scenario results
+- `POST /api/live-scenario/reset` — clear fault injection and results
 
 **UI:** "🔍 实时排查" button opens Chinese-language investigation console with fault mode selection, run mode toggle, step progress indicator, and RCA result visualization.
 
-**Makefile targets:** `live-scenario-simulate`, `live-scenario-status`, `live-scenario-reset`
+**Makefile targets:** `live-scenario-simulate`, `live-scenario-run`, `live-scenario-latest`, `live-scenario-reset`
 
 **Key design:** `InvestigationWorkflow.runFromMemory()` enables programmatic RCA without filesystem I/O. Simulation mode uses fixture clients (no live endpoints required for tests). UI is fully Chinese-localized.
 

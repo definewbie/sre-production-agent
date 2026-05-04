@@ -501,11 +501,11 @@ List<Evidence> (probe evidence, informational only)
 **What was built:**
 - `LiveScenarioService` — orchestrates Scenario G: fault injection → evidence collection → RCA workflow → result assembly
 - `LiveEvidenceCollector` — Spring component that collects evidence from all 5 providers (Prometheus, Loki, Trace, K8s, Alertmanager) in a single pass
-- `LiveScenarioController` — REST API: `POST /api/live-scenario/simulate`, `GET /api/live-scenario/{id}`, `POST /api/live-scenario/{id}/reset`
+- `LiveScenarioController` — REST API: `GET /api/live-scenario/simulate`, `POST /api/live-scenario/run`, `GET /api/live-scenario/{id}`, `GET /api/live-scenario/latest`, `POST /api/live-scenario/reset`
 - `LiveScenarioResult` / `LiveEvidenceReport` — response DTOs with per-source evidence breakdown
 - `InvestigationWorkflow.runFromMemory()` — in-memory RCA execution without temp file I/O
 - 中文 Live Investigation Console UI — dark-themed panel with fault mode selection (延迟注入/错误注入/超时注入), simulation mode, real-time evidence display, and RCA result visualization
-- Makefile targets: `live-scenario-simulate`, `live-scenario-status`, `live-scenario-reset`
+- Makefile targets: `live-scenario-simulate`, `live-scenario-run`, `live-scenario-latest`, `live-scenario-reset`
 - Server pom.xml: added all 5 provider dependencies for live evidence collection
 - 12 new tests (560 total, up from 548, 0 failures)
 

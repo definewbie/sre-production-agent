@@ -1663,18 +1663,30 @@ function renderLiveResult(data) {
         document.getElementById('liveDecisionCard').style.display = '';
 
         var dec = rca.decision || {};
-        var decType = dec.decisionType || 'unknown';
+        var decType = dec.decision_type || 'unknown';
         var isCompeting = decType === 'competing_hypotheses';
         var tagClass = isCompeting ? 'competing' : 'resolved';
         var tagText = isCompeting ? '⚠ 存在竞争假设' : '✓ 已定位根因';
 
+        // Build score/verification lookup by hypothesis_id
+        var scoreMap = {};
+        var confResults = rca.confidenceResults || [];
+        for (var ci = 0; ci < confResults.length; ci++) {
+            scoreMap[confResults[ci].hypothesis_id] = confResults[ci];
+        }
+        var verifMap = {};
+        var verResults = rca.verificationResults || [];
+        for (var vi = 0; vi < verResults.length; vi++) {
+            verifMap[verResults[vi].hypothesis_id] = verResults[vi];
+        }
+
         var dhtml = '<div class="live-decision-tag ' + tagClass + '">' + tagText + '</div>';
         dhtml += '<div class="live-decision-grid">';
         dhtml += '<div class="live-decision-row"><span class="live-decision-key">决策类型</span><span>' + decType + '</span></div>';
-        dhtml += '<div class="live-decision-row"><span class="live-decision-key">选定假设</span><span>' + (dec.selectedHypothesisId || '-') + '</span></div>';
-        dhtml += '<div class="live-decision-row"><span class="live-decision-key">置信度</span><span>' + (dec.confidenceScore != null ? dec.confidenceScore.toFixed(2) : '-') + '</span></div>';
-        if (dec.scoreGap != null) {
-            dhtml += '<div class="live-decision-row"><span class="live-decision-key">分数差距</span><span>' + dec.scoreGap.toFixed(2) + '</span></div>';
+        dhtml += '<div class="live-decision-row"><span class="live-decision-key">选定假设</span><span>' + (dec.selected_hypothesis_id || '-') + '</span></div>';
+        dhtml += '<div class="live-decision-row"><span class="live-decision-key">置信度</span><span>' + (dec.confidence_score != null ? dec.confidence_score.toFixed(2) : '-') + '</span></div>';
+        if (rca.comparison && rca.comparison.score_gap != null) {
+            dhtml += '<div class="live-decision-row"><span class="live-decision-key">分数差距</span><span>' + rca.comparison.score_gap.toFixed(2) + '</span></div>';
         }
         dhtml += '</div>';
         dhtml += '<div style="font-size:0.6rem;color:var(--dim);margin-top:0.5rem">'
@@ -1692,16 +1704,22 @@ function renderLiveResult(data) {
                 + '</tr></thead><tbody>';
             for (var h = 0; h < hyps.length; h++) {
                 var hyp = hyps[h];
-                var pct = Math.round((hyp.score || 0) * 100);
+                var hid = hyp.id;
+                var score = scoreMap[hid] ? scoreMap[hid].score : 0;
+                var verif = verifMap[hid];
+                var supCount = verif ? (verif.supporting_evidence_ids || []).length : '-';
+                var cntCount = verif ? (verif.counter_evidence_ids || []).length : '-';
+                var contraCount = verif ? (verif.contradictions || []).length : '-';
+                var pct = Math.round(score * 100);
                 hhtml += '<tr>'
-                    + '<td style="font-weight:600">' + (hyp.name || hyp.id || '-') + '</td>'
+                    + '<td style="font-weight:600">' + (hyp.title || hyp.id || '-') + '</td>'
                     + '<td><div style="display:flex;align-items:center;gap:0.3rem">'
                     + '<div style="flex:1;height:4px;background:var(--border);border-radius:2px">'
                     + '<div style="height:100%;width:' + pct + '%;background:var(--accent);border-radius:2px"></div></div>'
-                    + '<span style="font-size:0.65rem;color:var(--dim)">' + (hyp.score || 0).toFixed(2) + '</span></div></td>'
-                    + '<td>' + (hyp.supportingEvidence != null ? hyp.supportingEvidence.size : '-') + '</td>'
-                    + '<td>' + (hyp.counterEvidence != null ? hyp.counterEvidence.size : '-') + '</td>'
-                    + '<td>' + (hyp.contradictions != null ? hyp.contradictions.size : '-') + '</td>'
+                    + '<span style="font-size:0.65rem;color:var(--dim)">' + score.toFixed(2) + '</span></div></td>'
+                    + '<td>' + supCount + '</td>'
+                    + '<td>' + cntCount + '</td>'
+                    + '<td>' + contraCount + '</td>'
                     + '</tr>';
             }
             hhtml += '</tbody></table>';

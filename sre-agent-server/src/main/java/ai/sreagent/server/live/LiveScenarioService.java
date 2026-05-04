@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * LLM/probe layers are advisory only and never mutate the RCA conclusion.
  */
 @Service
+// TODO：现在的secnarios都是hardcode在代码里面的，应该做进一步的抽象，类似规则引擎的fact和rules，这样才能cover更加通用的场景
 public class LiveScenarioService {
 
     private static final Logger log = LoggerFactory.getLogger(LiveScenarioService.class);
@@ -99,10 +100,10 @@ public class LiveScenarioService {
             allEvidence.addAll(orderReport.allEvidence());
             allEvidence.addAll(paymentReport.allEvidence());
 
-            // Build merged report
+            // Build merged report — merge source reports by combining counts
             Map<String, LiveEvidenceReport.SourceReport> mergedSources = new LinkedHashMap<>();
-            mergedSources.putAll(orderReport.sources());
-            mergedSources.putAll(paymentReport.sources());
+            mergeSourceReports(mergedSources, orderReport.sources());
+            mergeSourceReports(mergedSources, paymentReport.sources());
             List<String> allWarnings = new ArrayList<>();
             allWarnings.addAll(orderReport.warnings());
             allWarnings.addAll(paymentReport.warnings());
@@ -190,6 +191,33 @@ public class LiveScenarioService {
      */
     public void resetFaults() {
         demoClient.setAllFaultConfig(Map.of("mode", "normal"));
+    }
+
+    private void mergeSourceReports(Map<String, LiveEvidenceReport.SourceReport> target,
+                                     Map<String, LiveEvidenceReport.SourceReport> source) {
+        for (var entry : source.entrySet()) {
+            String key = entry.getKey();
+            LiveEvidenceReport.SourceReport incoming = entry.getValue();
+            LiveEvidenceReport.SourceReport existing = target.get(key);
+            if (existing == null) {
+                target.put(key, incoming);
+            } else {
+                // Merge: combine evidence counts, preserve availability, merge evidence types
+                List<String> mergedTypes = new ArrayList<>(existing.evidenceTypes());
+                for (String t : incoming.evidenceTypes()) {
+                    if (!mergedTypes.contains(t)) {
+                        mergedTypes.add(t);
+                    }
+                }
+                target.put(key, new LiveEvidenceReport.SourceReport(
+                        key,
+                        existing.available() || incoming.available(),
+                        existing.evidenceCount() + incoming.evidenceCount(),
+                        List.copyOf(mergedTypes),
+                        existing.error() != null ? existing.error() : incoming.error()
+                ));
+            }
+        }
     }
 
     private void injectFault(String faultMode, Map<String, Object> params) {
