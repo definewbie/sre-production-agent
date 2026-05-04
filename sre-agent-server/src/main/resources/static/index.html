@@ -270,10 +270,136 @@ body {
 .llm-text { font-size: 0.75rem; line-height: 1.6; white-space: pre-wrap; }
 .llm-advisory { margin-top: 0.6rem; font-size: 0.55rem; color: var(--yellow); opacity: 0.8; line-height: 1.4; padding-top: 0.4rem; border-top: 1px solid rgba(234,179,8,0.15); }
 
-/* ---- Responsive ---- */
+/* ---- Demo Services ---- */
+.demo-topo-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.72rem;
+    line-height: 1.7;
+    color: var(--dim);
+    white-space: pre;
+    overflow-x: auto;
+}
+.demo-topo-box .topo-svc { color: var(--text); font-weight: 600; }
+.demo-topo-box .topo-endpoint { color: var(--blue); }
+.demo-topo-box .topo-arrow { color: var(--dim); }
+
+.demo-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+.demo-svc-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    position: relative;
+}
+.demo-svc-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 0.15rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.demo-health-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.demo-health-dot.healthy { background: var(--green); }
+.demo-health-dot.faulted { background: var(--red); }
+.demo-health-dot.unknown { background: var(--dim); }
+
+.demo-svc-url {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.65rem;
+    color: var(--blue);
+    margin-bottom: 0.5rem;
+    word-break: break-all;
+}
+.demo-fault-config {
+    font-size: 0.65rem;
+    color: var(--dim);
+    line-height: 1.6;
+}
+.demo-fault-config span {
+    color: var(--text);
+    font-weight: 500;
+}
+.demo-svc-ts {
+    font-size: 0.55rem;
+    color: var(--dim);
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.demo-btn-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+}
+.demo-btn {
+    padding: 0.45rem 0.9rem;
+    border-radius: 5px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1px solid transparent;
+}
+.demo-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.demo-btn-green { background: rgba(34,197,94,0.15); color: var(--green); border-color: rgba(34,197,94,0.3); }
+.demo-btn-green:hover:not(:disabled) { background: rgba(34,197,94,0.25); }
+.demo-btn-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); border-color: rgba(234,179,8,0.3); }
+.demo-btn-yellow:hover:not(:disabled) { background: rgba(234,179,8,0.25); }
+.demo-btn-red { background: rgba(239,68,68,0.15); color: var(--red); border-color: rgba(239,68,68,0.3); }
+.demo-btn-red:hover:not(:disabled) { background: rgba(239,68,68,0.25); }
+.demo-btn-blue { background: rgba(59,130,246,0.15); color: var(--blue); border-color: rgba(59,130,246,0.3); }
+.demo-btn-blue:hover:not(:disabled) { background: rgba(59,130,246,0.25); }
+.demo-btn-orange { background: rgba(249,115,22,0.15); color: var(--accent); border-color: rgba(249,115,22,0.3); }
+.demo-btn-orange:hover:not(:disabled) { background: rgba(249,115,22,0.25); }
+
+.demo-log-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    max-height: 180px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.65rem;
+    line-height: 1.6;
+    margin-top: 0.5rem;
+}
+.demo-log-entry {
+    padding: 0.15rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.demo-log-entry:last-child { border-bottom: none; }
+.demo-log-ts { color: var(--dim); }
+.demo-log-msg { color: var(--text); }
+.demo-log-msg.log-ok { color: var(--green); }
+.demo-log-msg.log-warn { color: var(--yellow); }
+.demo-log-msg.log-err { color: var(--red); }
+.demo-log-empty { color: var(--dim); font-style: italic; }
+
 @media (max-width: 768px) {
     .sidebar { width: 200px; }
     .header-badges { display: none; }
+    .demo-cards { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -291,6 +417,7 @@ body {
         <span class="badge badge-llm">LLM Advisory</span>
         <span class="badge badge-static">Static Evidence</span>
         <button id="labStatusBtn" onclick="toggleLabStatus()" style="margin-left:0.8rem;padding:0.25rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--fg);border-radius:4px;cursor:pointer;font-size:0.7rem">Lab Status</button>
+        <button id="demoServicesBtn" onclick="toggleDemoServices()" style="margin-left:0.4rem;padding:0.25rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--fg);border-radius:4px;cursor:pointer;font-size:0.7rem">Demo Services</button>
     </div>
 </div>
 
@@ -496,6 +623,70 @@ body {
                 </div>
                 <div class="tab-guard">Endpoint health checks require port-forward to be running. See <code>make observability-port-forward</code>.</div>
             </div>
+        </div>
+
+        <!-- Demo Services Page -->
+        <div id="demoServicesSection" style="display:none">
+
+            <!-- Topology Visualization -->
+            <div class="card" style="margin-bottom:0.8rem">
+                <div class="card-label">Service Topology</div>
+                <div class="demo-topo-box" id="demoTopoBox"><span class="topo-svc">client</span> / traffic-generator
+        <span class="topo-arrow">        ↓</span>
+<span class="topo-svc">order-service</span> <span class="topo-endpoint">/checkout</span>
+        <span class="topo-arrow">├──</span> <span class="topo-svc">payment-service</span> <span class="topo-endpoint">/charge</span>
+        <span class="topo-arrow">└──</span> <span class="topo-svc">inventory-service</span> <span class="topo-endpoint">/reserve</span></div>
+            </div>
+
+            <!-- Service Status Cards -->
+            <div class="card" style="margin-bottom:0.8rem">
+                <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+                    <span>Service Status</span>
+                    <span id="demoOverallStatus" style="font-size:0.6rem;color:var(--dim);font-weight:400"></span>
+                </div>
+                <div class="demo-cards" id="demoSvcCards">
+                    <div class="demo-svc-card" id="demoCard-order-service">
+                        <div class="demo-svc-name"><span class="demo-health-dot unknown"></span> order-service</div>
+                        <div class="demo-svc-url">—</div>
+                        <div class="demo-fault-config">mode: <span>—</span><br>latency: <span>—</span><br>error rate: <span>—</span></div>
+                        <div class="demo-svc-ts">—</div>
+                    </div>
+                    <div class="demo-svc-card" id="demoCard-payment-service">
+                        <div class="demo-svc-name"><span class="demo-health-dot unknown"></span> payment-service</div>
+                        <div class="demo-svc-url">—</div>
+                        <div class="demo-fault-config">mode: <span>—</span><br>latency: <span>—</span><br>error rate: <span>—</span></div>
+                        <div class="demo-svc-ts">—</div>
+                    </div>
+                    <div class="demo-svc-card" id="demoCard-inventory-service">
+                        <div class="demo-svc-name"><span class="demo-health-dot unknown"></span> inventory-service</div>
+                        <div class="demo-svc-url">—</div>
+                        <div class="demo-fault-config">mode: <span>—</span><br>latency: <span>—</span><br>error rate: <span>—</span></div>
+                        <div class="demo-svc-ts">—</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fault Injection Controls -->
+            <div class="card" style="margin-bottom:0.8rem">
+                <div class="card-label">Fault Injection Controls</div>
+                <div class="demo-btn-row">
+                    <button class="demo-btn demo-btn-green" id="demoBtnNormal" onclick="demoFaultAction('normal')">Set Normal</button>
+                    <button class="demo-btn demo-btn-yellow" id="demoBtnLatency" onclick="demoFaultAction('latency')">Inject Payment Latency</button>
+                    <button class="demo-btn demo-btn-red" id="demoBtnError" onclick="demoFaultAction('error')">Inject Payment Error</button>
+                    <button class="demo-btn demo-btn-red" id="demoBtnTimeout" onclick="demoFaultAction('timeout')">Inject Payment Timeout</button>
+                    <button class="demo-btn demo-btn-blue" id="demoBtnRefresh" onclick="loadDemoServicesStatus()">Refresh Status</button>
+                    <button class="demo-btn demo-btn-orange" id="demoBtnTraffic" onclick="demoFaultAction('traffic')">Generate Test Traffic</button>
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="card">
+                <div class="card-label">Activity Log</div>
+                <div class="demo-log-box" id="demoActivityLog">
+                    <div class="demo-log-empty">No activity yet</div>
+                </div>
+            </div>
+
         </div>
 
     </div>
@@ -890,6 +1081,9 @@ function toggleLabStatus() {
     var btn = document.getElementById('labStatusBtn');
     var workspace = document.getElementById('workspace');
     if (labStatusVisible) {
+        // If demo services is open, close it first
+        if (demoServicesVisible) { toggleDemoServices(); }
+
         section.style.display = '';
         btn.style.background = 'var(--blue)';
         btn.style.color = '#fff';
@@ -954,6 +1148,215 @@ function statusColor(s) {
     if (s === 'partial') return '#f59e0b';
     if (s === 'disconnected' || s === 'down') return '#ef4444';
     return '#6b7280';
+}
+
+/* ---- Demo Services Page ---- */
+var demoServicesVisible = false;
+var demoRefreshTimer = null;
+var demoLogEntries = [];
+
+function toggleDemoServices() {
+    demoServicesVisible = !demoServicesVisible;
+    var section = document.getElementById('demoServicesSection');
+    var btn = document.getElementById('demoServicesBtn');
+    var workspace = document.getElementById('workspace');
+
+    if (demoServicesVisible) {
+        // If lab status is open, close it first
+        if (labStatusVisible) { toggleLabStatus(); }
+
+        section.style.display = '';
+        btn.style.background = 'var(--accent)';
+        btn.style.color = '#fff';
+        btn.style.borderColor = 'var(--accent)';
+
+        // hide investigation cards
+        var cards = workspace.querySelectorAll('.card, .tabs-card, .progress-card, .decision-card, .hyp-card');
+        for (var i = 0; i < cards.length; i++) {
+            var c = cards[i];
+            if (c.id !== 'demoServicesSection' && c.parentNode && c.parentNode.id !== 'demoServicesSection') {
+                c.style.display = 'none';
+            }
+        }
+
+        loadDemoServicesStatus();
+        // auto-refresh every 10 seconds
+        if (demoRefreshTimer) clearInterval(demoRefreshTimer);
+        demoRefreshTimer = setInterval(function() {
+            if (demoServicesVisible) loadDemoServicesStatus();
+        }, 10000);
+    } else {
+        section.style.display = 'none';
+        btn.style.background = 'var(--surface)';
+        btn.style.color = 'var(--fg)';
+        btn.style.borderColor = 'var(--border)';
+
+        // restore investigation cards
+        var cards = workspace.querySelectorAll('.card, .tabs-card, .progress-card, .decision-card, .hyp-card');
+        for (var i = 0; i < cards.length; i++) {
+            var c = cards[i];
+            if (c.id !== 'demoServicesSection' && c.parentNode && c.parentNode.id !== 'demoServicesSection') {
+                c.style.display = '';
+            }
+        }
+        document.getElementById('probeCard').style.display = 'none';
+
+        if (demoRefreshTimer) { clearInterval(demoRefreshTimer); demoRefreshTimer = null; }
+    }
+}
+
+function loadDemoServicesStatus() {
+    var overallEl = document.getElementById('demoOverallStatus');
+    overallEl.textContent = 'Loading...';
+
+    fetch('/api/demo-services/status')
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function(data) {
+            var services = data.services || [];
+            var allHealthy = true;
+
+            for (var i = 0; i < services.length; i++) {
+                var svc = services[i];
+                var cardId = 'demoCard-' + svc.name;
+                var card = document.getElementById(cardId);
+                if (!card) continue;
+
+                var healthy = svc.healthy !== false;
+                if (!healthy) allHealthy = false;
+
+                // health dot
+                var dot = card.querySelector('.demo-health-dot');
+                dot.className = 'demo-health-dot ' + (healthy ? 'healthy' : 'faulted');
+
+                // URL
+                var urlEl = card.querySelector('.demo-svc-url');
+                urlEl.textContent = svc.url || svc.portForwardUrl || '—';
+
+                // fault config
+                var fault = svc.faultConfig || {};
+                var faultEl = card.querySelector('.demo-fault-config');
+                var mode = fault.mode || 'normal';
+                var latency = fault.latencyMs != null ? fault.latencyMs + 'ms' : '—';
+                var errorRate = fault.errorRate != null ? (fault.errorRate * 100) + '%' : '—';
+                faultEl.innerHTML = 'mode: <span>' + mode + '</span><br>'
+                    + 'latency: <span>' + latency + '</span><br>'
+                    + 'error rate: <span>' + errorRate + '</span>';
+
+                // timestamp
+                var tsEl = card.querySelector('.demo-svc-ts');
+                tsEl.textContent = 'Last refreshed: ' + (data.checkedAt || new Date().toISOString());
+            }
+
+            // update overall status
+            var statusText = allHealthy ? 'ALL HEALTHY' : 'FAULT INJECTED';
+            var statusColor = allHealthy ? 'var(--green)' : 'var(--red)';
+            overallEl.innerHTML = '<span style="color:' + statusColor + ';font-weight:600">' + statusText + '</span>'
+                + ' &middot; ' + services.length + ' services';
+        })
+        .catch(function(err) {
+            overallEl.innerHTML = '<span style="color:var(--red);font-weight:600">DISCONNECTED</span>';
+
+            // show disconnected state on all cards
+            var svcNames = ['order-service', 'payment-service', 'inventory-service'];
+            for (var i = 0; i < svcNames.length; i++) {
+                var card = document.getElementById('demoCard-' + svcNames[i]);
+                if (!card) continue;
+                var dot = card.querySelector('.demo-health-dot');
+                dot.className = 'demo-health-dot unknown';
+                var urlEl = card.querySelector('.demo-svc-url');
+                urlEl.textContent = 'Disconnected';
+                var faultEl = card.querySelector('.demo-fault-config');
+                faultEl.innerHTML = 'mode: <span>—</span><br>latency: <span>—</span><br>error rate: <span>—</span>';
+                var tsEl = card.querySelector('.demo-svc-ts');
+                tsEl.textContent = 'Unable to reach server';
+            }
+
+            demoLog('Failed to fetch status: ' + (err.message || 'unknown'), 'err');
+        });
+}
+
+function demoFaultAction(action) {
+    var endpoint;
+    var logMsg;
+    var logLevel = 'ok';
+
+    if (action === 'normal') {
+        endpoint = '/api/demo-services/fault/normal';
+        logMsg = 'Set all services to NORMAL mode';
+        logLevel = 'ok';
+    } else if (action === 'latency') {
+        endpoint = '/api/demo-services/fault/payment-latency';
+        logMsg = 'Injected LATENCY into payment-service';
+        logLevel = 'warn';
+    } else if (action === 'error') {
+        endpoint = '/api/demo-services/fault/payment-error';
+        logMsg = 'Injected ERROR into payment-service';
+        logLevel = 'err';
+    } else if (action === 'timeout') {
+        endpoint = '/api/demo-services/fault/payment-timeout';
+        logMsg = 'Injected TIMEOUT into payment-service';
+        logLevel = 'err';
+    } else if (action === 'traffic') {
+        endpoint = '/api/demo-services/traffic';
+        logMsg = 'Generating test traffic...';
+        logLevel = 'ok';
+    } else {
+        return;
+    }
+
+    // disable buttons during request
+    var buttons = document.querySelectorAll('.demo-btn');
+    for (var i = 0; i < buttons.length; i++) { buttons[i].disabled = true; }
+
+    demoLog(logMsg + ' (requesting...)', logLevel);
+
+    fetch(endpoint, { method: 'POST' })
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function(data) {
+            var resultMsg = data.message || data.status || 'OK';
+            demoLog(logMsg + ' → ' + resultMsg, logLevel);
+            // refresh status after fault change
+            loadDemoServicesStatus();
+        })
+        .catch(function(err) {
+            demoLog(logMsg + ' → FAILED: ' + (err.message || 'unknown'), 'err');
+        })
+        .finally(function() {
+            for (var i = 0; i < buttons.length; i++) { buttons[i].disabled = false; }
+        });
+}
+
+function demoLog(msg, level) {
+    var logBox = document.getElementById('demoActivityLog');
+    var now = new Date();
+    var ts = now.toISOString().substring(11, 19);
+    var cls = 'demo-log-msg';
+    if (level === 'ok') cls += ' log-ok';
+    else if (level === 'warn') cls += ' log-warn';
+    else if (level === 'err') cls += ' log-err';
+
+    var entry = document.createElement('div');
+    entry.className = 'demo-log-entry';
+    entry.innerHTML = '<span class="demo-log-ts">[' + ts + ']</span> <span class="' + cls + '">' + msg + '</span>';
+
+    // remove empty placeholder if present
+    var empty = logBox.querySelector('.demo-log-empty');
+    if (empty) empty.remove();
+
+    logBox.appendChild(entry);
+    logBox.scrollTop = logBox.scrollHeight;
+
+    // keep max 100 entries
+    var entries = logBox.querySelectorAll('.demo-log-entry');
+    if (entries.length > 100) {
+        entries[0].remove();
+    }
 }
 </script>
 </body>

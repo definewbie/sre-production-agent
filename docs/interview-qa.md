@@ -415,6 +415,51 @@ This matters for three reasons:
 **Important:** Step T does NOT deploy demo services or inject faults — that's Step U and Step V. Step T focuses purely on observability stack lifecycle management and health visibility.
 
 ---
+
+## Q31: Why is `demo-services` a separate Maven module instead of part of `sre-agent-server`?
+
+Three reasons:
+
+1. **Separation of concerns.** `demo-services` are target services that the SRE agent investigates — they are NOT part of the RCA pipeline. Mixing them into `sre-agent-server` would conflate "the system being monitored" with "the system doing the monitoring," violating the hexagonal architecture boundary.
+
+2. **Independent lifecycle.** Demo services are built into Docker images and deployed to a kind cluster. The SRE agent runs as a Java process. They have completely different build, test, and deploy cycles. A separate Maven module means `mvn -pl demo-services package docker:build` doesn't trigger the entire agent build.
+
+3. **Interview signal.** This demonstrates understanding that infrastructure/validate tooling should be isolated from production code. In real SRE orgs, synthetic test services and canary deployments follow the same pattern — separate repositories or modules.
+
+---
+
+## Q32: How does fault injection work in the demo services, and why is it runtime-controlled?
+
+Fault injection is triggered via REST API calls to the SRE agent server:
+
+- `POST /api/demo-services/fault/payment-latency` — injects 1500ms artificial latency into the `payment-service` endpoint
+- `POST /api/demo-services/fault/clear` — clears all injected faults
+
+Internally, the `payment-service` has a `FaultInjectionController` that toggles a thread-local boolean. When the fault flag is active, the service's `PaymentController` adds a `Thread.sleep()` before processing. Prometheus scrapes the elevated latency, and the SRE agent's `PrometheusEvidenceProvider` picks it up as real metric evidence.
+
+It's runtime-controlled (not code-change-based) because:
+
+1. **Demo flow.** During an interview demo, you can show normal traffic → inject fault → agent detects anomaly → clear fault → recovery, all without restarting anything.
+2. **Repeatability.** Tests can inject and clear faults programmatically, enabling deterministic end-to-end RCA validation.
+3. **No source modification.** The agent codebase stays untouched — fault injection is an external stimulus, just like a real production incident.
+
+---
+
+## Q33: How do the demo services connect to the SRE agent's evidence pipeline?
+
+The demo services form a three-tier microservice topology: `order-service` calls both `payment-service` and `inventory-service`. All three expose Micrometer metrics at `/actuator/prometheus`, which are scraped by the Prometheus instance running in the kind cluster.
+
+The connection works in three steps:
+
+1. **Metrics collection.** Prometheus scrapes all demo services every 15 seconds. When `payment-service` has injected latency, the `http_server_requests_seconds` metric shows elevated p99 values.
+
+2. **Evidence extraction.** The SRE agent's `PrometheusEvidenceProvider` queries Prometheus (via `PrometheusQueryClient`) using PromQL like `histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{service="payment-service"}[5m]))`. This returns real metric evidence — not fixtures.
+
+3. **RCA pipeline.** The real metric evidence enters the standard `InvestigationWorkflow`: collected → scored against diagnostic patterns → compared → decision made. The agent doesn't know or care that the metrics came from demo services vs. production services — the `EvidenceProvider` interface abstracts the source.
+
+This is the critical bridge: Step T provided the observability stack (Prometheus, Grafana), and Step U provides the target services that generate observable telemetry. Together they enable end-to-end RCA validation with real metrics, not just static JSON fixtures.
+
+---
 ## 中文版
 
 ## Q1: 这和一个日志聊天机器人有什么区别？
@@ -830,3 +875,48 @@ Live Lab Status 页面（通过页面头部的 "Lab Status" 按钮切换）显�
 3. **连接基础设施与应用。** Step T 的脚本（`scripts/observability/`）管理基础设施（Helm 安装、端口转发），状态页面将基础设施状态反映回应用程序中。这展示了 SRE 和平台工程角色所需的全面思考能力。
 
 **重要提示：** Step T 不部署演示服务或注入故障——那是 Step U 和 Step V 的工作。Step T 专注于可观测性栈生命周期管理和健康可见性。
+
+---
+
+## Q31：为什么 `demo-services` 是独立的 Maven 模块，而不是 `sre-agent-server` 的一部分？
+
+三个原因：
+
+1. **关注点分离。** `demo-services` 是 SRE agent 调查的目标服务——它们不是 RCA 管道的一部分。将它们混入 `sre-agent-server` 会混淆"被监控系统"和"执行监控系统"，违反六边形架构边界。
+
+2. **独立生命周期。** 演示服务构建为 Docker 镜像并部署到 kind 集群。SRE agent 作为 Java 进程运行。它们有完全不同的构建、测试和部署周期。独立的 Maven 模块意味着 `mvn -pl demo-services package docker:build` 不会触发整个 agent 构建。
+
+3. **面试信号。** 这展示了对基础设施/验证工具应与生产代码隔离的理解。在真实的 SRE 组织中，合成测试服务和金丝雀部署遵循相同的模式——独立的仓库或模块。
+
+---
+
+## Q32：演示服务中的故障注入如何工作？为什么是运行时控制的？
+
+故障注入通过 REST API 调用 SRE agent server 触发：
+
+- `POST /api/demo-services/fault/payment-latency` — 在 `payment-service` 端点注入 1500ms 人工延迟
+- `POST /api/demo-services/fault/clear` — 清除所有注入的故障
+
+内部实现上，`payment-service` 有一个 `FaultInjectionController`，切换线程局部布尔标志。当故障标志激活时，服务的 `PaymentController` 在处理前添加 `Thread.sleep()`。Prometheus 抓取到升高的延迟，SRE agent 的 `PrometheusEvidenceProvider` 将其作为真实的指标证据收集。
+
+采用运行时控制（而非代码修改）的原因：
+
+1. **演示流程。** 在面试演示中，你可以展示正常流量 → 注入故障 → agent 检测异常 → 清除故障 → 恢复，全程无需重启任何东西。
+2. **可重复性。** 测试可以编程方式注入和清除故障，实现确定性的端到端 RCA 验证。
+3. **不修改源码。** agent 代码库保持不变——故障注入是外部刺激，就像真实的生产事故一样。
+
+---
+
+## Q33：演示服务如何连接到 SRE agent 的证据管道？
+
+演示服务形成三层微服务拓扑：`order-service` 同时调用 `payment-service` 和 `inventory-service`。所有三个服务通过 `/actuator/prometheus` 暴露 Micrometer 指标，由 kind 集群中的 Prometheus 实例抓取。
+
+连接分三步工作：
+
+1. **指标收集。** Prometheus 每 15 秒抓取所有演示服务。当 `payment-service` 有注入延迟时，`http_server_requests_seconds` 指标显示升高的 p99 值。
+
+2. **证据提取。** SRE agent 的 `PrometheusEvidenceProvider` 通过 `PrometheusQueryClient` 使用 PromQL 查询 Prometheus，如 `histogram_quantile(0.99, rate(http_server_requests_seconds_bucket{service="payment-service"}[5m]))`。这返回真实的指标证据——而非 fixture。
+
+3. **RCA 管道。** 真实的指标证据进入标准的 `InvestigationWorkflow`：收集 → 对照诊断模式评分 → 比较 → 做出决策。agent 不知道也不关心指标来自演示服务还是生产服务——`EvidenceProvider` 接口抽象了来源。
+
+这是关键的桥梁：Step T 提供了可观测性栈（Prometheus、Grafana），Step U 提供了生成可观测遥测数据的目标服务。两者结合实现了使用真实指标（而非静态 JSON fixture）的端到端 RCA 验证。

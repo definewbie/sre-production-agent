@@ -343,6 +343,43 @@ Step T adds an observability status service with health checking, local stack ma
 
 ---
 
+## Instrumented Demo Services (Step U)
+
+Step U adds **instrumented demo microservices** to the local kind lab, producing real metrics, logs, and traces with controllable fault injection.
+
+**Service topology:**
+```
+client / traffic-generator
+        ↓
+order-service /checkout
+        ├── payment-service /charge
+        └── inventory-service /reserve
+```
+
+Each service is a Spring Boot app with:
+- **Metrics**: Micrometer Prometheus at `/actuator/prometheus`
+- **Logs**: Structured stdout for Promtail → Loki
+- **Traces**: OpenTelemetry → Jaeger
+- **Fault injection**: In-memory `FaultConfig` via `POST /fault-config`
+
+Fault modes: `normal`, `latency`, `error`, `timeout`, `mixed`
+
+```bash
+make demo-build-images
+make demo-load-images
+make demo-services-install
+make demo-services-port-forward
+make demo-fault-payment-latency  # inject 1500ms latency
+```
+
+**Server API**: `GET /api/demo-services/status`, `POST /api/demo-services/fault/*`
+
+**UI**: "Demo Services" page with topology visualization, service status cards, and fault injection controls.
+
+**41 new tests** across demo services and server (548 total, up from 507, 0 failures)
+
+---
+
 ## LLM Hypothesis Proposer (Step R)
 
 Step R adds an **LLM Hypothesis Proposer** to the `sre-agent-llm` module that generates advisory hypothesis proposals when the deterministic RCA workflow produces inconclusive results. This bridges the gap between deterministic investigation and AI-assisted exploration.
@@ -437,11 +474,13 @@ java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar
 | `sre-agent-probe-executor` | Probe execution framework — routes LLM ProbeIntents to evidence providers, collects informational Evidence | **None** |
 | `sre-agent-llm` | LLM report synthesis + Hypothesis Proposer (MockLlmClient, prompt building, report enhancement, advisory hypothesis proposals) | **None** |
 | `sre-agent-cli` | Command-line adapter (Picocli) | None |
+| `demo-services` | Instrumented demo microservices (order/payment/inventory) for fault injection | Spring Boot 3.x |
 | `sre-agent-server` | Spring Boot REST API + Web UI | Spring Boot 3.x |
 
 - **Evidence Taxonomy (core)**: Provider-agnostic normalized evidence model with category, signal, source kind, severity, and causal role classification
 
-**Key constraint:** `sre-agent-core`, `sre-agent-k8s-provider`, `sre-agent-prometheus-provider`, `sre-agent-loki-provider`, `sre-agent-alertmanager-provider`, `sre-agent-trace-provider`, `sre-agent-probe-executor`, and `sre-agent-llm` have zero Spring dependency. `sre-agent-k8s-provider` supports three evidence modes: fixture-based (unit tests), live kubectl (local demo), and Kubernetes Java Client (production-grade API client). `sre-agent-prometheus-provider`, `sre-agent-loki-provider`, `sre-agent-alertmanager-provider`, and `sre-agent-trace-provider` each support two evidence modes: fixture-based (unit tests/CI) and HTTP client (production). The workflow is pure Java. CLI and Server are thin adapters that call the same `InvestigationWorkflow`. The LLM module is optional — it enhances reports with AI-synthesized narratives and generates advisory hypothesis proposals while respecting guardrails (no auto-action, no data exfiltration, no RCA decision override).
+**Key constraint:** `sre-agent-core`, `sre-agent-k8s-provider`, `sre-agent-prometheus-provider`, `sre-agent-loki-provider`, `sre-agent-alertmanager-provider`, `sre-agent-trace-provider`, `sre-agent-probe-executor`, and `sre-agent-llm` have zero Spring dependency. `sre-agent-k8s-provider` supports three evidence modes: fixture-based (unit tests), live kubectl (local demo), and Kubernetes Java Client (production-grade API client). `sre-agent-prometheus-provider`, `sre-agent-loki-provider`, `sre-agent-alertmanager-provider`, and `sre-agent-trace-provider` each support two evidence modes:
+fixture-based (unit tests/CI) and HTTP client (production). `demo-services` provides 3 instrumented Spring Boot microservices (order-service, payment-service, inventory-service) for local fault injection and observability validation. The workflow is pure Java. CLI and Server are thin adapters that call the same `InvestigationWorkflow`. The LLM module is optional — it enhances reports with AI-synthesized narratives and generates advisory hypothesis proposals while respecting guardrails (no auto-action, no data exfiltration, no RCA decision override).
 
 ---
 
@@ -458,7 +497,7 @@ java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar
 mvn test
 ```
 
-Expected: 484 tests passing.
+Expected: 548 tests passing.
 
 ### Run CLI Demo
 
@@ -613,7 +652,7 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven multi-module
 - Jackson (JSON serialization)
 - Picocli (CLI framework)
-- JUnit 5 + AssertJ (507 tests)
+- JUnit 5 + AssertJ (548 tests)
 - Static HTML + vanilla JS (minimal Web UI)
 
 ---
@@ -716,6 +755,11 @@ sre-production-agent/
 │       └── mapper/                  # 5 provider mappers (Prometheus, Loki, Trace, K8s, Alertmanager)
 ├── k8s/
 │   ├── demo-services/recommend-crashloop-demo.yaml
+│   ├── demo-services/order-service.yaml
+│   ├── demo-services/payment-service.yaml
+│   ├── demo-services/inventory-service.yaml
+│   ├── demo-services/traffic-generator.yaml
+│   └── demo-services/servicemonitors.yaml
 │   └── rbac/sre-agent-reader.yaml
 ├── sre-agent-llm/                   # LLM report synthesis (optional)
 │   ├── pom.xml
@@ -736,7 +780,8 @@ sre-production-agent/
         ├── controller/              # HealthController, InvestigationController, ObservabilityStatusController
         └── service/                 # InvestigationService, InvestigationResponse, InMemoryInvestigationStore, ObservabilityStatusService
 ├── scripts/
-│   └── observability/              # Helm values + install/uninstall/port-forward/check scripts
+│   ├── observability/              # Helm values + install/uninstall/port-forward/check scripts
+│   └── demo-services/              # Build/load/deploy/port-forward/check/traffic scripts
 ```
 
 ---
@@ -767,6 +812,7 @@ See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 ||| R | LLM Hypothesis Proposer — sre-agent-llm | ✅ Done |
 ||| S | Probe Execution Framework v1 — sre-agent-probe-executor | ✅ Done |
 ||| T | Local Observability Stack — health checking + stack management + Live Lab Status UI | ✅ Done |
+||| U | Instrumented Demo Services — fault injection + real metrics/logs/traces | ✅ Done |
 ||| U | Instrumented Demo Services | 🔲 Upcoming |
 ||| V | Complex Live RCA Scenarios | 🔲 Upcoming |
 ||| W | Post-Probe RCA Re-run Policy | 🔲 Upcoming |
@@ -1010,9 +1056,10 @@ java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar
 | `sre-agent-loki-provider` | Loki 日志证据提供器（Fixture + HTTP 客户端）— 超时错误、异常爆发、OOM 消息 | **无** |
 | `sre-agent-alertmanager-provider` | Alertmanager 告警证据提供器（Fixture + HTTP）— 告警生命周期、事件映射 | **无** |
 | `sre-agent-trace-provider` | 分布式追踪证据提供器（Fixture + HTTP）— span 延迟、错误 span、服务依赖 | **无** |
-| `sre-agent-llm` | LLM 报告综合（MockLlmClient、提示词构建、报告增强） | **无** |
-| `sre-agent-cli` | 命令行适配器（Picocli） | 无 |
-| `sre-agent-server` | Spring Boot REST API + Web UI | Spring Boot 3.x |
+|| `sre-agent-llm` | LLM 报告综合（MockLlmClient、提示词构建、报告增强） | **无** |
+|| `sre-agent-cli` | 命令行适配器（Picocli） | 无 |
+|| `demo-services` | 仪表化演示微服务（order/payment/inventory）用于故障注入 | Spring Boot 3.x |
+|| `sre-agent-server` | Spring Boot REST API + Web UI | Spring Boot 3.x |
 
 - **证据分类体系（core）**: Provider-agnostic 归一化证据模型，包含 category/signal/sourceKind/severity/causalRole 分类
 
@@ -1033,7 +1080,7 @@ java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar
 mvn test
 ```
 
-预期结果：507 个测试全部通过。
+预期结果：548 个测试全部通过。
 
 ### 运行 CLI 演示
 
@@ -1188,7 +1235,7 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven 多模块
 - Jackson（JSON 序列化）
 - Picocli（CLI 框架）
-- JUnit 5 + AssertJ（507 个测试）
+- JUnit 5 + AssertJ（548 个测试）
 - 静态 HTML + 原生 JS（轻量 Web UI）
 
 ---
@@ -1291,6 +1338,11 @@ sre-production-agent/
 │       └── mapper/                  # 5 provider mappers (Prometheus, Loki, Trace, K8s, Alertmanager)
 ├── k8s/
 │   ├── demo-services/recommend-crashloop-demo.yaml
+│   ├── demo-services/order-service.yaml
+│   ├── demo-services/payment-service.yaml
+│   ├── demo-services/inventory-service.yaml
+│   ├── demo-services/traffic-generator.yaml
+│   └── demo-services/servicemonitors.yaml
 │   └── rbac/sre-agent-reader.yaml
 ├── sre-agent-llm/                   # LLM 报告综合（可选）
 │   ├── pom.xml
@@ -1342,6 +1394,7 @@ sre-production-agent/
 ||| R | LLM 假设提议器 — sre-agent-llm | ✅ 已完成 |
 ||| S | 探测执行框架 v1 — sre-agent-probe-executor | ✅ 已完成 |
 ||| T | 本地可观测性栈（健康检查 + 栈管理 + Live Lab Status UI） | ✅ 已完成 |
+||| U | 示例微服务（故障注入 + 真实指标/日志/链路追踪） | ✅ 已完成 |
 ||| U | 示例微服务（instrumented demo services） | 🔲 待开始 |
 ||| V | 复杂实时 RCA 场景 | 🔲 待开始 |
 ||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |

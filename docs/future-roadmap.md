@@ -4,8 +4,8 @@
 
 || Target Role | Priority Step | Reason |
 |---|---|---|
-||| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → Step U: Instrumented Demo Services | Demonstrates principled LLM + evidence + probe integration |
-||| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → Step U: Instrumented Demo Services | Demonstrates full observability pipeline |
+|| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → Step V: Complex Live RCA | Demonstrates principled LLM + evidence + probe integration |
+|| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → Step V: Complex Live RCA | Demonstrates full observability pipeline |
 || Engineering Manager / Architect | Polish architecture narrative | Demonstrates design trade-off reasoning |
 
 ---
@@ -401,7 +401,42 @@ List<Evidence> (source = "trace")
 
 **Test breakdown:** Core:124, LLM:51, K8s:48, Prometheus:43, Loki:30, Alertmanager:45, Trace:66, Server:23, CLI:15 (435 total, 0 failures)
 
-**Next step:** Step U — Instrumented Demo Services on kind
+**Next step:** Step V — Complex Live RCA with real observability data
+
+---
+
+## Step U: Instrumented Demo Services ✅ COMPLETED
+
+**Status:** Completed. Three instrumented Spring Boot microservices (order-service, payment-service, inventory-service) deployed to kind with Prometheus metrics, fault injection, and service topology visualization.
+
+**What was built:**
+- `demo-services` Maven module with 3 instrumented Spring Boot microservices
+- Kubernetes manifests: `k8s/demo-services/{order-service,payment-service,inventory-service,traffic-generator,servicemonitors}.yaml`
+- Shell scripts: `scripts/demo-services/` for build, load, deploy, port-forward, check, and traffic generation
+- Makefile targets: `demo-build-images`, `demo-load-images`, `demo-services-install`, `demo-services-port-forward`, `demo-services-status`, `demo-fault-payment-latency`, `demo-fault-clear`
+- REST API: `GET /api/demo-services/status`, `POST /api/demo-services/fault/*`
+- UI: "Demo Services" page with topology visualization, service status cards, and fault injection controls
+- Fault injection: latency injection on payment-service (1500ms), with live metric evidence collection
+
+**Architecture:**
+```
+Traffic Generator → order-service → payment-service
+                                  → inventory-service
+  ↓ (Prometheus scrapes all services)
+Prometheus → Grafana → SRE Agent evidence providers
+```
+
+**Key design decisions:**
+- Demo services are a separate Maven module (`demo-services`), not part of the RCA pipeline — they are infrastructure for validation
+- Fault injection is runtime-controlled via REST API, not code changes
+- Service topology is explicit: order-service calls both payment and inventory services
+- All services expose Prometheus metrics via Micrometer (`/actuator/prometheus`)
+
+**Why this matters:**
+- Provides real microservice topology for end-to-end RCA validation
+- Demonstrates fault injection without modifying the SRE agent codebase
+- Bridges the gap between static fixture evidence and live observability data
+- Foundation for Step V (Complex Live RCA) which will use real metric/log evidence from these services
 
 ---
 
@@ -535,8 +570,8 @@ These are not committed — listed for discussion only:
 
 | 目标岗位 | 优先步骤 | 原因 |
 |---|---|---|
-|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → Step U: 仪表化演示服务 | 展示了规范的 LLM + 证据 + 探测集成能力 |
-|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → Step U: 仪表化演示服务 | 展示了完整的可观测性流水线 |
+|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → Step V: 复杂实时 RCA | 展示了规范的 LLM + 证据 + 探测集成能力 |
+|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → Step V: 复杂实时 RCA | 展示了完整的可观测性流水线 |
 | 工程经理 / 架构师 | 完善架构叙事 | 展示了设计权衡推理能力 |
 
 ---
@@ -867,6 +902,41 @@ ObservabilityStatusResponse DTO (每个端点的状态)
 - 展示了 Spring Boot 服务层模式（接口 → 实现 → 控制器 → DTO）
 - 连接基础设施脚本和应用层健康感知的桥梁
 - 为 Step U（仪表化演示服务）奠定基础
+
+---
+
+## Step U: 仪表化演示服务 ✅ 已完成
+
+**状态：** 已完成。三个仪表化的 Spring Boot 微服务（order-service、payment-service、inventory-service）部署到 kind，支持 Prometheus 指标、故障注入和服务拓扑可视化。
+
+**已构建内容：**
+- `demo-services` Maven 模块，包含 3 个仪表化的 Spring Boot 微服务
+- Kubernetes 清单：`k8s/demo-services/{order-service,payment-service,inventory-service,traffic-generator,servicemonitors}.yaml`
+- Shell 脚本：`scripts/demo-services/`，用于构建、加载、部署、端口转发、检查和流量生成
+- Makefile 目标：`demo-build-images`、`demo-load-images`、`demo-services-install`、`demo-services-port-forward`、`demo-services-status`、`demo-fault-payment-latency`、`demo-fault-clear`
+- REST API：`GET /api/demo-services/status`、`POST /api/demo-services/fault/*`
+- UI："Demo Services" 页面，包含拓扑可视化、服务状态卡片和故障注入控制
+- 故障注入：在 payment-service 上注入延迟（1500ms），支持实时指标证据收集
+
+**架构：**
+```
+Traffic Generator → order-service → payment-service
+                                  → inventory-service
+  ↓（Prometheus 抓取所有服务）
+Prometheus → Grafana → SRE Agent 证据提供者
+```
+
+**关键设计决策：**
+- 演示服务是独立的 Maven 模块（`demo-services`），不属于 RCA 管道 — 它们是验证用的基础设施
+- 故障注入通过 REST API 运行时控制，无需代码变更
+- 服务拓扑明确：order-service 同时调用 payment 和 inventory 服务
+- 所有服务通过 Micrometer 暴露 Prometheus 指标（`/actuator/prometheus`）
+
+**重要性：**
+- 为端到端 RCA 验证提供真实的微服务拓扑
+- 演示了无需修改 SRE agent 代码库的故障注入
+- 连接了静态 fixture 证据和实时可观测性数据之间的鸿沟
+- 为 Step V（复杂实时 RCA）奠定基础，后者将使用来自这些服务的真实指标/日志证据
 
 ---
 

@@ -30,6 +30,7 @@
         <module>sre-agent-probe-executor</module>
         <module>sre-agent-server</module>
         <module>sre-agent-cli</module>
+        <module>demo-services</module>
     </modules>
 
     <properties>

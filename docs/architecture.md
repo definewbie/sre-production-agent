@@ -67,11 +67,11 @@ sre-production-agent (parent POM)
 ├── sre-agent-trace-provider        ← Depends on core, zero Spring (Distributed trace evidence)
 ├── sre-agent-probe-executor        ← Depends on core + llm, zero Spring (Probe execution framework)
 ├── sre-agent-cli                   ← Depends on core + llm + k8s-provider + prometheus-provider + loki-provider + alertmanager-provider + trace-provider + probe-executor, uses Picocli
-└── sre-agent-server                ← Depends on core + llm + k8s-provider + prometheus-provider + probe-executor, uses Spring Boot
+├── sre-agent-server                ← Depends on core + llm + k8s-provider + prometheus-provider + probe-executor, uses Spring Boot
+└── demo-services                   ← Standalone Spring Boot microservices (order-service, payment-service, inventory-service) for end-to-end RCA validation
 ```
 
-### Why Nine Modules?
-### Why Ten Modules?
+### Why Eleven Modules?
 
 || Module | Responsibility | Key Dependency |
 |---|---|---||| `sre-agent-core` | Domain model, RCA workflow, scoring, reporting, evidence taxonomy (Step Q) | Jackson only |
@@ -83,7 +83,8 @@ sre-production-agent (parent POM)
 | `sre-agent-trace-provider` | Distributed trace evidence provider (fixture + HTTP) — span latency, error spans, service dependency graph | core + Jackson |
 | `sre-agent-probe-executor` | Probe execution framework — routes LLM-generated ProbeIntents to evidence providers, collects informational Evidence | core + llm + Jackson |
 | `sre-agent-cli` | Command-line interface | Picocli + core + llm + k8s-provider + prometheus-provider + loki-provider + trace-provider + probe-executor |
-| `sre-agent-server` | REST API + Web UI + LLM endpoints | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
+|| `sre-agent-server` | REST API + Web UI + LLM endpoints | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
+|| `demo-services` | Instrumented Spring Boot microservices for end-to-end RCA validation (Step U) | Spring Boot + Micrometer |
 
 ### Why Core Has Zero Spring Dependency
 
@@ -114,6 +115,31 @@ probe-executor ← server
 core ← cli (also via llm + k8s-provider + prometheus-provider + trace-provider + probe-executor)
 cli  ↗   ↖ server  (no dependency between adapters)
 ```
+
+### Demo Services Topology (`demo-services`)
+
+Step U introduced `demo-services` — a standalone Maven module containing three instrumented Spring Boot microservices that provide a realistic target topology for end-to-end RCA validation.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Demo Service Mesh                       │
+│                                                          │
+│  Traffic Generator ──→ order-service ──→ payment-service  │
+│                                   └──→ inventory-service │
+│         (all services expose /actuator/prometheus)        │
+└──────────────┬───────────────────────────────────────────┘
+               ↓ (Prometheus scrapes all services)
+┌──────────────────────────────────────────────────────────┐
+│              Observability Stack (kind cluster)           │
+│  Prometheus → Grafana → Alertmanager → SRE Agent          │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Key design decisions:**
+- `demo-services` has **no dependency** on any `sre-agent-*` module — it is purely validation infrastructure
+- Fault injection is runtime-controlled via REST API (`POST /api/demo-services/fault/*`), no code changes needed
+- All services expose Micrometer metrics at `/actuator/prometheus` for real-time evidence collection
+- Service topology is explicit: `order-service` calls both `payment-service` and `inventory-service`
 
 ### LLM Module (`sre-agent-llm`)
 
@@ -655,10 +681,11 @@ sre-production-agent (parent POM)
 ├── sre-agent-trace-provider        ← 依赖 core，零 Spring 依赖（分布式追踪证据）
 ├── sre-agent-probe-executor        ← 依赖 core + llm，零 Spring 依赖（探测执行框架）
 ├── sre-agent-cli                   ← 依赖 core + llm + k8s-provider + prometheus-provider + trace-provider + probe-executor，使用 Picocli
-└── sre-agent-server                ← 依赖 core + llm + k8s-provider + prometheus-provider + probe-executor，使用 Spring Boot
+├── sre-agent-server                ← 依赖 core + llm + k8s-provider + prometheus-provider + probe-executor，使用 Spring Boot
+└── demo-services                   ← 独立的 Spring Boot 微服务（order-service、payment-service、inventory-service），用于端到端 RCA 验证
 ```
 
-### 为什么是十个模块？
+### 为什么是十一个模块？
 
 ||| 模块 | 职责 | 关键依赖 |
 ||---|---|---|
@@ -671,7 +698,8 @@ sre-production-agent (parent POM)
 |||| `sre-agent-trace-provider` | 分布式追踪证据提供者（fixture + HTTP）— span 延迟、错误 span、服务依赖图 | core + Jackson |
 ||| `sre-agent-probe-executor` | 探测执行框架 — 将 LLM 生成的 ProbeIntent 路由到证据提供者，收集信息性证据 | core + llm + Jackson |
 |||| `sre-agent-cli` | 命令行界面 | Picocli + core + k8s-provider + prometheus-provider + trace-provider + probe-executor |
-||| `sre-agent-server` | REST API + Web UI + LLM 端点 | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
+|| `sre-agent-server` | REST API + Web UI + LLM 端点 | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
+|| `demo-services` | 仪表化的 Spring Boot 微服务，用于端到端 RCA 验证（Step U） | Spring Boot + Micrometer |
 
 ### 为什么 Core 零 Spring 依赖
 
@@ -702,6 +730,31 @@ llm  ← server
 core ← cli (also via k8s-provider + prometheus-provider + trace-provider + probe-executor)
 cli  ↗   ↖ server  (适配器之间无依赖)
 ```
+
+### 演示服务拓扑（`demo-services`）
+
+Step U 引入了 `demo-services` — 一个独立的 Maven 模块，包含三个仪表化的 Spring Boot 微服务，为端到端 RCA 验证提供真实的目标拓扑。
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Demo Service Mesh                       │
+│                                                          │
+│  Traffic Generator ──→ order-service ──→ payment-service  │
+│                                   └──→ inventory-service │
+│         (所有服务暴露 /actuator/prometheus)                │
+└──────────────┬───────────────────────────────────────────┘
+               ↓ (Prometheus 抓取所有服务)
+┌──────────────────────────────────────────────────────────┐
+│              可观测性栈（kind 集群）                        │
+│  Prometheus → Grafana → Alertmanager → SRE Agent          │
+└──────────────────────────────────────────────────────────┘
+```
+
+**关键设计决策：**
+- `demo-services` **不依赖**任何 `sre-agent-*` 模块 — 纯粹是验证基础设施
+- 故障注入通过 REST API 运行时控制（`POST /api/demo-services/fault/*`），无需代码变更
+- 所有服务通过 `/actuator/prometheus` 暴露 Micrometer 指标，支持实时证据收集
+- 服务拓扑明确：`order-service` 同时调用 `payment-service` 和 `inventory-service`
 
 ### LLM 模块（`sre-agent-llm`）
 

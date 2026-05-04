@@ -3,6 +3,10 @@
 .PHONY: deploy-smoke smoke-test clean-smoke
 .PHONY: deploy-crashloop-demo wait-crashloop collect-k8s-evidence-live investigate-k8s-live clean-crashloop-demo live-k8s-demo
 .PHONY: observability-install observability-uninstall observability-status observability-port-forward observability-check
+.PHONY: demo-build-images demo-load-images demo-services-install demo-services-uninstall
+.PHONY: demo-services-status demo-services-port-forward demo-services-check
+.PHONY: demo-traffic-start demo-fault-normal demo-fault-payment-latency
+.PHONY: demo-fault-payment-error demo-fault-payment-timeout
 
 # ─── Build & Test ───────────────────────────────────────────
 
@@ -175,3 +179,49 @@ observability-port-forward:
 
 observability-check:
 	@scripts/observability/check-observability.sh
+
+# ─── Demo Services (3-service demo) ───────────────────────
+
+demo-build-images:
+	@scripts/demo-services/build-demo-images.sh
+
+demo-load-images:
+	@scripts/demo-services/load-demo-images-kind.sh
+
+demo-services-install:
+	@scripts/demo-services/deploy-demo-services.sh
+
+demo-services-uninstall:
+	@scripts/demo-services/uninstall-demo-services.sh
+
+demo-services-status:
+	@echo "=== Demo Services Pods ==="
+	@kubectl -n demo get pods -l scenario=demo-services -o wide
+	@echo ""
+	@echo "=== Demo Services ==="
+	@kubectl -n demo get svc -l scenario=demo-services
+
+demo-services-port-forward:
+	@scripts/demo-services/port-forward-demo-services.sh
+
+demo-services-check:
+	@scripts/demo-services/check-demo-services.sh
+
+demo-traffic-start:
+	@scripts/demo-services/generate-traffic.sh
+
+demo-fault-normal:
+	@echo "Setting payment-service → NORMAL mode"
+	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"normal","latencyMs":0,"errorRate":0.0,"timeoutRate":0.0}'
+
+demo-fault-payment-latency:
+	@echo "Setting payment-service → LATENCY mode (1500ms)"
+	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"latency","latencyMs":1500,"errorRate":0.0,"timeoutRate":0.0}'
+
+demo-fault-payment-error:
+	@echo "Setting payment-service → ERROR mode (80% error rate)"
+	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"error","latencyMs":0,"errorRate":0.8,"timeoutRate":0.0}'
+
+demo-fault-payment-timeout:
+	@echo "Setting payment-service → TIMEOUT mode (5s delay, 100% timeout)"
+	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"timeout","latencyMs":5000,"errorRate":0.0,"timeoutRate":1.0}'
