@@ -21,11 +21,15 @@ cleanup() {
 trap cleanup EXIT
 
 # Prometheus
-kubectl -n "$NAMESPACE" port-forward svc/prometheus-operated 9090:9090 &
-echo "✓ Prometheus   → http://localhost:9090 (PID: $!)"
+prometheus_svc=$(kubectl -n "$NAMESPACE" get svc -o name 2>/dev/null | grep 'prometheus-kube-prometheus-prometheus' | head -1 || echo "")
+if [ -n "$prometheus_svc" ]; then
+    kubectl -n "$NAMESPACE" port-forward "$prometheus_svc" 9090:9090 &
+    echo "✓ Prometheus   → http://localhost:9090 (PID: $!)"
+else
+    echo "⚠ Prometheus service not found"
+fi
 
 # Alertmanager
-kubectl -n "$NAMESPACE" port-forward svc/prometheus-operated 9093:9093 &
 alertmanager_svc=$(kubectl -n "$NAMESPACE" get svc -o name 2>/dev/null | grep alertmanager | head -1 || echo "")
 if [ -n "$alertmanager_svc" ]; then
     kubectl -n "$NAMESPACE" port-forward "$alertmanager_svc" 9093:9093 &
@@ -55,7 +59,7 @@ fi
 # Grafana
 grafana_svc=$(kubectl -n "$NAMESPACE" get svc -o name 2>/dev/null | grep grafana | head -1 || echo "")
 if [ -n "$grafana_svc" ]; then
-    kubectl -n "$NAMESPACE" port-forward "$grafana_svc" 3000:80 &
+    kubectl -n "$NAMESPACE" port-forward "$grafana_svc" 3000:3000 &
     echo "✓ Grafana      → http://localhost:3000 (PID: $!)"
 else
     echo "⚠ Grafana service not found"
