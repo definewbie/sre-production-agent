@@ -182,6 +182,16 @@ observability-check:
 
 # ─── Demo Services (3-service demo) ───────────────────────
 
+# Short aliases (recommended)
+demo-build: demo-build-images demo-load-images
+demo-deploy: demo-services-install
+demo-check: demo-services-check
+demo-status: demo-services-status
+demo-port-forward: demo-services-port-forward
+demo-uninstall: demo-services-uninstall
+demo-traffic: demo-traffic-start
+
+# Full targets
 demo-build-images:
 	@scripts/demo-services/build-demo-images.sh
 
@@ -196,10 +206,10 @@ demo-services-uninstall:
 
 demo-services-status:
 	@echo "=== Demo Services Pods ==="
-	@kubectl -n demo get pods -l scenario=demo-services -o wide
+	@kubectl -n demo get pods -o wide
 	@echo ""
 	@echo "=== Demo Services ==="
-	@kubectl -n demo get svc -l scenario=demo-services
+	@kubectl -n demo get svc
 
 demo-services-port-forward:
 	@scripts/demo-services/port-forward-demo-services.sh
@@ -210,18 +220,23 @@ demo-services-check:
 demo-traffic-start:
 	@scripts/demo-services/generate-traffic.sh
 
+# Fault injection (requires port-forward active)
 demo-fault-normal:
-	@echo "Setting payment-service → NORMAL mode"
-	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"normal","latencyMs":0,"errorRate":0.0,"timeoutRate":0.0}'
+	@echo "Clearing all faults on payment-service..."
+	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"normal","latencyMs":0,"errorRate":0.0,"timeoutRate":0.0}' && echo ""
 
 demo-fault-payment-latency:
-	@echo "Setting payment-service → LATENCY mode (1500ms)"
-	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"latency","latencyMs":1500,"errorRate":0.0,"timeoutRate":0.0}'
+	@echo "Injecting latency (2000ms) on payment-service..."
+	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"latency","latencyMs":2000,"errorRate":0.0,"timeoutRate":0.0}' && echo ""
 
 demo-fault-payment-error:
-	@echo "Setting payment-service → ERROR mode (80% error rate)"
-	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"error","latencyMs":0,"errorRate":0.8,"timeoutRate":0.0}'
+	@echo "Injecting 50%% error rate on payment-service..."
+	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"error","latencyMs":0,"errorRate":0.5,"timeoutRate":0.0}' && echo ""
 
-demo-fault-payment-timeout:
-	@echo "Setting payment-service → TIMEOUT mode (5s delay, 100% timeout)"
-	@curl -s -X POST http://localhost:18082/fault-config -H 'Content-Type: application/json' -d '{"mode":"timeout","latencyMs":5000,"errorRate":0.0,"timeoutRate":1.0}'
+demo-fault-inventory-latency:
+	@echo "Injecting latency (3000ms) on inventory-service..."
+	@curl -s -X POST http://localhost:18083/fault-config -H 'Content-Type: application/json' -d '{"mode":"latency","latencyMs":3000,"errorRate":0.0,"timeoutRate":0.0}' && echo ""
+
+demo-fault-inventory-error:
+	@echo "Injecting 80%% error rate on inventory-service..."
+	@curl -s -X POST http://localhost:18083/fault-config -H 'Content-Type: application/json' -d '{"mode":"error","latencyMs":0,"errorRate":0.8,"timeoutRate":0.0}' && echo ""
