@@ -79,45 +79,323 @@ This demonstrates the K8s evidence provider module (`sre-agent-k8s-provider`) fe
 
 ---
 
+## Live K8s Demo (Step K)
+
+The fixture-based Scenario F can also run with **live Kubernetes evidence** from a local `kind` cluster:
+
+```bash
+make build
+make cluster-up
+make live-k8s-demo
+```
+
+This deploys a CrashLoopBackOff workload into `kind`, collects real K8s evidence via kubectl, and runs the same RCA workflow. The result is identical: `pod_crash_loop → likely_root_cause`.
+
+See [docs/live-k8s-demo.md](docs/live-k8s-demo.md) for the full walkthrough.
+
+---
+
+## Kubernetes Java Client Integration (Step L)
+
+Step L adds a production-grade **Kubernetes Java Client** (`io.kubernetes:client-java:24.0.0`) as an alternative evidence reader for `sre-agent-k8s-provider`. This complements the existing kubectl-based live reader with a proper API client that supports:
+
+- **Kubeconfig mode** — reads `~/.kube/config` for local development
+- **In-cluster mode** — auto-detects service account tokens when running inside a pod
+
+```bash
+java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  investigate \
+  --alert examples/alerts/k8s_crashloop.json \
+  --evidence examples/evidence/k8s_crashloop_evidence.json \
+  --reader java-client \
+  --client-mode kubeconfig \
+  --output /tmp/rca-javaclient-report.md
+```
+
+**Key additions:**
+- `JavaClientKubernetesResourceReader` — implements the `KubernetesResourceReader` SPI with official Java client
+- `KubernetesClientConfig` + `KubernetesApiClientFactory` — configuration and client lifecycle
+- `KubernetesEvidenceCollectionException` — typed error handling
+- CLI flags: `--reader java-client`, `--client-mode`, `--kubeconfig`
+- Updated RBAC manifest and `docs/k8s-rbac.md`
+- Bug fix: `mapPodToSemanticEvidence()` now detects CrashLoop from terminated state (not just waiting)
+
+Live `kind` validation confirms identical results: `hyp_pod_crash_loop = 0.95`, decision = `likely_root_cause`.
+
+---
+
+## Prometheus Metrics Evidence Provider (Step M)
+
+Step M adds a dedicated `sre-agent-prometheus-provider` module that collects **metric evidence** from Prometheus and maps it to the generic `Evidence` objects consumed by the core RCA pipeline. This is the first observability signal provider beyond Kubernetes resource evidence.
+
+**Key design:** `sre-agent-core` has zero Prometheus dependency. The provider is a pure adapter that outputs `Evidence` with `source = "prometheus"`.
+
+```bash
+# Collect Prometheus evidence using fixture (no live Prometheus needed)
+java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-prometheus-evidence \
+  --service payment-service \
+  --namespace demo \
+  --query-type LATENCY_P95 \
+  --output examples/evidence/prometheus_payment_latency.json \
+  --reader fixture
+
+# Collect Prometheus evidence from live instance
+java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-prometheus-evidence \
+  --service payment-service \
+  --namespace demo \
+  --query-type LATENCY_P95 \
+  --output examples/evidence/prometheus_payment_latency.json \
+  --reader http \
+  --prometheus-url http://localhost:9090
+```
+
+**Key additions:**
+- `PrometheusQueryClient` interface → `FixturePrometheusQueryClient` / `HttpPrometheusQueryClient`
+- `PrometheusResponseParser` — handles vector/range results, NaN/+Inf, empty results
+- `PrometheusQueryTemplateRegistry` — 8 query types: ERROR_RATE, LATENCY_P95, LATENCY_P99, DOWNSTREAM_LATENCY_P95, MEMORY_USAGE, CPU_USAGE, RESTART_RATE, REQUEST_RATE
+- `PrometheusEvidenceMapper` — maps to 9 semantic evidence types (e.g., `metric_latency_p95_spike`, `metric_error_rate_spike`, `metric_no_signal`)
+- 43 new tests (229 total, up from 186)
+
+See [docs/prometheus-evidence-provider.md](docs/prometheus-evidence-provider.md) for full documentation.
+
+---
+
+## Loki Logs Evidence Provider (Step N)
+
+Step N adds a dedicated `sre-agent-loki-provider` module that collects **log evidence** from Grafana Loki and maps it to the generic `Evidence` objects consumed by the core RCA pipeline. This complements the Prometheus metric provider by adding log-line-level observability.
+
+**Key design:** `sre-agent-core` has zero Loki dependency. The provider is a pure adapter that outputs `Evidence` with `source = "loki"`.
+
+```bash
+# Collect Loki evidence using fixture (no live Loki needed)
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-loki-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type TIMEOUT_ERROR \
+  --output /tmp/loki_timeout_evidence.json \
+  --reader fixture
+
+# Collect multiple query types at once
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-loki-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type TIMEOUT_ERROR,EXCEPTION_LOGS,OOM_LOGS \
+  --output /tmp/loki_multi.json \
+  --reader fixture
+
+# Collect Loki evidence from live instance
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-loki-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type TIMEOUT_ERROR \
+  --output /tmp/loki_timeout_live.json \
+  --reader http \
+  --loki-url http://localhost:3100
+```
+
+**Key additions:**
+- `LokiQueryClient` interface → `FixtureLokiQueryClient` / `HttpLokiQueryClient`
+- `LokiResponseParser` — handles stream results, nanosecond timestamps, error/empty results
+- `LokiQueryTemplateRegistry` — 9 LogQL query types: TIMEOUT_ERROR, DOWNSTREAM_TIMEOUT, DOWNSTREAM_ERROR, EXCEPTION_LOGS, CRASH_LOGS, OOM_LOGS, DB_CONNECTION_TIMEOUT, RETRY_EXHAUSTED, HTTP_5XX_LOGS
+- `LokiEvidenceMapper` — maps to 9 semantic evidence types (e.g., `log_timeout_error`, `log_exception_spike`, `log_oom_message`, `log_no_signal`)
+- 30 new tests (263 total, up from 229)
+
+See [docs/loki-evidence-provider.md](docs/loki-evidence-provider.md) for full documentation.
+
+---
+
+## Alertmanager Alert Evidence Provider (Step O)
+
+Step O adds a dedicated `sre-agent-alertmanager-provider` module that collects **alert evidence** from Alertmanager and maps it to the generic `Evidence` objects consumed by the core RCA pipeline. This complements the Prometheus and Loki providers by adding alert lifecycle and severity evidence.
+
+**Key design:** `sre-agent-core` has zero Alertmanager dependency. The provider is a pure adapter that outputs `Evidence` with `source = "alertmanager"`.
+
+```bash
+# Collect Alertmanager evidence using fixture (no live Alertmanager needed)
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-alertmanager-evidence \
+  --service order-service \
+  --namespace demo \
+  --output /tmp/alertmanager_evidence.json \
+  --reader fixture
+
+# Collect Alertmanager evidence from live instance
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-alertmanager-evidence \
+  --service order-service \
+  --namespace demo \
+  --output /tmp/alertmanager_live.json \
+  --reader http \
+  --alertmanager-url http://localhost:9093
+```
+
+**Key additions:**
+- `AlertmanagerQueryClient` interface → `FixtureAlertmanagerQueryClient` / `HttpAlertmanagerQueryClient`
+- `AlertmanagerResponseParser` — handles alert/route/silence results, status/state parsing, empty results
+- `AlertmanagerEvidenceMapper` — maps to 7 semantic evidence types (alert lifecycle, incident mapping, severity evidence)
+- `AlertmanagerEvidenceProvider` — dual output: incidents + evidence
+- 45 new tests (308 total, up from 263)
+
+---
+
+## Distributed Trace Evidence Provider (Step P)
+
+Step P adds a dedicated `sre-agent-trace-provider` module that collects **trace evidence** (span latency, error spans, service dependency graph) from Jaeger/Tempo and maps it to the generic `Evidence` objects consumed by the core RCA pipeline. This complements the Prometheus, Loki, and Alertmanager providers by adding distributed tracing observability.
+
+**Key design:** `sre-agent-core` has zero trace dependency. The provider is a pure adapter that outputs `Evidence` with `source = "trace"`.
+
+```bash
+# Collect trace evidence using fixture (no live Jaeger/Tempo needed)
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-trace-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type SLOW_SPANS \
+  --output /tmp/trace_slow_spans.json \
+  --reader fixture
+
+# Collect multiple query types at once
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-trace-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type SLOW_SPANS,ERROR_SPANS,SERVICE_DEPENDENCY \
+  --output /tmp/trace_multi.json \
+  --reader fixture
+
+# Collect trace evidence from live Jaeger/Tempo instance
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-trace-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type SLOW_SPANS \
+  --output /tmp/trace_slow_live.json \
+  --reader http \
+  --trace-url http://localhost:16686
+```
+
+**Key additions:**
+- `TraceQueryClient` interface → `FixtureTraceQueryClient` / `HttpTraceQueryClient`
+- `TraceResponseParser` — handles trace/span results, duration parsing, error status, service dependency extraction
+- `TraceQueryTemplateRegistry` — 6 query types: SLOW_SPANS, ERROR_SPANS, SERVICE_DEPENDENCY, SPAN_ERRORS_BY_SERVICE, TRACE_DURATION_HISTOGRAM, SERVICE_CALL_GRAPH
+- `TraceEvidenceMapper` — maps to 8 semantic evidence types (e.g., `trace_span_latency_high`, `trace_error_span_detected`, `trace_service_dependency`, `trace_no_signal`)
+- 35 new tests (343 total, up from 308)
+
+See [docs/trace-evidence-provider.md](docs/trace-evidence-provider.md) for full documentation.
+
+---
+
+## Probe Execution Framework (Step S)
+
+Step S adds a dedicated `sre-agent-probe-executor` module that routes LLM-generated `ProbeIntent` objects to existing evidence providers and collects new informational `Evidence`. This completes the LLM → Probe → Evidence feedback loop started in Step R.
+
+**Key design:** Probe execution does NOT bypass Verification or mutate RCA decisions. `canAffectDecision` is always `false`, enforced at compile time. Only FIXTURE mode is supported in Step S.
+
+```bash
+# Generate hypothesis proposals and execute probes for Scenario E
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  propose-and-execute-probes \
+  --alert examples/alerts/competing_hypotheses.json \
+  --evidence examples/evidence/competing_hypotheses.json \
+  --output /tmp/probe-results.json
+```
+
+**Key additions:**
+- `sre-agent-probe-executor` module (10th Maven module, package `ai.sreagent.probe`)
+- `ProbeIntentRouter` — routes ProbeType to supported providers
+- `ProbeExecutionPolicy` — enforces `canAffectDecision=false`, rejects LIVE mode
+- `FixtureProbeExecutor` — generates fixture Evidence per probe type
+- 5 provider mappers (Prometheus, Loki, Trace, Kubernetes, Alertmanager)
+- CLI command: `propose-and-execute-probes`
+- REST endpoint: `POST /api/investigations/scenario-e/propose-and-execute-probes`
+- UI: Probe Execution card in `index.html`
+- 46 new tests (484 total, up from 435)
+
+---
+
+## LLM Hypothesis Proposer (Step R)
+
+Step R adds an **LLM Hypothesis Proposer** to the `sre-agent-llm` module that generates advisory hypothesis proposals when the deterministic RCA workflow produces inconclusive results. This bridges the gap between deterministic investigation and AI-assisted exploration.
+
+**Key design:** LLM proposals are **advisory only** — they never change `InvestigationDecision`, `ConfidenceResult`, `VerificationResult`, or create `Evidence`. All proposals carry `UNVERIFIED_PROPOSAL` status and `canAffectDecision = false`.
+
+```bash
+# Generate hypothesis proposals for Scenario E (competing hypotheses)
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  propose-hypotheses \
+  --alert examples/alerts/competing_hypotheses.json \
+  --evidence examples/evidence/competing_hypotheses.json \
+  --output examples/reports/hypothesis_proposals.json
+```
+
+**Trigger policy:**
+- ✅ Proposes when: competing hypotheses, uncertain decision, low confidence (<0.60), small score gap (<0.10)
+- ❌ Does not propose when: clear RCA with high confidence (>=0.80) and good margin (>=0.15)
+
+**Key additions:**
+- `LlmHypothesisProposer` interface + `MockLlmHypothesisProposer` (deterministic impl)
+- `LlmHypothesisProposalPromptBuilder` — constructs LLM prompts from investigation context
+- `LlmProposalTriggerPolicy` — decides when to trigger proposals
+- `ProposalGuardrail` — validates all proposals are advisory-only
+- Models: `ProposalStatus`, `ProbeType`, `ProbeIntent`, `VerificationPlan`, `UnverifiedHypothesisProposal`, `LlmHypothesisProposalResult`
+- 28 new tests (435 total, up from 407)
+
+---
+
 ## Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  sre-agent-cli        sre-agent-server                   │
-│  (Picocli)            (Spring Boot 3.x)                  │
-│       │                      │                            │
-│       └──────────┬───────────┘                            │
-│                  ↓                                        │
-│         InvestigationWorkflow                             │
-│         (shared orchestrator)                             │
-│                  ↓                                        │
-│  ┌─────────── sre-agent-core ───────────────────┐        │
-│  │                                               │        │
-│  │  EvidenceLoader → PatternRegistry             │        │
-│  │       ↓                                       │        │
-│  │  HypothesisEngine                             │        │
-│  │       ↓                                       │        │
-│  │  VerificationEngine                           │        │
-│  │       ↓                                       │        │
-│  │  ConfidenceScorer                             │        │
-│  │       ↓                                       │        │
-│  │  HypothesisComparator → InvestigationDecision │        │
-│  │       ↓                                       │        │
-│  │  MarkdownReporter + EventTraceStore           │        │
-│  │                                               │        │
-│  │  Zero Spring dependency                       │        │
-│  └───────────────────────────────────────────────┘        │
-│          ↑               ↓ (optional)                     │
-│  ┌──── sre-agent-k8s-provider ────┐  ┌──── sre-agent-llm ────────┐
-│  │                                │  │                            │
-│  │  Fixture-based K8s evidence    │  │  MockLlmClient → LlmPrompt │
-│  │  provider (pod status,         │  │       ↓                    │
-│  │  container restarts, exit      │  │  LlmReportSynthesizer →    │
-│  │  codes)                        │  │  LlmEnhancedReport         │
-│  │                                │  │                            │
-│  │  Zero Spring dependency        │  │  Guardrails: no auto-act.  │
-│  │  Zero K8s client dependency    │  │  Zero Spring dependency    │
-│  └────────────────────────────────┘  └────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  sre-agent-cli                    sre-agent-server                   │
+│  (Picocli)                        (Spring Boot 3.x)                  │
+│       │                                  │                            │
+│       └──────────────┬───────────────────┘                            │
+│                      ↓                                                │
+│             InvestigationWorkflow                                     │
+│             (shared orchestrator)                                     │
+│                      ↓                                                │
+│  ┌──────────────── sre-agent-core ────────────────────┐              │
+│  │                                                     │              │
+│  │  EvidenceLoader → PatternRegistry                   │              │
+│  │       ↓                                             │              │
+│  │  HypothesisEngine                                   │              │
+│  │       ↓                                             │              │
+│  │  VerificationEngine                                 │              │
+│  │       ↓                                             │              │
+│  │  ConfidenceScorer                                   │              │
+│  │       ↓                                             │              │
+│  │  HypothesisComparator → InvestigationDecision       │              │
+│  │       ↓                                             │              │
+│  │  MarkdownReporter + EventTraceStore                 │              │
+│  │                                                     │              │
+│  │  Zero Spring dependency                             │              │
+│  └─────────────────────────────────────────────────────┘              │
+│          ↑               ↑               ↓ (optional)                 │
+│  ┌── k8s-provider ──┐  ┌── prometheus ──┐  ┌── llm ─────────────┐    │
+│  │                   │  │                │  │                     │    │
+│  │  K8s evidence     │  │  Metric        │  │  MockLlmClient →    │    │
+│  │  (fixture +       │  │  evidence      │  │  LlmPrompt →        │    │
+│  │  kubectl +        │  │  (fixture +    │  │  LlmReportSynth. →  │    │
+│  │  Java client):    │  │  HTTP client)  │  │  LlmEnhancedReport  │    │
+│  │  pod status,      │  │                │  │                     │    │
+│  │  restarts,        │  │  Zero Spring   │  │  Guardrails: no      │    │
+│  │  exit codes       │  │  dependency    │  │  auto-action         │    │
+│  │                   │  └────────────────┘  └─────────────────────┘    │
+│  │  Zero Spring      │                                               │
+│  │  dependency       │  ┌── loki ──────┐                             │
+│  └───────────────────┘  │              │                             │
+│                         │  Log          │                             │
+│                         │  evidence     │                             │
+│                         │  (fixture +   │                             │
+│                         │  HTTP client) │                             │
+│                         │               │                             │
+│                         │  Zero Spring  │                             │
+│                         └───────────────┘                             │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -126,12 +404,19 @@ This demonstrates the K8s evidence provider module (`sre-agent-k8s-provider`) fe
 | Module | Purpose | Spring Dependency |
 |---|---|---|
 | `sre-agent-core` | Deterministic RCA workflow engine | **None** |
-| `sre-agent-k8s-provider` | Fixture-based K8s evidence provider (pod status, restarts, exit codes) | **None** |
-| `sre-agent-llm` | LLM report synthesis (MockLlmClient, prompt building, report enhancement) | **None** |
+| `sre-agent-k8s-provider` | K8s evidence provider (fixture + live kubectl + Java client) — pod status, restarts, exit codes | **None** |
+| `sre-agent-prometheus-provider` | Prometheus metric evidence provider (fixture + HTTP client) — error rates, latency, CPU/memory | **None** |
+| `sre-agent-loki-provider` | Loki log evidence provider (fixture + HTTP client) — timeout errors, exception bursts, OOM messages | **None** |
+| `sre-agent-alertmanager-provider` | Alertmanager alert evidence provider (fixture + HTTP) — alert lifecycle, incident mapping | **None** |
+| `sre-agent-trace-provider` | Distributed trace evidence provider (fixture + HTTP) — span latency, error spans, service dependency graph | **None** |
+| `sre-agent-probe-executor` | Probe execution framework — routes LLM ProbeIntents to evidence providers, collects informational Evidence | **None** |
+| `sre-agent-llm` | LLM report synthesis + Hypothesis Proposer (MockLlmClient, prompt building, report enhancement, advisory hypothesis proposals) | **None** |
 | `sre-agent-cli` | Command-line adapter (Picocli) | None |
 | `sre-agent-server` | Spring Boot REST API + Web UI | Spring Boot 3.x |
 
-**Key constraint:** `sre-agent-core`, `sre-agent-k8s-provider`, and `sre-agent-llm` have zero Spring dependency. `sre-agent-k8s-provider` also has zero K8s client library dependency — it uses fixture-based evidence. The workflow is pure Java. CLI and Server are thin adapters that call the same `InvestigationWorkflow`. The LLM module is optional — it enhances reports with AI-synthesized narratives while respecting guardrails (no auto-action, no data exfiltration).
+- **Evidence Taxonomy (core)**: Provider-agnostic normalized evidence model with category, signal, source kind, severity, and causal role classification
+
+**Key constraint:** `sre-agent-core`, `sre-agent-k8s-provider`, `sre-agent-prometheus-provider`, `sre-agent-loki-provider`, `sre-agent-alertmanager-provider`, `sre-agent-trace-provider`, `sre-agent-probe-executor`, and `sre-agent-llm` have zero Spring dependency. `sre-agent-k8s-provider` supports three evidence modes: fixture-based (unit tests), live kubectl (local demo), and Kubernetes Java Client (production-grade API client). `sre-agent-prometheus-provider`, `sre-agent-loki-provider`, `sre-agent-alertmanager-provider`, and `sre-agent-trace-provider` each support two evidence modes: fixture-based (unit tests/CI) and HTTP client (production). The workflow is pure Java. CLI and Server are thin adapters that call the same `InvestigationWorkflow`. The LLM module is optional — it enhances reports with AI-synthesized narratives and generates advisory hypothesis proposals while respecting guardrails (no auto-action, no data exfiltration, no RCA decision override).
 
 ---
 
@@ -148,7 +433,7 @@ This demonstrates the K8s evidence provider module (`sre-agent-k8s-provider`) fe
 mvn test
 ```
 
-Expected: 162 tests passing.
+Expected: 484 tests passing.
 
 ### Run CLI Demo
 
@@ -303,19 +588,21 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven multi-module
 - Jackson (JSON serialization)
 - Picocli (CLI framework)
-- JUnit 5 + AssertJ (162 tests)
+- JUnit 5 + AssertJ (484 tests)
 - Static HTML + vanilla JS (minimal Web UI)
 
 ---
 
 ## Current Limitations
 
-- **Static evidence** — Scenario E uses pre-loaded JSON, not real Prometheus/Loki/K8s
+- **Prometheus, Loki, Alertmanager, and Trace evidence now available** — Steps M+N+O+P add `sre-agent-prometheus-provider`, `sre-agent-loki-provider`, `sre-agent-alertmanager-provider`, and `sre-agent-trace-provider` with fixture-based testing; live integration requires `--prometheus-url` / `--loki-url` / `--alertmanager-url` / `--trace-url`
+- **Static evidence for Scenarios E/F** — Demo scenarios still use pre-loaded JSON, not live Prometheus/Loki/K8s queries
 - **Manual confidence weights** — weights are based on SRE diagnostic experience, not learned from data
 - **In-memory store** — investigation results are not persisted across server restarts
 - **No real LLM provider** — current LLM integration uses MockLlmClient; swap in a real provider by implementing the LlmClient interface
 - **4 diagnostic patterns** — covers deployment regression, dependency latency, resource pressure, and CrashLoopBackOff
 - **2 demo scenarios** — Scenario E (competing hypotheses) and Scenario F (CrashLoopBackOff)
+- **Live K8s demo is optional** — `mvn test` does not require a live cluster; live demo runs via `make live-k8s-demo`
 
 ---
 
@@ -333,7 +620,15 @@ sre-production-agent/
 │   ├── interview-qa.md
 │   ├── resume-bullets.md
 │   ├── llm-positioning.md
-│   └── future-roadmap.md
+│   ├── future-roadmap.md
+│   ├── live-k8s-demo.md
+│   ├── k8s-evidence-provider.md
+│   ├── k8s-rbac.md
+│   ├── prometheus-evidence-provider.md
+│   ├── loki-evidence-provider.md
+│   ├── alertmanager-provider.md
+│   ├── trace-evidence-provider.md
+│   └── LOCAL_K8S_SETUP.md
 ├── examples/
 │   ├── alerts/competing_hypotheses.json
 │   ├── alerts/k8s_crashloop.json
@@ -351,10 +646,52 @@ sre-production-agent/
 │       ├── report/                  # MarkdownReporter
 │       ├── eventtrace/              # EventTraceStore, InMemoryEventTraceStore
 │       └── workflow/                # InvestigationWorkflow, InvestigationResult
-├── sre-agent-k8s-provider/          # K8s evidence provider (fixture-based)
+├── sre-agent-k8s-provider/          # K8s evidence provider (fixture + kubectl + Java client)
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/k8s/
-│       └── K8sEvidenceProvider.java
+│       ├── K8sEvidenceProvider.java
+│       └── client/                  # JavaClientKubernetesResourceReader, KubernetesClientConfig, etc.
+├── sre-agent-prometheus-provider/   # Prometheus metric evidence provider (fixture + HTTP)
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/prometheus/
+│       ├── client/                  # PrometheusQueryClient, FixturePrometheusQueryClient, HttpPrometheusQueryClient
+│       ├── parser/                  # PrometheusResponseParser
+│       ├── query/                   # PrometheusQueryTemplateRegistry
+│       ├── mapper/                  # PrometheusEvidenceMapper
+│       └── provider/                # PrometheusEvidenceProvider
+├── sre-agent-loki-provider/         # Loki log evidence provider (fixture + HTTP)
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/loki/
+│       ├── client/                  # LokiQueryClient, FixtureLokiQueryClient, HttpLokiQueryClient
+│       ├── parser/                  # LokiResponseParser
+│       ├── query/                   # LokiQueryTemplateRegistry
+│       ├── mapper/                  # LokiEvidenceMapper
+│       └── LokiEvidenceProvider.java
+├── sre-agent-alertmanager-provider/ # Alertmanager alert evidence provider (fixture + HTTP)
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/alertmanager/
+│       ├── client/                  # AlertmanagerQueryClient, FixtureAlertmanagerQueryClient, HttpAlertmanagerQueryClient
+│       ├── parser/                  # AlertmanagerResponseParser
+│       ├── mapper/                  # AlertmanagerEvidenceMapper
+│       └── AlertmanagerEvidenceProvider.java
+├── sre-agent-trace-provider/        # Distributed trace evidence provider (fixture + HTTP)
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/trace/
+│       ├── client/                  # TraceQueryClient, FixtureTraceQueryClient, HttpTraceQueryClient
+│       ├── parser/                  # TraceResponseParser
+│       ├── query/                   # TraceQueryTemplateRegistry
+│       ├── mapper/                  # TraceEvidenceMapper
+│       └── TraceEvidenceProvider.java
+├── sre-agent-probe-executor/        # Probe execution framework (routes LLM ProbeIntents to evidence providers)
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/probe/
+│       ├── router/                  # ProbeIntentRouter
+│       ├── policy/                  # ProbeExecutionPolicy
+│       ├── executor/                # FixtureProbeExecutor
+│       └── mapper/                  # 5 provider mappers (Prometheus, Loki, Trace, K8s, Alertmanager)
+├── k8s/
+│   ├── demo-services/recommend-crashloop-demo.yaml
+│   └── rbac/sre-agent-reader.yaml
 ├── sre-agent-llm/                   # LLM report synthesis (optional)
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/llm/
@@ -381,7 +718,7 @@ sre-production-agent/
 
 See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 
-| Step | Scope | Status |
+|| Step | Scope | Status |
 |------|-------|--------|
 | A | Project skeleton + domain model + JSON loading + patterns | ✅ Done |
 | B | HypothesisEngine + VerificationEngine | ✅ Done |
@@ -393,6 +730,19 @@ See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 | H | Local K8s provider module setup (sre-agent-k8s-provider) | ✅ Done |
 | I | K8s evidence provider (fixture-based) + pod_crash_loop pattern | ✅ Done |
 | J | Wire K8s evidence into RCA workflow + Scenario F | ✅ Done |
+| K | Live K8s / kind integration for Scenario F (optional live demo path) | ✅ Done |
+| L | Kubernetes Java Client integration — JavaClientKubernetesResourceReader | ✅ Done |
+|| M | Prometheus Metrics Evidence Provider — sre-agent-prometheus-provider | ✅ Done |
+|| N | Loki Logs Evidence Provider — sre-agent-loki-provider | ✅ Done |
+|| O | Alertmanager Alert Evidence Provider — sre-agent-alertmanager-provider | ✅ Done |
+||| P | Distributed Trace Evidence Provider — sre-agent-trace-provider | ✅ Done |
+||| Q | Observability Evidence Taxonomy / Normalization — sre-agent-core | ✅ Done |
+||| R | LLM Hypothesis Proposer — sre-agent-llm | ✅ Done |
+||| S | Probe Execution Framework v1 — sre-agent-probe-executor | ✅ Done |
+||| T | Local Observability Stack on kind (Prometheus + Loki + Tempo) | 🔲 Upcoming |
+||| U | Instrumented Demo Services | 🔲 Upcoming |
+||| V | Complex Live RCA Scenarios | 🔲 Upcoming |
+||| W | Post-Probe RCA Re-run Policy | 🔲 Upcoming |
 
 ---
 
@@ -485,6 +835,103 @@ downstream_dependency_latency  score = 0.00
 
 ---
 
+## 实时 K8s 演示（Step K）
+
+基于 Fixture 的场景 F 也可以使用本地 `kind` 集群的**实时 Kubernetes 证据**运行：
+
+```bash
+make build
+make cluster-up
+make live-k8s-demo
+```
+
+这会在 `kind` 中部署一个 CrashLoopBackOff 工作负载，通过 kubectl 收集真实的 K8s 证据，并运行相同的 RCA 工作流。结果完全一致：`pod_crash_loop → likely_root_cause`。
+
+完整演示流程详见 [docs/live-k8s-demo.md](docs/live-k8s-demo.md)。
+
+---
+
+## Alertmanager 告警证据提供器（Step O）
+
+Step O 新增了专用 `sre-agent-alertmanager-provider` 模块，从 Alertmanager 收集**告警证据**并映射到核心 RCA 流水线使用的通用 `Evidence` 对象。通过添加告警生命周期和严重性证据，补充了 Prometheus 和 Loki 提供器的功能。
+
+**关键设计：** `sre-agent-core` 零 Alertmanager 依赖。该提供器是纯适配器，输出 `source = "alertmanager"` 的 `Evidence`。
+
+```bash
+# 使用 fixture 收集 Alertmanager 证据（无需实时 Alertmanager）
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-alertmanager-evidence \
+  --service order-service \
+  --namespace demo \
+  --output /tmp/alertmanager_evidence.json \
+  --reader fixture
+
+# 从实时实例收集 Alertmanager 证据
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-alertmanager-evidence \
+  --service order-service \
+  --namespace demo \
+  --output /tmp/alertmanager_live.json \
+  --reader http \
+  --alertmanager-url http://localhost:9093
+```
+
+**关键新增：**
+- `AlertmanagerQueryClient` 接口 → `FixtureAlertmanagerQueryClient` / `HttpAlertmanagerQueryClient`
+- `AlertmanagerResponseParser` — 处理告警/路由/静默结果，状态解析，空结果
+- `AlertmanagerEvidenceMapper` — 映射到 7 种语义证据类型（告警生命周期、事件映射、严重性证据）
+- `AlertmanagerEvidenceProvider` — 双重输出：事件 + 证据
+- 45 个新测试（共 308 个，从 263 个增加）
+
+---
+
+## 分布式追踪证据提供器（Step P）
+
+Step P 新增了专用 `sre-agent-trace-provider` 模块，从 Jaeger/Tempo 收集**追踪证据**（span 延迟、错误 span、服务依赖图）并映射到核心 RCA 流水线使用的通用 `Evidence` 对象。通过添加分布式追踪可观测性，补充了 Prometheus、Loki 和 Alertmanager 提供器的功能。
+
+**关键设计：** `sre-agent-core` 零 trace 依赖。该提供器是纯适配器，输出 `source = "trace"` 的 `Evidence`。
+
+```bash
+# 使用 fixture 收集追踪证据（无需实时 Jaeger/Tempo）
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-trace-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type SLOW_SPANS \
+  --output /tmp/trace_slow_spans.json \
+  --reader fixture
+
+# 同时收集多种查询类型
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-trace-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type SLOW_SPANS,ERROR_SPANS,SERVICE_DEPENDENCY \
+  --output /tmp/trace_multi.json \
+  --reader fixture
+
+# 从实时 Jaeger/Tempo 实例收集追踪证据
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  collect-trace-evidence \
+  --service order-service \
+  --namespace demo \
+  --query-type SLOW_SPANS \
+  --output /tmp/trace_slow_live.json \
+  --reader http \
+  --trace-url http://localhost:16686
+```
+
+**关键新增：**
+- `TraceQueryClient` 接口 → `FixtureTraceQueryClient` / `HttpTraceQueryClient`
+- `TraceResponseParser` — 处理 trace/span 结果、时长解析、错误状态、服务依赖提取
+- `TraceQueryTemplateRegistry` — 6 种查询类型：SLOW_SPANS, ERROR_SPANS, SERVICE_DEPENDENCY, SPAN_ERRORS_BY_SERVICE, TRACE_DURATION_HISTOGRAM, SERVICE_CALL_GRAPH
+- `TraceEvidenceMapper` — 映射到 8 种语义证据类型（如 `trace_span_latency_high`、`trace_error_span_detected`、`trace_service_dependency`、`trace_no_signal`）
+- 35 个新测试（共 343 个，从 308 个增加）
+
+详见 [docs/trace-evidence-provider.md](docs/trace-evidence-provider.md)。
+
+---
+
 ## 架构概览
 
 ```
@@ -516,13 +963,12 @@ downstream_dependency_latency  score = 0.00
 │          ↑               ↓ (optional)                     │
 │  ┌──── sre-agent-k8s-provider ────┐  ┌──── sre-agent-llm ────────┐
 │  │                                │  │                            │
-│  │  Fixture-based K8s evidence    │  │  MockLlmClient → LlmPrompt │
-│  │  provider (pod status,         │  │       ↓                    │
-│  │  container restarts, exit      │  │  LlmReportSynthesizer →    │
-│  │  codes)                        │  │  LlmEnhancedReport         │
+│  │  K8s evidence (fixture +        │  │  MockLlmClient → LlmPrompt │
+│  │  live kubectl + Java client):  │  │       ↓                    │
+│  │  pod status, container         │  │  LlmReportSynthesizer →    │
+│  │  restarts, exit codes          │  │  LlmEnhancedReport         │
 │  │                                │  │                            │
 │  │  Zero Spring dependency        │  │  Guardrails: no auto-act.  │
-│  │  Zero K8s client dependency    │  │  Zero Spring dependency    │
 │  └────────────────────────────────┘  └────────────────────────────┘
 └──────────────────────────────────────────────────────────┘
 ```
@@ -532,12 +978,18 @@ downstream_dependency_latency  score = 0.00
 | 模块 | 用途 | Spring 依赖 |
 |---|---|---|
 | `sre-agent-core` | 确定性根因分析工作流引擎 | **无** |
-| `sre-agent-k8s-provider` | 基于 Fixture 的 K8s 证据提供器（Pod 状态、重启、退出码） | **无** |
+| `sre-agent-k8s-provider` | K8s 证据提供器（fixture + 实时 kubectl + Java 客户端）— Pod 状态、重启、退出码 | **无** |
+| `sre-agent-prometheus-provider` | Prometheus 指标证据提供器（Fixture + HTTP 客户端）— 错误率、延迟、CPU/内存 | **无** |
+| `sre-agent-loki-provider` | Loki 日志证据提供器（Fixture + HTTP 客户端）— 超时错误、异常爆发、OOM 消息 | **无** |
+| `sre-agent-alertmanager-provider` | Alertmanager 告警证据提供器（Fixture + HTTP）— 告警生命周期、事件映射 | **无** |
+| `sre-agent-trace-provider` | 分布式追踪证据提供器（Fixture + HTTP）— span 延迟、错误 span、服务依赖 | **无** |
 | `sre-agent-llm` | LLM 报告综合（MockLlmClient、提示词构建、报告增强） | **无** |
 | `sre-agent-cli` | 命令行适配器（Picocli） | 无 |
 | `sre-agent-server` | Spring Boot REST API + Web UI | Spring Boot 3.x |
 
-**关键约束：** `sre-agent-core`、`sre-agent-k8s-provider` 和 `sre-agent-llm` 零 Spring 依赖。`sre-agent-k8s-provider` 也零 K8s 客户端库依赖——使用基于 Fixture 的证据。工作流是纯 Java 实现。CLI 和 Server 是薄适配层，调用同一个 `InvestigationWorkflow`。LLM 模块是可选的——它在遵守护栏（不自动执行操作、不泄露数据）的前提下，用 AI 综合叙述来增强报告。
+- **证据分类体系（core）**: Provider-agnostic 归一化证据模型，包含 category/signal/sourceKind/severity/causalRole 分类
+
+|**关键约束：** `sre-agent-core`、`sre-agent-k8s-provider`、`sre-agent-prometheus-provider`、`sre-agent-loki-provider`、`sre-agent-alertmanager-provider`、`sre-agent-trace-provider` 和 `sre-agent-llm` 零 Spring 依赖。`sre-agent-k8s-provider` 支持三种证据模式：基于 Fixture（单元测试）、实时 kubectl（本地演示）和 Kubernetes Java Client（生产级 API 客户端）。`sre-agent-prometheus-provider`、`sre-agent-loki-provider`、`sre-agent-alertmanager-provider` 和 `sre-agent-trace-provider` 各支持两种证据模式：基于 Fixture（单元测试/CI）和 HTTP 客户端（生产环境）。工作流是纯 Java 实现。CLI 和 Server 是薄适配层，调用同一个 `InvestigationWorkflow`。LLM 模块是可选的——它在遵守护栏（不自动执行操作、不泄露数据）的前提下，用 AI 综合叙述来增强报告。
 
 ---
 
@@ -554,7 +1006,7 @@ downstream_dependency_latency  score = 0.00
 mvn test
 ```
 
-预期结果：162 个测试全部通过。
+预期结果：484 个测试全部通过。
 
 ### 运行 CLI 演示
 
@@ -709,19 +1161,21 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven 多模块
 - Jackson（JSON 序列化）
 - Picocli（CLI 框架）
-- JUnit 5 + AssertJ（162 个测试）
+- JUnit 5 + AssertJ（484 个测试）
 - 静态 HTML + 原生 JS（轻量 Web UI）
 
 ---
 
 ## 当前限制
 
-- **静态证据** —— 场景 E 使用预加载的 JSON，而非真实的 Prometheus / Loki / K8s 数据
+- **Prometheus、Loki、Alertmanager 和 Trace 证据现已可用** — Steps M+N+O+P 新增 `sre-agent-prometheus-provider`、`sre-agent-loki-provider`、`sre-agent-alertmanager-provider` 和 `sre-agent-trace-provider`，支持基于 Fixture 的测试；实时集成需要 `--prometheus-url` / `--loki-url` / `--alertmanager-url` / `--trace-url`
+- **场景 E/F 使用静态证据** — 演示场景仍使用预加载的 JSON，而非实时 Prometheus/Loki/K8s 查询
 - **手动置信度权重** —— 权重基于 SRE 诊断经验设定，未通过数据学习
 - **内存存储** —— 排查结果不会在服务器重启后持久化
 - **无真实 LLM 提供商** —— 当前 LLM 集成使用 MockLlmClient；可通过实现 LlmClient 接口替换为真实提供商
 - **4 种诊断模式** —— 覆盖部署回退、依赖延迟、资源压力和 CrashLoopBackOff
 - **2 个演示场景** —— 场景 E（竞争性假设）和场景 F（CrashLoopBackOff）
+- **实时 K8s 演示是可选的** —— `mvn test` 不需要实时集群；实时演示通过 `make live-k8s-demo` 运行
 
 ---
 
@@ -739,7 +1193,15 @@ sre-production-agent/
 │   ├── interview-qa.md
 │   ├── resume-bullets.md
 │   ├── llm-positioning.md
-│   └── future-roadmap.md
+│   ├── future-roadmap.md
+│   ├── live-k8s-demo.md
+│   ├── k8s-evidence-provider.md
+│   ├── k8s-rbac.md
+│   ├── prometheus-evidence-provider.md
+│   ├── loki-evidence-provider.md
+│   ├── alertmanager-provider.md
+│   ├── trace-evidence-provider.md
+│   └── LOCAL_K8S_SETUP.md
 ├── examples/
 │   ├── alerts/competing_hypotheses.json
 │   ├── alerts/k8s_crashloop.json
@@ -760,7 +1222,49 @@ sre-production-agent/
 ├── sre-agent-k8s-provider/          # K8s 证据提供器（基于 Fixture）
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/k8s/
-│       └── K8sEvidenceProvider.java
+│       ├── K8sEvidenceProvider.java
+│       └── client/                  # JavaClientKubernetesResourceReader, KubernetesClientConfig 等
+├── sre-agent-prometheus-provider/   # Prometheus 指标证据提供器（Fixture + HTTP）
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/prometheus/
+│       ├── client/                  # PrometheusQueryClient, FixturePrometheusQueryClient, HttpPrometheusQueryClient
+│       ├── parser/                  # PrometheusResponseParser
+│       ├── query/                   # PrometheusQueryTemplateRegistry
+│       ├── mapper/                  # PrometheusEvidenceMapper
+│       └── provider/                # PrometheusEvidenceProvider
+├── sre-agent-loki-provider/         # Loki 日志证据提供器（Fixture + HTTP）
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/loki/
+│       ├── client/                  # LokiQueryClient, FixtureLokiQueryClient, HttpLokiQueryClient
+│       ├── parser/                  # LokiResponseParser
+│       ├── query/                   # LokiQueryTemplateRegistry
+│       ├── mapper/                  # LokiEvidenceMapper
+│       └── LokiEvidenceProvider.java
+├── sre-agent-alertmanager-provider/ # Alertmanager 告警证据提供器（Fixture + HTTP）
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/alertmanager/
+│       ├── client/                  # AlertmanagerQueryClient, FixtureAlertmanagerQueryClient, HttpAlertmanagerQueryClient
+│       ├── parser/                  # AlertmanagerResponseParser
+│       ├── mapper/                  # AlertmanagerEvidenceMapper
+│       └── AlertmanagerEvidenceProvider.java
+├── sre-agent-trace-provider/     # 分布式追踪证据提供器（Fixture + HTTP）
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/trace/
+│       ├── client/                  # TraceQueryClient, FixtureTraceQueryClient, HttpTraceQueryClient
+│       ├── parser/                  # TraceResponseParser
+│       ├── query/                   # TraceQueryTemplateRegistry
+│       ├── mapper/                  # TraceEvidenceMapper
+│       └── TraceEvidenceProvider.java
+├── sre-agent-probe-executor/        # 探测执行框架（将 LLM ProbeIntent 路由到证据提供者）
+│   ├── pom.xml
+│   └── src/main/java/ai/sreagent/probe/
+│       ├── router/                  # ProbeIntentRouter
+│       ├── policy/                  # ProbeExecutionPolicy
+│       ├── executor/                # FixtureProbeExecutor
+│       └── mapper/                  # 5 provider mappers (Prometheus, Loki, Trace, K8s, Alertmanager)
+├── k8s/
+│   ├── demo-services/recommend-crashloop-demo.yaml
+│   └── rbac/sre-agent-reader.yaml
 ├── sre-agent-llm/                   # LLM 报告综合（可选）
 │   ├── pom.xml
 │   └── src/main/java/ai/sreagent/llm/
@@ -799,3 +1303,16 @@ sre-production-agent/
 | H | 本地 K8s 提供器模块搭建（sre-agent-k8s-provider） | ✅ 已完成 |
 | I | K8s 证据提供器（基于 Fixture）+ pod_crash_loop 模式 | ✅ 已完成 |
 | J | 将 K8s 证据接入 RCA 工作流 + 场景 F | ✅ 已完成 |
+|| K | 实时 K8s / kind 集成，用于场景 F（可选实时演示路径） | ✅ 已完成 |
+|| L | Kubernetes Java Client 集成 — JavaClientKubernetesResourceReader | ✅ 已完成 |
+||| M | Prometheus 指标证据提供者 — sre-agent-prometheus-provider | ✅ 已完成 |
+|| N | Loki 日志证据提供者 — sre-agent-loki-provider | ✅ 已完成 |
+|| O | Alertmanager 告警证据提供者 — sre-agent-alertmanager-provider | ✅ 已完成 |
+||| P | 分布式追踪证据提供者 — sre-agent-trace-provider | ✅ 已完成 |
+||| Q | 证据分类体系 / 归一化 — sre-agent-core | ✅ 已完成 |
+||| R | LLM 假设提议器 — sre-agent-llm | ✅ 已完成 |
+||| S | 探测执行框架 v1 — sre-agent-probe-executor | ✅ 已完成 |
+||| T | 本地可观测性栈（kind 上的 Prometheus + Loki + Tempo） | 🔲 待开始 |
+||| U | 示例微服务（instrumented demo services） | 🔲 待开始 |
+||| V | 复杂实时 RCA 场景 | 🔲 待开始 |
+||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |

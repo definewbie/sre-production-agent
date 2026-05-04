@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": {
+          "service": "order-service",
+          "namespace": "demo"
+        },
+        "values": [
+          ["1714292400000000000", "ERROR payment-service timeout after 500ms"],
+          ["1714292401000000000", "ERROR upstream request timeout: /api/v2/checkout"],
+          ["1714292402000000000", "WARN connection timeout to redis-master:6379"]
+        ]
+      }
+    ]
+  }
+}

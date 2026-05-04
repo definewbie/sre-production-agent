@@ -1,0 +1,68 @@
+# =============================================================================
+# SRE Agent Reader — namespace-scoped, read-only RBAC
+# =============================================================================
+# This ServiceAccount is used by JavaClientKubernetesResourceReader in
+# production in-cluster mode.  The Java client mounts this ServiceAccount
+# token inside the agent Pod and calls the Kubernetes API directly.
+#
+# IMPORTANT: The kubectl-based reader used for local demos does NOT represent
+# the production access model.  This file is the single source of truth for
+# what the production agent may access.
+#
+# Resources covered (read-only — get, list, watch):
+#   pods, events, services, namespaces, deployments, replicasets
+# No write permissions.  No cluster-admin.
+# =============================================================================
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sre-agent-reader
+  namespace: sre-agent
+  labels:
+    app: sre-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sre-agent-reader
+  namespace: demo
+  labels:
+    app: sre-agent
+rules:
+  # Read pods and pod status
+  - apiGroups: [""]
+    resources: ["pods", "pods/status"]
+    verbs: ["get", "list", "watch"]
+  # Read events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  # Read services
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  # Read namespaces
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Read deployments, replicasets and their status
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/status", "replicasets", "replicasets/status"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sre-agent-reader
+  namespace: demo
+  labels:
+    app: sre-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sre-agent-reader
+subjects:
+  - kind: ServiceAccount
+    name: sre-agent-reader
+    namespace: sre-agent

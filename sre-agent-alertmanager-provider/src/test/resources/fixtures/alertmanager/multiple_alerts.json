@@ -1,0 +1,64 @@
+[
+  {
+    "labels": {
+      "alertname": "HighErrorRate",
+      "service": "order-service",
+      "namespace": "demo",
+      "severity": "critical"
+    },
+    "annotations": {
+      "summary": "order-service error rate is critical",
+      "description": "5xx error rate exceeded 10% threshold"
+    },
+    "startsAt": "2026-04-28T10:08:00Z",
+    "endsAt": "0001-01-01T00:00:00Z",
+    "status": {
+      "state": "active",
+      "silencedBy": [],
+      "inhibitedBy": []
+    },
+    "fingerprint": "mno901pqr234"
+  },
+  {
+    "labels": {
+      "alertname": "HighMemoryUsage",
+      "service": "order-service",
+      "namespace": "demo",
+      "severity": "warning"
+    },
+    "annotations": {
+      "summary": "order-service memory usage is high",
+      "description": "Memory usage exceeded 85% threshold"
+    },
+    "startsAt": "2026-04-28T10:09:00Z",
+    "endsAt": "0001-01-01T00:00:00Z",
+    "status": {
+      "state": "active",
+      "silencedBy": [],
+      "inhibitedBy": []
+    },
+    "fingerprint": "stu567vwx890"
+  },
+  {
+    "labels": {
+      "alertname": "PodCrashLoop",
+      "service": "order-service",
+      "namespace": "demo",
+      "severity": "critical",
+      "silencedBy": ["silence-abc"],
+      "inhibitedBy": []
+    },
+    "annotations": {
+      "summary": "order-service pod is in CrashLoopBackOff",
+      "description": "Pod order-service-7d9f8b6c4-x2k1j has restarted 15 times"
+    },
+    "startsAt": "2026-04-28T10:06:00Z",
+    "endsAt": "0001-01-01T00:00:00Z",
+    "status": {
+      "state": "active",
+      "silencedBy": ["silence-abc"],
+      "inhibitedBy": []
+    },
+    "fingerprint": "yza123bcd456"
+  }
+]

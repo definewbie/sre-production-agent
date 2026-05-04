@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "traceID": "trace-error-001",
+      "spans": [
+        {
+          "spanID": "span-root-002",
+          "operationName": "POST /orders",
+          "startTime": 1714292400000000,
+          "duration": 500000,
+          "processID": "p1",
+          "references": [],
+          "tags": [
+            {"key": "http.status_code", "value": "500"}
+          ]
+        },
+        {
+          "spanID": "span-inventory-002",
+          "operationName": "GET inventory-service /stock",
+          "startTime": 1714292400100000,
+          "duration": 400000,
+          "processID": "p2",
+          "references": [
+            {"refType": "CHILD_OF", "spanID": "span-root-002"}
+          ],
+          "tags": [
+            {"key": "error", "value": "true"},
+            {"key": "error.message", "value": "connection refused"}
+          ]
+        }
+      ],
+      "processes": {
+        "p1": {
+          "serviceName": "order-service"
+        },
+        "p2": {
+          "serviceName": "inventory-service"
+        }
+      }
+    }
+  ]
+}

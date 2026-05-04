@@ -4,6 +4,8 @@ import ai.sreagent.core.domain.Evidence;
 import ai.sreagent.core.domain.IncidentTask;
 import ai.sreagent.core.evidence.EvidenceLoader;
 import ai.sreagent.k8s.FixtureKubernetesResourceReader;
+import ai.sreagent.k8s.JavaClientKubernetesResourceReader;
+import ai.sreagent.k8s.KubernetesClientConfig;
 import ai.sreagent.k8s.KubernetesEvidenceProvider;
 import ai.sreagent.k8s.KubernetesFaultMode;
 import ai.sreagent.k8s.KubectlKubernetesResourceReader;
@@ -37,8 +39,14 @@ public class CollectK8sEvidenceCommand implements Callable<Integer> {
     @Option(names = "--output", description = "Output path for collected evidence JSON", required = true)
     private String outputPath;
 
-    @Option(names = "--reader", description = "Reader mode: fixture, kubectl", defaultValue = "fixture")
+    @Option(names = "--reader", description = "Reader mode: fixture, kubectl, java-client", defaultValue = "fixture")
     private String readerMode;
+
+    @Option(names = "--client-mode", description = "Java client mode: kubeconfig, in-cluster", defaultValue = "kubeconfig")
+    private String clientMode;
+
+    @Option(names = "--kubeconfig", description = "Path to kubeconfig file (java-client kubeconfig mode)")
+    private String kubeconfigPath;
 
     @Option(names = "--detect-faults", description = "Also detect K8s fault modes")
     private boolean detectFaults;
@@ -66,8 +74,13 @@ public class CollectK8sEvidenceCommand implements Callable<Integer> {
             return 1;
         }
 
-        // 3. Collect evidence
-        List<Evidence> evidence = provider.collectEvidence(incident);
+        // 3. Collect evidence (semantic for live readers, generic for fixture)
+        List<Evidence> evidence;
+        if ("kubectl".equals(readerMode) || "java-client".equals(readerMode)) {
+            evidence = provider.collectSemanticEvidence(incident);
+        } else {
+            evidence = provider.collectEvidence(incident);
+        }
         System.out.println("Collected " + evidence.size() + " evidence items from Kubernetes");
 
         // 4. Detect faults if requested
@@ -110,7 +123,20 @@ public class CollectK8sEvidenceCommand implements Callable<Integer> {
     private KubernetesEvidenceProvider createProvider() {
         return switch (readerMode) {
             case "kubectl" -> new KubernetesEvidenceProvider(new KubectlKubernetesResourceReader());
+            case "java-client" -> new KubernetesEvidenceProvider(createJavaClientReader());
             default -> new KubernetesEvidenceProvider(new FixtureKubernetesResourceReader());
         };
+    }
+
+    private JavaClientKubernetesResourceReader createJavaClientReader() {
+        KubernetesClientConfig config = switch (clientMode.toLowerCase()) {
+            case "in-cluster" -> KubernetesClientConfig.inCluster();
+            default -> {
+                KubernetesClientConfig.KubernetesClientMode mode =
+                    KubernetesClientConfig.KubernetesClientMode.KUBECONFIG;
+                yield new KubernetesClientConfig(mode, kubeconfigPath, null, 10_000);
+            }
+        };
+        return new JavaClientKubernetesResourceReader(config);
     }
 }

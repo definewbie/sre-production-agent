@@ -1,4 +1,9 @@
 .PHONY: build test clean verify-json server-up
+.PHONY: cluster-up cluster-down kube-context cluster-status namespaces
+.PHONY: deploy-smoke smoke-test clean-smoke
+.PHONY: deploy-crashloop-demo wait-crashloop collect-k8s-evidence-live investigate-k8s-live clean-crashloop-demo live-k8s-demo
+
+# ─── Build & Test ───────────────────────────────────────────
 
 build:
 	mvn package -DskipTests
@@ -20,29 +25,44 @@ server-up:
 health:
 	curl -s http://localhost:8080/health
 
+# ─── kind Cluster Lifecycle ────────────────────────────────
+
 KIND_CLUSTER_NAME := sre-agent
 KIND_CONFIG := k8s/kind-sre-agent.yaml
-.PHONY: cluster-up cluster-down cluster-status namespaces deploy-smoke smoke-test clean-smoke kube-context
 
 cluster-up:
-	kind create cluster --config $(KIND_CONFIG)
+	@echo "Creating kind cluster '$(KIND_CLUSTER_NAME)'..."
+	kind create cluster --config $(KIND_CONFIG) || \
+		(echo "Cluster may already exist. Use 'make cluster-down' first to recreate." && exit 1)
+	@echo "Switching kube context..."
+	kubectl config use-context kind-$(KIND_CLUSTER_NAME)
+	@echo "Cluster ready."
+	make cluster-status
 
 cluster-down:
+	@echo "Deleting kind cluster '$(KIND_CLUSTER_NAME)'..."
 	kind delete cluster --name $(KIND_CLUSTER_NAME)
+	@echo "Cluster deleted."
 
 kube-context:
 	kubectl config use-context kind-$(KIND_CLUSTER_NAME)
 
 cluster-status:
+	@echo "=== Cluster Info ==="
 	kubectl cluster-info --context kind-$(KIND_CLUSTER_NAME)
+	@echo "=== Nodes ==="
 	kubectl get nodes -o wide
+	@echo "=== All Pods ==="
 	kubectl get pods -A
 
 namespaces:
 	kubectl apply -f k8s/namespaces/demo.yaml
 	kubectl apply -f k8s/namespaces/observability.yaml
 	kubectl apply -f k8s/namespaces/sre-agent.yaml
+	@echo "Namespaces created."
 	kubectl get ns
+
+# ─── Smoke Test (nginx, Step H) ───────────────────────────
 
 deploy-smoke:
 	kubectl apply -f k8s/demo-services/nginx-smoke.yaml
@@ -60,3 +80,76 @@ smoke-test:
 
 clean-smoke:
 	kubectl delete -f k8s/demo-services/nginx-smoke.yaml --ignore-not-found=true
+
+# ─── CrashLoopBackOff Live Demo (Step K) ──────────────────
+
+# Find the CLI jar dynamically
+CLI_JAR := $(shell ls sre-agent-cli/target/sre-agent-cli-*.jar 2>/dev/null | head -1)
+
+deploy-crashloop-demo:
+	@echo "Deploying recommend-service CrashLoopBackOff demo..."
+	kubectl apply -f k8s/demo-services/recommend-crashloop-demo.yaml
+	@echo "Deployment created. Waiting for CrashLoopBackOff..."
+	@echo "Run 'make wait-crashloop' to wait for the pod to enter CrashLoopBackOff state."
+
+wait-crashloop:
+	@echo "Waiting for recommend-service pod to enter CrashLoopBackOff..."
+	@timeout=90; \
+	elapsed=0; \
+	while [ $$elapsed -lt $$timeout ]; do \
+		status=$$(kubectl -n demo get pods -l app=recommend-service -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || echo ""); \
+		restarts=$$(kubectl -n demo get pods -l app=recommend-service -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null || echo "0"); \
+		if [ "$$status" = "CrashLoopBackOff" ] || [ "$$restarts" -ge 2 ]; then \
+			echo ""; \
+			echo "✓ Pod is in CrashLoopBackOff (restarts: $$restarts)"; \
+			kubectl -n demo get pods -l app=recommend-service -o wide; \
+			exit 0; \
+		fi; \
+		echo "  Waiting... (status=$$status, restarts=$$restarts, elapsed=$${elapsed}s)"; \
+		sleep 5; \
+		elapsed=$$((elapsed + 5)); \
+	done; \
+	echo "⚠ Timeout waiting for CrashLoopBackOff. Current state:"; \
+	kubectl -n demo get pods -l app=recommend-service -o wide; \
+	kubectl -n demo describe pod -l app=recommend-service | tail -20; \
+	exit 1
+
+collect-k8s-evidence-live:
+	@if [ -z "$(CLI_JAR)" ]; then echo "Error: CLI jar not found. Run 'make build' first."; exit 1; fi
+	@echo "Collecting live K8s evidence from kind cluster..."
+	java -jar $(CLI_JAR) collect-k8s-evidence \
+		--namespace demo \
+		--service recommend-service \
+		--output examples/evidence/k8s_crashloop_live_evidence.json \
+		--reader kubectl
+	@echo "Live evidence collected."
+	@echo "=== Evidence Summary ==="
+	@cat examples/evidence/k8s_crashloop_live_evidence.json | python3 -c "import json,sys; items=json.load(sys.stdin); print('Evidence count:', len(items)); [print('  -', i.get('evidence_type','?')) for i in items]"
+
+investigate-k8s-live:
+	@if [ -z "$(CLI_JAR)" ]; then echo "Error: CLI jar not found. Run 'make build' first."; exit 1; fi
+	@echo "Running RCA investigation with live K8s evidence..."
+	java -jar $(CLI_JAR) investigate \
+		--alert examples/alerts/k8s_crashloop.json \
+		--evidence examples/evidence/k8s_crashloop_live_evidence.json \
+		--output examples/reports/k8s_crashloop_live_report.md \
+		--show-trace
+	@echo "=== Report Generated ==="
+	@head -30 examples/reports/k8s_crashloop_live_report.md
+
+clean-crashloop-demo:
+	@echo "Cleaning up CrashLoopBackOff demo..."
+	kubectl delete -f k8s/demo-services/recommend-crashloop-demo.yaml --ignore-not-found=true
+	@echo "Demo resources deleted."
+
+live-k8s-demo: cluster-status namespaces deploy-crashloop-demo wait-crashloop collect-k8s-evidence-live investigate-k8s-live
+	@echo ""
+	@echo "═══════════════════════════════════════════════════"
+	@echo "  Live K8s Demo Complete!"
+	@echo "═══════════════════════════════════════════════════"
+	@echo ""
+	@echo "Evidence: examples/evidence/k8s_crashloop_live_evidence.json"
+	@echo "Report:   examples/reports/k8s_crashloop_live_report.md"
+	@echo ""
+	@echo "Cleanup:  make clean-crashloop-demo"
+	@echo "Tear down: make cluster-down"

@@ -2,11 +2,11 @@
 
 ## Priority Depends on Interview Target
 
-| Target Role | Priority Step | Reason |
+|| Target Role | Priority Step | Reason |
 |---|---|---|
-| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → Step L: OpenAI provider swap | Demonstrates principled LLM integration |
-| SRE / Platform Engineer | ~~Steps H–J~~ ✅ Done → Step K: More diagnostic patterns | Demonstrates K8s observability knowledge |
-| Engineering Manager / Architect | Polish architecture narrative | Demonstrates design trade-off reasoning |
+|| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → Step T: Local Observability Stack | Demonstrates principled LLM + evidence + probe integration |
+|| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → Step T: Local Observability Stack | Demonstrates full observability pipeline |
+|| Engineering Manager / Architect | Polish architecture narrative | Demonstrates design trade-off reasoning |
 
 ---
 
@@ -135,7 +135,66 @@ The core insight: **the scoring pipeline is already platform-agnostic**. It only
 
 ---
 
-## Step K: More Diagnostic Patterns
+## Step K: Live K8s / kind Integration ✅ COMPLETED
+
+**Status:** Completed. Scenario F extended with optional live kind demo path.
+
+**What was built:**
+- CrashLoopBackOff demo manifest: `k8s/demo-services/recommend-crashloop-demo.yaml`
+- Namespace-scoped read-only RBAC: `k8s/rbac/sre-agent-reader.yaml`
+- Makefile targets: `cluster-up`, `deploy-crashloop-demo`, `wait-crashloop`, `collect-k8s-evidence-live`, `investigate-k8s-live`, `clean-crashloop-demo`, `live-k8s-demo`
+- Live K8s demo documentation: `docs/live-k8s-demo.md`
+- K8s evidence provider architecture doc: `docs/k8s-evidence-provider.md`
+- Updated `docs/LOCAL_K8S_SETUP.md` with live demo instructions
+
+**Why this matters:**
+- Proves the provider abstraction works with real K8s cluster data, not just fixture JSON
+- Same RCA core produces `likely_root_cause` from both fixture and live evidence
+- Demonstrates SRE / Platform engineering capability with real K8s tooling
+- `mvn test` remains independent of live cluster
+
+**Two evidence paths:**
+
+| Path | Purpose | Run by |
+|------|---------|--------|
+| Fixture (default) | Deterministic CI / unit tests | `mvn test` |
+| Live kind (optional) | Local demo / platform credibility | `make live-k8s-demo` |
+
+---
+
+## Step L: Kubernetes Java Client Integration ✅ COMPLETED
+
+**Status:** Completed. Production-grade Kubernetes Java Client as an alternative evidence reader.
+
+**What was built:**
+- Added `io.kubernetes:client-java:24.0.0` dependency to `sre-agent-k8s-provider`
+- `JavaClientKubernetesResourceReader` — implements `KubernetesResourceReader` SPI using the official Java client
+- `KubernetesClientConfig` — configuration holder for client mode, kubeconfig path, namespace, timeouts
+- `KubernetesApiClientFactory` — client lifecycle management (kubeconfig + in-cluster modes)
+- `KubernetesEvidenceCollectionException` — typed exception for evidence collection failures
+- CLI flags: `--reader java-client`, `--client-mode <kubeconfig|in-cluster>`, `--kubeconfig <path>`
+- Updated RBAC YAML and created `docs/k8s-rbac.md`
+- Updated `docs/k8s-evidence-provider.md` with Java client architecture
+- Bug fix: `mapPodToSemanticEvidence()` now detects CrashLoop from terminated container state (not just waiting state)
+
+**Why this matters:**
+- Demonstrates production-grade K8s API integration using the official Java client library
+- Supports both kubeconfig (local dev) and in-cluster (pod) authentication modes
+- Validates the `KubernetesResourceReader` SPI abstraction — fixture, kubectl, and Java client all produce identical RCA results
+- 15 new tests (186 total, up from 171)
+- Live `kind` validation: `hyp_pod_crash_loop = 0.95`, decision = `likely_root_cause`
+
+**Three evidence paths:**
+
+| Path | Purpose | Run by |
+|------|---------|--------|
+| Fixture (default) | Deterministic CI / unit tests | `mvn test` |
+| Live kubectl (optional) | Local demo via shell | `make live-k8s-demo` |
+| Java Client (optional) | Production-grade API client | `--reader java-client` |
+
+---
+
+## Step K+: More Diagnostic Patterns (Future Extension)
 
 **Goal:** Expand coverage beyond the current 4 patterns (config_drift, resource_exhaustion, dependency_failure, pod_crash_loop).
 
@@ -156,7 +215,251 @@ The core insight: **the scoring pipeline is already platform-agnostic**. It only
 
 ---
 
-## Beyond Step K (Longer Term)
+## Step M: Prometheus Metrics Evidence Provider ✅ COMPLETED
+
+**Status:** Completed. Prometheus metric evidence adapter module with fixture-based testing.
+
+**What was built:**
+- `sre-agent-prometheus-provider` module (6th Maven module, package `ai.sreagent.prometheus`)
+- `PrometheusQueryClient` interface (SPI) with `FixturePrometheusQueryClient` and `HttpPrometheusQueryClient` implementations
+- `PrometheusResponseParser` — handles vector/range results, NaN/+Inf, empty results
+- `PrometheusQueryTemplateRegistry` — 8 query types: ERROR_RATE, LATENCY_P95, LATENCY_P99, DOWNSTREAM_LATENCY_P95, MEMORY_USAGE, CPU_USAGE, RESTART_RATE, REQUEST_RATE
+- `PrometheusEvidenceMapper` — threshold-based mapping to 9 semantic evidence types
+- `PrometheusEvidenceProvider` — orchestrator (client → parser → mapper)
+- CLI command: `collect-prometheus-evidence` with `--service`, `--namespace`, `--query-type`, `--reader`, `--prometheus-url` flags
+- 43 new tests (229 total, up from 186)
+
+**Architecture:**
+```
+PrometheusEvidenceProvider (orchestrator)
+  ↓
+PrometheusQueryClient (SPI)
+  ├── FixturePrometheusQueryClient  ← Tests / CI
+  └── HttpPrometheusQueryClient     ← Production
+  ↓
+PrometheusResponseParser → PrometheusEvidenceMapper
+  ↓
+List<Evidence> (source = "prometheus")
+```
+
+**Key design invariants:**
+- `sre-agent-core` has zero Prometheus dependency — the provider is a pure adapter
+- Fixture-based testing — no live Prometheus required for tests or CI
+- Provider outputs generic `Evidence` objects; core pipeline is data-source agnostic
+- All PromQL templates are environment-specific and designed to be overridden per deployment
+
+**Why this matters:**
+- First observability signal provider beyond Kubernetes resource evidence
+- Enables the agent to reason about metric anomalies (error rate spikes, latency degradation, resource saturation)
+- Validates the adapter pattern for evidence providers — same `core ← provider` boundary as K8s provider
+- Foundation for Step R (LLM Hypothesis Proposer) which will consume metric evidence
+
+---
+
+## Step N: Loki Logs Evidence Provider ✅ COMPLETED
+
+**Status:** Completed. Loki log evidence adapter module with fixture-based testing.
+
+**What was built:**
+- `sre-agent-loki-provider` module (7th Maven module, package `ai.sreagent.loki`)
+- `LokiQueryClient` interface (SPI) with `FixtureLokiQueryClient` and `HttpLokiQueryClient` implementations
+- `LokiResponseParser` — handles stream results, nanosecond timestamps, error/empty results
+- `LokiQueryTemplateRegistry` — 8 LogQL query types: TIMEOUT_ERROR, DOWNSTREAM_TIMEOUT, DOWNSTREAM_ERROR, EXCEPTION_LOGS, CRASH_LOGS, OOM_LOGS, DB_CONNECTION_TIMEOUT, RETRY_EXHAUSTED, HTTP_5XX_LOGS
+- `LokiEvidenceMapper` — maps log patterns to 9 semantic evidence types
+- `LokiEvidenceProvider` — orchestrator (client → parser → mapper)
+- CLI command: `collect-loki-evidence` with `--service`, `--namespace`, `--query-type`, `--output`, `--reader`, `--loki-url` flags
+- 30 new tests (263 total, up from 229)
+
+**Architecture:**
+```
+LokiEvidenceProvider (orchestrator)
+  ↓
+LokiQueryClient (SPI)
+  ├── FixtureLokiQueryClient  ← Tests / CI
+  └── HttpLokiQueryClient     ← Production
+  ↓
+LokiResponseParser → LokiEvidenceMapper
+  ↓
+List<Evidence> (source = "loki")
+```
+
+**Key design invariants:**
+- `sre-agent-core` has zero Loki dependency — the provider is a pure adapter
+- Fixture-based testing — no live Loki required for tests or CI
+- Provider outputs generic `Evidence` objects; core pipeline is data-source agnostic
+- All LogQL templates are environment-specific and designed to be overridden per deployment
+
+**Why this matters:**
+- First log-based observability provider — complements Prometheus metric evidence
+- Enables the agent to reason about log anomalies (timeout errors, exception bursts, OOM messages)
+- Combined Prometheus + Loki evidence enables multi-signal correlation
+- Foundation for Step R (LLM Hypothesis Proposer) which will consume both metric and log evidence
+
+---
+
+## Step O: Alertmanager Alert Evidence Provider ✅ COMPLETED
+
+**Status:** Completed. Alertmanager alert evidence adapter module with fixture-based testing.
+
+**What was built:**
+- `sre-agent-alertmanager-provider` module (8th Maven module, package `ai.sreagent.alertmanager`)
+- `AlertmanagerQueryClient` interface (SPI) with `FixtureAlertmanagerQueryClient` and `HttpAlertmanagerQueryClient` implementations
+- `AlertmanagerResponseParser` — handles alert/route/silence results, status/state parsing, empty results
+- `AlertmanagerEvidenceMapper` — maps alert patterns to 7 semantic evidence types (alert lifecycle, incident mapping, severity evidence)
+- `AlertmanagerEvidenceProvider` — orchestrator (client → parser → mapper) producing dual output: incidents + evidence
+- CLI command: `collect-alertmanager-evidence` with `--service`, `--namespace`, `--alertmanager-url`, `--reader` flags
+- 45 new tests (308 total, up from 263)
+
+**Key design invariants:**
+- `sre-agent-core` has zero Alertmanager dependency — the provider is a pure adapter
+- Fixture-based testing — no live Alertmanager required for tests or CI
+- Provider outputs generic `Evidence` objects; core pipeline is data-source agnostic
+- Dual output: both incident context and evidence objects for full RCA integration
+
+---
+
+## Step P: Distributed Trace Evidence Provider ✅ COMPLETED
+
+**Status:** Completed. Distributed trace evidence adapter module with fixture-based testing.
+
+**What was built:**
+- `sre-agent-trace-provider` module (9th Maven module, package `ai.sreagent.trace`)
+- `TraceQueryClient` interface (SPI) with `FixtureTraceQueryClient` and `HttpTraceQueryClient` implementations
+- `TraceResponseParser` — handles trace/span results, duration parsing, error status, service dependency extraction
+- `TraceQueryTemplateRegistry` — 6 query types: SLOW_SPANS, ERROR_SPANS, SERVICE_DEPENDENCY, SPAN_ERRORS_BY_SERVICE, TRACE_DURATION_HISTOGRAM, SERVICE_CALL_GRAPH
+- `TraceEvidenceMapper` — maps trace patterns to 8 semantic evidence types
+- `TraceEvidenceProvider` — orchestrator (client → parser → mapper)
+- CLI command: `collect-trace-evidence` with `--service`, `--namespace`, `--query-type`, `--output`, `--reader`, `--trace-url` flags
+- 35 new tests (343 total, up from 308)
+
+**Architecture:**
+```
+TraceEvidenceProvider (orchestrator)
+  ↓
+TraceQueryClient (SPI)
+  ├── FixtureTraceQueryClient  ← Tests / CI
+  └── HttpTraceQueryClient     ← Production (Jaeger/Tempo)
+  ↓
+TraceResponseParser → TraceEvidenceMapper
+  ↓
+List<Evidence> (source = "trace")
+```
+
+**Key design invariants:**
+- `sre-agent-core` has zero trace dependency — the provider is a pure adapter
+- Fixture-based testing — no live Jaeger/Tempo required for tests or CI
+- Provider outputs generic `Evidence` objects; core pipeline is data-source agnostic
+
+---
+
+## Step Q: Observability Evidence Taxonomy ✅ COMPLETED
+
+**Status:** Completed. Provider-agnostic evidence taxonomy with category, signal, sourceKind, severity, and causalRole normalization in `sre-agent-core`.
+
+**What was built:**
+- `EvidenceCategory` enum — classifies evidence into metric, log, trace, alert, k8s_resource, deploy, topology categories
+- `EvidenceSignal` enum — normalizes signal direction: spike, drop, saturation, anomaly, recovery, no_signal
+- `EvidenceSourceKind` enum — classifies data source: prometheus, loki, jaeger, alertmanager, kubernetes, git, cmdb, manual
+- `EvidenceSeverity` enum — normalized severity: critical, high, medium, low, info
+- `CausalRole` enum — causal role in hypothesis: supporting, counter, contextual, trigger, consequence
+- `EvidenceTaxonomy` record — composite taxonomy combining all classifications
+- `EvidenceNormalizer` — maps raw `Evidence` to normalized `EvidenceTaxonomy`
+- Provider-agnostic: all providers now produce evidence that can be classified through the same taxonomy
+- Foundation for Step R (LLM Hypothesis Proposer)
+
+**Estimated effort:** 1 day
+
+---
+
+## Step R: LLM Hypothesis Proposer v1 ✅ COMPLETED
+
+**Status:** Completed. LLM-based hypothesis proposal system with strict advisory-only guardrails.
+
+**What was built:**
+- `ai.sreagent.llm.proposer` package in `sre-agent-llm` module
+- `LlmHypothesisProposer` interface — SPI for LLM hypothesis proposal
+- `MockLlmHypothesisProposer` — deterministic implementation for tests/CI
+- `LlmHypothesisProposalPromptBuilder` — constructs evidence-aware prompts with guardrails
+- `LlmProposalTriggerPolicy` — determines when to propose (competing_hypotheses, uncertain, low confidence, small score gap)
+- `ProposalGuardrail` — enforces advisory-only constraints
+- New models: `ProposalStatus`, `ProbeType`, `ProbeIntent`, `VerificationPlan`, `UnverifiedHypothesisProposal`, `LlmHypothesisProposalResult`
+- CLI command: `propose-hypotheses --alert <path> --evidence <path> --output <path>`
+- 92 new tests (435 total, up from 343, across 9 modules)
+
+**Key architectural constraint:** LLM proposals are **advisory only** — they never change `InvestigationDecision`, `ConfidenceResult`, `VerificationResult`, and never create `Evidence`. All proposals carry `ProposalStatus.UNVERIFIED_PROPOSAL` and `canAffectDecision=false`.
+
+**Trigger policy:**
+- Only proposes when investigation is inconclusive: `competing_hypotheses`, `uncertain`, low confidence, or small score gap
+- Scenario E (`competing_hypotheses`) → triggers proposals (1 proposal: `deployment_timeout_amplification`)
+- Scenario F (`likely_root_cause`, high confidence) → no proposals
+
+**Guardrails:**
+- All proposals are `UNVERIFIED_PROPOSAL` — never override deterministic RCA
+- `canAffectDecision=false` — proposals cannot influence the investigation decision
+- Never creates `Evidence` objects — proposals are purely informational
+- LLM cannot change `InvestigationDecision`, `ConfidenceResult`, or `VerificationResult`
+
+**Test breakdown:** Core:124, LLM:51, K8s:48, Prometheus:43, Loki:30, Alertmanager:45, Trace:66, Server:23, CLI:15 (435 total, 0 failures)
+
+**Next step:** Step T — Local Observability Stack on kind
+
+---
+
+## Step S: Probe Execution Framework v1 ✅ COMPLETED
+
+**Status:** Completed. Routes LLM-generated ProbeIntents to existing evidence providers and collects new Evidence.
+
+**What was built:**
+- `sre-agent-probe-executor` module (10th Maven module, package `ai.sreagent.probe`)
+- `ProbeIntentRouter` — routes ProbeType to supported providers (Prometheus, Loki, Trace, Kubernetes, Alertmanager)
+- `ProbeExecutionPolicy` — enforces `canAffectDecision=false` and rejects LIVE mode (only FIXTURE supported in Step S)
+- `FixtureProbeExecutor` — generates fixture Evidence per probe type using existing fixture clients
+- 5 provider mappers: `PrometheusProbeMapper`, `LokiProbeMapper`, `TraceProbeMapper`, `KubernetesProbeMapper`, `AlertmanagerProbeMapper`
+- CLI command: `propose-and-execute-probes`
+- REST endpoint: `POST /api/investigations/scenario-e/propose-and-execute-probes`
+- UI: Probe Execution card in `index.html`
+- 46 new tests in probe-executor module (484 total, up from 435, 0 failures)
+
+**Architecture:**
+```
+LlmHypothesisProposalResult (from Step R)
+  ↓  contains List<ProbeIntent>
+ProbeIntentRouter
+  ↓  maps ProbeType → Provider
+ProbeExecutionPolicy (canAffectDecision=false, mode=FIXTURE only)
+  ↓
+FixtureProbeExecutor
+  ├── PrometheusProbeMapper → FixturePrometheusQueryClient
+  ├── LokiProbeMapper       → FixtureLokiQueryClient
+  ├── TraceProbeMapper      → FixtureTraceQueryClient
+  ├── KubernetesProbeMapper → K8sFixtureLoader
+  └── AlertmanagerProbeMapper → FixtureAlertmanagerQueryClient
+  ↓
+List<Evidence> (probe evidence, informational only)
+```
+
+**Key constraints:**
+- Probe execution does **NOT** bypass Verification — probe evidence goes through the same pipeline
+- Probe execution does **NOT** mutate RCA decision — collected evidence is informational only
+- `canAffectDecision` is always `false` — enforced at compile time via `ProbeExecutionPolicy`
+- Only FIXTURE mode supported in Step S — LIVE mode is rejected by policy
+- Probe evidence is informational only — it does not automatically re-trigger investigation
+
+**Why this matters:**
+- Completes the LLM → Probe → Evidence feedback loop started in Step R
+- Demonstrates principled separation: LLM proposes probes, probe executor collects evidence, but neither changes the RCA decision
+- Validates that existing evidence providers (Steps M–P) can be reused for probe-driven evidence collection
+- The `canAffectDecision=false` guardrail ensures the deterministic pipeline remains authoritative
+
+**Next steps after S:**
+- Step T: Local observability stack on kind (Prometheus + Loki + Tempo + Alertmanager)
+- Step U: Instrumented demo services (order-service, payment-service, recommend-service)
+- Step V: Complex live RCA with real observability data
+- Step W: Post-probe RCA re-run policy (allowing controlled evidence injection into re-investigation)
+
+---
+
+## Beyond Step M (Longer Term)
 
 These are not committed — listed for discussion only:
 
@@ -193,8 +496,8 @@ These are not committed — listed for discussion only:
 
 | 目标岗位 | 优先步骤 | 原因 |
 |---|---|---|
-| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → Step L: OpenAI 提供者替换 | 展示了规范的 LLM 集成能力 |
-| SRE / 平台工程师 | ~~Steps H–J~~ ✅ 已完成 → Step K: 更多诊断模式 | 展示了 K8s 可观测性知识 |
+|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → Step T: 本地可观测性栈 | 展示了规范的 LLM + 证据 + 探测集成能力 |
+|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → Step T: 本地可观测性栈 | 展示了完整的可观测性流水线 |
 | 工程经理 / 架构师 | 完善架构叙事 | 展示了设计权衡推理能力 |
 
 ---
@@ -324,7 +627,66 @@ ScoredHypothesis (pod_crash_loop, score=0.95, likely_root_cause)
 
 ---
 
-## Step K: 更多诊断模式
+## Step K: 实时 K8s / kind 集成 ✅ 已完成
+
+**状态：** 已完成。Scenario F 已扩展，支持可选的实时 kind 演示路径。
+
+**已构建内容：**
+- CrashLoopBackOff 演示清单：`k8s/demo-services/recommend-crashloop-demo.yaml`
+- 命名空间范围的只读 RBAC：`k8s/rbac/sre-agent-reader.yaml`
+- Makefile 目标：`cluster-up`、`deploy-crashloop-demo`、`wait-crashloop`、`collect-k8s-evidence-live`、`investigate-k8s-live`、`clean-crashloop-demo`、`live-k8s-demo`
+- 实时 K8s 演示文档：`docs/live-k8s-demo.md`
+- K8s 证据提供者架构文档：`docs/k8s-evidence-provider.md`
+- 更新了 `docs/LOCAL_K8S_SETUP.md`，添加了实时演示说明
+
+**为什么重要：**
+- 证明了提供者抽象不仅适用于固定数据 JSON，也能处理真实 K8s 集群数据
+- 相同的 RCA 核心从固定数据和实时证据都能生成 `likely_root_cause`
+- 展示了使用真实 K8s 工具的 SRE / 平台工程能力
+- `mvn test` 仍独立于实时集群
+
+**两条证据路径：**
+
+| 路径 | 用途 | 运行方式 |
+|------|------|----------|
+| 固定数据（默认） | 确定性 CI / 单元测试 | `mvn test` |
+| 实时 kind（可选） | 本地演示 / 平台可信度 | `make live-k8s-demo` |
+
+---
+
+## Step L: Kubernetes Java Client 集成 ✅ 已完成
+
+**状态：** 已完成。生产级 Kubernetes Java Client 作为替代证据读取器。
+
+**已构建内容：**
+- 在 `sre-agent-k8s-provider` 中添加 `io.kubernetes:client-java:24.0.0` 依赖
+- `JavaClientKubernetesResourceReader` — 使用官方 Java 客户端实现 `KubernetesResourceReader` SPI
+- `KubernetesClientConfig` — 客户端模式、kubeconfig 路径、命名空间、超时等配置
+- `KubernetesApiClientFactory` — 客户端生命周期管理（kubeconfig + 集群内模式）
+- `KubernetesEvidenceCollectionException` — 证据收集异常的类型化处理
+- CLI 标志：`--reader java-client`、`--client-mode <kubeconfig|in-cluster>`、`--kubeconfig <path>`
+- 更新 RBAC YAML 并创建 `docs/k8s-rbac.md`
+- 更新 `docs/k8s-evidence-provider.md` 添加 Java 客户端架构
+- Bug 修复：`mapPodToSemanticEvidence()` 现在可从已终止状态检测 CrashLoop（不仅限于等待状态）
+
+**为什么重要：**
+- 展示了使用官方 Java 客户端库的生产级 K8s API 集成
+- 同时支持 kubeconfig（本地开发）和集群内（Pod）认证模式
+- 验证了 `KubernetesResourceReader` SPI 抽象——固定数据、kubectl 和 Java 客户端均产生相同的 RCA 结果
+- 15 个新测试（共 186 个，从 171 个增加）
+- 实时 `kind` 验证：`hyp_pod_crash_loop = 0.95`，决策 = `likely_root_cause`
+
+**三条证据路径：**
+
+| 路径 | 用途 | 运行方式 |
+|------|------|----------|
+| 固定数据（默认） | 确定性 CI / 单元测试 | `mvn test` |
+| 实时 kubectl（可选） | 通过 shell 本地演示 | `make live-k8s-demo` |
+| Java 客户端（可选） | 生产级 API 客户端 | `--reader java-client` |
+
+---
+
+## Step K+: 更多诊断模式（未来扩展）
 
 **目标：** 将覆盖范围扩展到当前 4 个模式之外（config_drift、resource_exhaustion、dependency_failure、pod_crash_loop）。
 
@@ -345,7 +707,7 @@ ScoredHypothesis (pod_crash_loop, score=0.95, likely_root_cause)
 
 ---
 
-## Step K 以后（长期方向）
+## Step L 以后（长期方向）
 
 这些尚未纳入计划——仅供讨论：
 
@@ -357,6 +719,76 @@ ScoredHypothesis (pod_crash_loop, score=0.95, likely_root_cause)
 | Slack / Teams 集成 | 将调查结果发送到事件频道 | 低 |
 | Runbook 自动化 | 将决策关联到具体的 Runbook 步骤 | 中 |
 | AIOps 基准测试 | 将 Agent 准确率与纯人工 RCA 进行比较 | 高 |
+
+---
+
+## Step R: LLM 假设提议 v1 ✅ 已完成
+
+**状态：** 已完成。具有严格仅咨询性防护措施的 LLM 假设提议系统。
+
+**已构建内容：**
+- `ai.sreagent.llm.proposer` 包，位于 `sre-agent-llm` 模块
+- `LlmHypothesisProposer` 接口 — LLM 假设提议的 SPI
+- `MockLlmHypothesisProposer` — 用于测试/CI 的确定性实现
+- `LlmHypothesisProposalPromptBuilder` — 构建带防护措施的证据感知提示词
+- `LlmProposalTriggerPolicy` — 确定何时提议（competing_hypotheses、uncertain、低置信度、小分数差距）
+- `ProposalGuardrail` — 强制执行仅咨询性约束
+- 新模型：`ProposalStatus`、`ProbeType`、`ProbeIntent`、`VerificationPlan`、`UnverifiedHypothesisProposal`、`LlmHypothesisProposalResult`
+- CLI 命令：`propose-hypotheses --alert <path> --evidence <path> --output <path>`
+- 92 个新测试（共 435 个，从 343 个增加，跨 9 个模块）
+
+**关键架构约束：** LLM 提议**仅限咨询性** — 它们永远不会更改 `InvestigationDecision`、`ConfidenceResult`、`VerificationResult`，也永远不会创建 `Evidence`。所有提议都带有 `ProposalStatus.UNVERIFIED_PROPOSAL` 和 `canAffectDecision=false`。
+
+**触发策略：**
+- 仅在调查不确定时提议：`competing_hypotheses`、`uncertain`、低置信度或小分数差距
+- 场景 E（`competing_hypotheses`）→ 触发提议（1 个提议：`deployment_timeout_amplification`）
+- 场景 F（`likely_root_cause`，高置信度）→ 无提议
+
+**防护措施：**
+- 所有提议均为 `UNVERIFIED_PROPOSAL` — 永远不覆盖确定性 RCA
+- `canAffectDecision=false` — 提议不能影响调查决策
+- 永远不创建 `Evidence` 对象 — 提议纯粹是信息性的
+- LLM 不能更改 `InvestigationDecision`、`ConfidenceResult` 或 `VerificationResult`
+
+**测试分布：** Core:124, LLM:51, K8s:48, Prometheus:43, Loki:30, Alertmanager:45, Trace:66, Server:23, CLI:15（共 435 个，0 失败）
+
+**下一步：** Step T — kind 上的本地可观测性栈
+
+---
+
+## Step S: 探测执行框架 v1 ✅ 已完成
+
+**状态：** 已完成。将 LLM 生成的 ProbeIntent 路由到现有证据提供者，收集新证据。
+
+**已构建内容：**
+- `sre-agent-probe-executor` 模块（第 10 个 Maven 模块，包 `ai.sreagent.probe`）
+- `ProbeIntentRouter` — 将 ProbeType 路由到受支持的提供者（Prometheus、Loki、Trace、Kubernetes、Alertmanager）
+- `ProbeExecutionPolicy` — 强制 `canAffectDecision=false` 并拒绝 LIVE 模式（Step S 仅支持 FIXTURE）
+- `FixtureProbeExecutor` — 使用现有 fixture 客户端按探测类型生成 fixture 证据
+- 5 个提供者映射器：`PrometheusProbeMapper`、`LokiProbeMapper`、`TraceProbeMapper`、`KubernetesProbeMapper`、`AlertmanagerProbeMapper`
+- CLI 命令：`propose-and-execute-probes`
+- REST 端点：`POST /api/investigations/scenario-e/propose-and-execute-probes`
+- UI：`index.html` 中的探测执行卡片
+- probe-executor 模块中 46 个新测试（共 484 个，从 435 个增加，0 失败）
+
+**关键约束：**
+- 探测执行**不会**绕过验证——探测证据通过相同流水线处理
+- 探测执行**不会**变更 RCA 决策——收集的证据仅用于信息参考
+- `canAffectDecision` 始终为 `false`——通过 `ProbeExecutionPolicy` 在编译时强制执行
+- Step S 仅支持 FIXTURE 模式——LIVE 模式被策略拒绝
+- 探测证据仅用于信息参考——不会自动重新触发调查
+
+**重要性：**
+- 完成了 Step R 开始的 LLM → 探测 → 证据反馈循环
+- 展示了有原则的分离：LLM 提议探测，探测执行器收集证据，但两者都不改变 RCA 决策
+- 验证了现有证据提供者（Steps M–P）可被复用于探测驱动的证据收集
+- `canAffectDecision=false` 防护措施确保确定性流水线保持权威性
+
+**S 之后的后续步骤：**
+- Step T：kind 上的本地可观测性栈（Prometheus + Loki + Tempo + Alertmanager）
+- Step U：仪表化演示服务（order-service、payment-service、recommend-service）
+- Step V：使用真实可观测性数据的复杂实时 RCA
+- Step W：探测后 RCA 重新运行策略（允许受控证据注入重新调查）
 
 ---
 

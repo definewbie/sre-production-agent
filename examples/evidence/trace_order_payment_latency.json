@@ -1,0 +1,55 @@
+{
+  "incidentId" : "cli-trace-1777866655149",
+  "evidence" : [ {
+    "id" : "6deb51aa-e406-4e0b-9792-33ab9d738492",
+    "source" : "tracing",
+    "service" : "order-service",
+    "timestamp" : "2024-04-28T08:20:00.200Z",
+    "content" : "Trace shows slow downstream span: payment-service POST payment-service /charge took 1200ms.",
+    "attributes" : {
+      "traceId" : "trace-downstream-001",
+      "spanId" : "span-payment-001",
+      "parentSpanId" : "span-root-001",
+      "service" : "payment-service",
+      "operation" : "POST payment-service /charge",
+      "durationMs" : 1200,
+      "rootDurationMs" : 1500,
+      "status" : "ok",
+      "attributes" : {
+        "http.status_code" : "200"
+      },
+      "namespace" : "demo"
+    },
+    "strength" : 0.85,
+    "incident_id" : "cli-trace-1777866655149",
+    "evidence_type" : "trace_downstream_span_slow"
+  }, {
+    "id" : "3e077f95-538e-4a31-846c-8269a2b5406d",
+    "source" : "tracing",
+    "service" : "order-service",
+    "timestamp" : "2024-04-28T08:20:00.200Z",
+    "content" : "Trace shows payment-service span consumed 80% of order-service request latency.",
+    "attributes" : {
+      "traceId" : "trace-downstream-001",
+      "spanId" : "span-payment-001",
+      "service" : "payment-service",
+      "operation" : "POST payment-service /charge",
+      "durationMs" : 1200,
+      "rootDurationMs" : 1500,
+      "childDurationRatio" : 0.8,
+      "rootService" : "order-service",
+      "namespace" : "demo"
+    },
+    "strength" : 0.9,
+    "incident_id" : "cli-trace-1777866655149",
+    "evidence_type" : "trace_child_span_dominates_latency"
+  } ],
+  "rawSummary" : {
+    "reader" : "fixture",
+    "service" : "order-service",
+    "namespace" : "demo",
+    "queryCount" : 1,
+    "evidenceCount" : 2,
+    "evidenceTypes" : [ "trace_downstream_span_slow", "trace_child_span_dominates_latency" ]
+  }
+}

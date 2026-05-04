@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": {
+          "service": "order-service",
+          "namespace": "demo"
+        },
+        "values": [
+          ["1714292400000000000", "OOMKilled - container exceeded memory limit of 512Mi"],
+          ["1714292401000000000", "java.lang.OutOfMemoryError: Java heap space"],
+          ["1714292402000000000", "WARN memory usage at 95% of limit, approaching OOM"]
+        ]
+      }
+    ]
+  }
+}

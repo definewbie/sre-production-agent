@@ -1,0 +1,44 @@
+[
+  {
+    "labels": {
+      "alertname": "DownstreamLatencyHigh",
+      "service": "payment-service",
+      "namespace": "demo",
+      "severity": "critical",
+      "downstream": "inventory-service"
+    },
+    "annotations": {
+      "summary": "payment-service downstream latency to inventory-service is high",
+      "description": "p95 latency to inventory-service exceeded 2s threshold"
+    },
+    "startsAt": "2026-04-28T10:05:00Z",
+    "endsAt": "0001-01-01T00:00:00Z",
+    "status": {
+      "state": "active",
+      "silencedBy": [],
+      "inhibitedBy": []
+    },
+    "fingerprint": "def789ghi012"
+  },
+  {
+    "labels": {
+      "alertname": "DownstreamLatencyHigh",
+      "service": "payment-service",
+      "namespace": "demo",
+      "severity": "critical",
+      "downstream": "order-service"
+    },
+    "annotations": {
+      "summary": "payment-service downstream latency to order-service is high",
+      "description": "p95 latency to order-service exceeded 2s threshold"
+    },
+    "startsAt": "2026-04-28T10:05:30Z",
+    "endsAt": "0001-01-01T00:00:00Z",
+    "status": {
+      "state": "active",
+      "silencedBy": [],
+      "inhibitedBy": []
+    },
+    "fingerprint": "ghi345jkl678"
+  }
+]

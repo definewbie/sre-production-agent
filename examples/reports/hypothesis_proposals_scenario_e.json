@@ -1,0 +1,62 @@
+{
+  "incidentId" : "inc_2026-05-04T052901335060Z",
+  "baseDecisionType" : "competing_hypotheses",
+  "baseSelectedHypothesisId" : "hyp_deployment_regression",
+  "baseConfidenceScore" : 0.64,
+  "baseScoreGap" : 0.06,
+  "proposals" : [ {
+    "proposalId" : "llm_prop_deployment_timeout_amplification",
+    "title" : "Deployment timeout change may have amplified downstream latency",
+    "rootCauseType" : "deployment_downstream_amplification_loop",
+    "affectedService" : "order-service",
+    "candidateCause" : "Deployment timeout/retry configuration change amplified downstream latency symptoms, creating a feedback loop between order-service and payment-service",
+    "reasoning" : "The two leading hypotheses (deployment regression and downstream dependency latency) may not be independent. A deployment timeout or retry behavior change could have amplified downstream latency, creating an apparent competing signal. The deployment changed timeout/retry configuration, which caused more aggressive retries to payment-service, which increased load and latency on payment-service, which then appeared as both a deployment regression and a downstream dependency issue.",
+    "supportingSignals" : [ "competing_hypotheses decision with small score gap", "deployment event near incident window", "downstream latency spike on payment-service" ],
+    "verificationPlan" : {
+      "requiredEvidence" : [ "timeout config diff exact value", "pre/post deploy timeout error rate", "payment-service p95 latency by endpoint", "client-side cancellation / timeout metrics", "retry exhausted logs", "order-service -> payment-service slow/error spans" ],
+      "missingEvidence" : [ "timeout config diff", "client-side cancellation metrics", "retry exhausted logs" ],
+      "counterEvidenceToCheck" : [ "payment-service independent error spike", "network partition evidence" ],
+      "probeIntents" : [ {
+        "probeType" : "PROMETHEUS_QUERY",
+        "targetService" : "order-service",
+        "targetEntity" : "order-service",
+        "queryIntent" : "Check order-service timeout error rate before and after deploy",
+        "expectedEvidenceType" : "metric_error_rate_spike",
+        "rationale" : "Determine if deployment increased timeout errors"
+      }, {
+        "probeType" : "PROMETHEUS_QUERY",
+        "targetService" : "payment-service",
+        "targetEntity" : "payment-service",
+        "queryIntent" : "Check payment-service p95 latency during incident window",
+        "expectedEvidenceType" : "metric_latency_p95_spike",
+        "rationale" : "Determine if payment-service latency spiked after deploy"
+      }, {
+        "probeType" : "LOKI_QUERY",
+        "targetService" : "order-service",
+        "targetEntity" : "order-service",
+        "queryIntent" : "Search order-service logs for retry exhausted and downstream timeout",
+        "expectedEvidenceType" : "log_retry_exhausted",
+        "rationale" : "Find evidence of retry amplification"
+      }, {
+        "probeType" : "TRACE_QUERY",
+        "targetService" : "order-service",
+        "targetEntity" : "order-service->payment-service",
+        "queryIntent" : "Inspect order-service to payment-service span latency and error spans",
+        "expectedEvidenceType" : "trace_downstream_span_slow",
+        "rationale" : "Confirm downstream latency amplification in trace data"
+      }, {
+        "probeType" : "KUBERNETES_QUERY",
+        "targetService" : "order-service",
+        "targetEntity" : "order-service-pods",
+        "queryIntent" : "Check order-service pod restart/readiness to rule out local runtime instability",
+        "expectedEvidenceType" : "pod_restart_count_increased",
+        "rationale" : "Rule out local pod issues as alternative cause"
+      } ]
+    },
+    "priorConfidence" : 0.35,
+    "status" : "UNVERIFIED_PROPOSAL",
+    "canAffectDecision" : false
+  } ],
+  "advisoryOnly" : false,
+  "modelProvider" : "mock"
+}

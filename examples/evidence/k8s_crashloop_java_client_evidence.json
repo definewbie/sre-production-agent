@@ -1,0 +1,299 @@
+[ {
+  "id" : "ev-k8s-crashloop-061c622e",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.597214Z",
+  "content" : "Pod recommend-service-6495dd76cd-pq55b is in CrashLoopBackOff state. Container exiting with code 1.",
+  "attributes" : {
+    "pod_name" : "recommend-service-6495dd76cd-pq55b",
+    "container" : "recommend-service",
+    "exit_code" : 1,
+    "reason" : "CrashLoopBackOff",
+    "restart_count" : 5
+  },
+  "strength" : 0.95,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "container_crash_loop_backoff"
+}, {
+  "id" : "ev-k8s-restart-d137885b",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.597272Z",
+  "content" : "Pod has restarted 5 times. Restart count is abnormally high.",
+  "attributes" : {
+    "restart_count" : 5,
+    "pod_name" : "recommend-service-6495dd76cd-pq55b"
+  },
+  "strength" : 0.9,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "pod_restart_count_increased"
+}, {
+  "id" : "ev-k8s-notready-f2eed693",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.597312Z",
+  "content" : "Pod readiness probe failing. Pod recommend-service-6495dd76cd-pq55b is not ready.",
+  "attributes" : {
+    "ready" : false,
+    "pod_name" : "recommend-service-6495dd76cd-pq55b"
+  },
+  "strength" : 0.85,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "pod_not_ready"
+}, {
+  "id" : "ev-k8s-deploy-meta-c145726c",
+  "source" : "kubernetes",
+  "service" : "nginx-smoke",
+  "timestamp" : "2026-05-03T12:50:51.615949Z",
+  "content" : "Deployment nginx-smoke has 2/2 desired replicas ready.",
+  "attributes" : {
+    "deployment_name" : "nginx-smoke",
+    "replicas" : 2,
+    "updated_replicas" : 2,
+    "available_replicas" : 2,
+    "ready_replicas" : 2
+  },
+  "strength" : 0.7,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "deployment_metadata"
+}, {
+  "id" : "ev-k8s-evt-5a778eec",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.630237Z",
+  "content" : "Scheduled: Successfully assigned demo/recommend-service-6495dd76cd-pq55b to sre-agent-worker2",
+  "attributes" : {
+    "reason" : "Scheduled",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-pq55b",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-cc73953e",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.630310Z",
+  "content" : "Pulled: Container image \"busybox:1.36\" already present on machine and can be accessed by the pod",
+  "attributes" : {
+    "reason" : "Pulled",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-pq55b",
+    "count" : 6
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-153773da",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.630318Z",
+  "content" : "Created: Container created",
+  "attributes" : {
+    "reason" : "Created",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-pq55b",
+    "count" : 6
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-232e95f2",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.630321Z",
+  "content" : "Started: Container started",
+  "attributes" : {
+    "reason" : "Started",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-pq55b",
+    "count" : 6
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-9e3eb4d0",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-pq55b",
+  "timestamp" : "2026-05-03T12:50:51.630327Z",
+  "content" : "BackOff: Back-off restarting failed container recommend-service in pod recommend-service-6495dd76cd-pq55b_demo(c3aa8c2f-dc69-42ca-bed7-9d340008edb7)",
+  "attributes" : {
+    "reason" : "BackOff",
+    "type" : "Warning",
+    "involvedObject" : "recommend-service-6495dd76cd-pq55b",
+    "count" : 6
+  },
+  "strength" : 0.75,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-9e144f65",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:50:51.630332Z",
+  "content" : "Scheduled: Successfully assigned demo/recommend-service-6495dd76cd-x4lsb to sre-agent-worker2",
+  "attributes" : {
+    "reason" : "Scheduled",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-x4lsb",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-8936701d",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:50:51.630336Z",
+  "content" : "Pulling: Pulling image \"busybox:1.36\"",
+  "attributes" : {
+    "reason" : "Pulling",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-x4lsb",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-1e00ce1a",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:50:51.630341Z",
+  "content" : "Pulled: Successfully pulled image \"busybox:1.36\" in 8.138s (8.138s including waiting). Image size: 1906887 bytes.",
+  "attributes" : {
+    "reason" : "Pulled",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-x4lsb",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-084136a5",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:50:51.630344Z",
+  "content" : "Created: Container created",
+  "attributes" : {
+    "reason" : "Created",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-x4lsb",
+    "count" : 9
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-6919504a",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:50:51.630349Z",
+  "content" : "Started: Container started",
+  "attributes" : {
+    "reason" : "Started",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-x4lsb",
+    "count" : 9
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-74084c9f",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:50:51.630354Z",
+  "content" : "Pulled: Container image \"busybox:1.36\" already present on machine and can be accessed by the pod",
+  "attributes" : {
+    "reason" : "Pulled",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd-x4lsb",
+    "count" : 8
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-18ef9d21",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:50:51.630359Z",
+  "content" : "BackOff: Back-off restarting failed container recommend-service in pod recommend-service-6495dd76cd-x4lsb_demo(8342770e-88f6-4b7f-b01e-987c734d5ddb)",
+  "attributes" : {
+    "reason" : "BackOff",
+    "type" : "Warning",
+    "involvedObject" : "recommend-service-6495dd76cd-x4lsb",
+    "count" : 20
+  },
+  "strength" : 0.75,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-055db6ac",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd",
+  "timestamp" : "2026-05-03T12:50:51.630380Z",
+  "content" : "SuccessfulCreate: Created pod: recommend-service-6495dd76cd-x4lsb",
+  "attributes" : {
+    "reason" : "SuccessfulCreate",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-91b33afa",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd",
+  "timestamp" : "2026-05-03T12:50:51.630383Z",
+  "content" : "SuccessfulCreate: Created pod: recommend-service-6495dd76cd-pq55b",
+  "attributes" : {
+    "reason" : "SuccessfulCreate",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service-6495dd76cd",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-87836fe2",
+  "source" : "kubernetes",
+  "service" : "recommend-service",
+  "timestamp" : "2026-05-03T12:50:51.630388Z",
+  "content" : "ScalingReplicaSet: Scaled up replica set recommend-service-6495dd76cd from 0 to 1",
+  "attributes" : {
+    "reason" : "ScalingReplicaSet",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+}, {
+  "id" : "ev-k8s-evt-a83be240",
+  "source" : "kubernetes",
+  "service" : "recommend-service",
+  "timestamp" : "2026-05-03T12:50:51.630393Z",
+  "content" : "ScalingReplicaSet: Scaled up replica set recommend-service-6495dd76cd from 0 to 1",
+  "attributes" : {
+    "reason" : "ScalingReplicaSet",
+    "type" : "Normal",
+    "involvedObject" : "recommend-service",
+    "count" : 1
+  },
+  "strength" : 0.5,
+  "incident_id" : "inc-k8s-2026-05-03T125050933646Z",
+  "evidence_type" : "k8s_event"
+} ]

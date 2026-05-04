@@ -398,6 +398,23 @@ body {
             </div>
         </div>
 
+        <!-- Probe Execution (Step S) -->
+        <div class="card" id="probeCard" style="display:none">
+            <div class="card-label">Probe Execution <span style="font-size:0.55rem;color:var(--blue);font-weight:400">Step S</span></div>
+            <div style="margin-bottom:0.5rem;font-size:0.7rem;color:var(--dim)">
+                LLM-proposed probes routed to providers → fixture evidence collected. Does not affect RCA decision.
+            </div>
+            <div style="margin-bottom:0.6rem">
+                <button class="btn btn-primary" id="probeBtn" onclick="executeProbes()">Execute Probes (Fixture)</button>
+            </div>
+            <div id="probeStatus" style="font-size:0.65rem;color:var(--dim);margin-bottom:0.4rem"></div>
+            <div id="probeEvidence"></div>
+            <div class="dec-note" style="margin-top:0.5rem;font-size:0.55rem;color:var(--dim)">
+                canAffectDecision = false. Probe evidence is informational only.
+                <span class="dec-guard">Probe execution does not re-run RCA or modify scores.</span>
+            </div>
+        </div>
+
         <!-- Hypothesis Comparison -->
         <div class="hyp-card" id="hypCard">
             <div class="hyp-label">Hypothesis Comparison</div>
@@ -590,6 +607,7 @@ function callApi() {
 
             // Show decision
             document.getElementById('decisionCard').classList.add('visible');
+            document.getElementById('probeCard').style.display = '';
             document.getElementById('hypCard').classList.add('visible');
             document.getElementById('tabsCard').classList.add('visible');
             document.getElementById('resetBtn').style.display = '';
@@ -601,6 +619,7 @@ function callApi() {
         })
         .catch(() => {
             document.getElementById('decisionCard').classList.add('visible');
+            document.getElementById('probeCard').style.display = '';
             document.getElementById('hypCard').classList.add('visible');
             document.getElementById('tabsCard').classList.add('visible');
             document.getElementById('resetBtn').style.display = '';
@@ -617,6 +636,7 @@ function resetView() {
     document.getElementById('incStatus').innerHTML = '<span class="dot dot-open"></span>Not analyzed';
     document.getElementById('progressCard').classList.remove('visible');
     document.getElementById('decisionCard').classList.remove('visible');
+    document.getElementById('probeCard').style.display = 'none';
     document.getElementById('hypCard').classList.remove('visible');
     document.getElementById('tabsCard').classList.remove('visible');
     STEPS.forEach(s => s.classList.remove('done', 'active'));
@@ -793,6 +813,56 @@ function loadLlm() {
                 + 'In production, this would call an LLM to synthesize a human-readable narrative from the structured investigation result.</div>'
                 + '<div class="llm-advisory">&#9888; LLM is deferred by design. See llm-positioning.md for rationale.</div>'
                 + '</div>';
+        });
+}
+</script>
+
+<script>
+/* ---- Step S: Probe Execution ---- */
+function executeProbes() {
+    var btn = document.getElementById('probeBtn');
+    var statusEl = document.getElementById('probeStatus');
+    var evEl = document.getElementById('probeEvidence');
+    btn.textContent = 'Executing...';
+    btn.disabled = true;
+    statusEl.textContent = 'Routing probe intents to providers...';
+    evEl.innerHTML = '';
+
+    fetch('/api/investigations/scenario-e/propose-and-execute-probes', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.textContent = 'Probes Executed';
+            btn.disabled = true;
+            var lines = [];
+            lines.push('mode: fixture');
+            lines.push('status: ' + (data.status || ''));
+            lines.push('probes executed: ' + (data.executedProbeIds ? data.executedProbeIds.length : 0));
+            lines.push('evidence collected: ' + (data.evidence ? data.evidence.length : 0));
+            lines.push('can affect decision: ' + (data.canAffectDecision ? 'YES' : 'no'));
+            statusEl.textContent = lines.join(' · ');
+
+            if (data.evidence && data.evidence.length > 0) {
+                var html = '<div style="margin-top:0.4rem">';
+                for (var i = 0; i < data.evidence.length; i++) {
+                    var ev = data.evidence[i];
+                    var evType = ev.originalEvidenceType || ev.evidenceType || 'unknown';
+                    var evSource = ev.source || '';
+                    var evContent = ev.content || '';
+                    html += '<div class="ev-item">'
+                        + '<span class="ev-type ev-type-probe" style="background:rgba(59,130,246,0.12);color:#3b82f6">probe</span>'
+                        + '<span class="ev-source">' + evType + '</span>'
+                        + '<div class="ev-desc">' + evContent + '</div>'
+                        + '</div>';
+                }
+                html += '</div>';
+                evEl.innerHTML = html;
+            }
+        })
+        .catch(function(err) {
+            btn.textContent = 'Execute Probes (Fixture)';
+            btn.disabled = false;
+            statusEl.textContent = 'Probe execution failed. See server logs.';
+            evEl.innerHTML = '<div style="font-size:0.65rem;color:var(--red)">Error: ' + (err.message || 'unknown') + '</div>';
         });
 }
 </script>

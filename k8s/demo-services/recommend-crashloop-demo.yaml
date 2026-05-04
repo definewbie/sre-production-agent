@@ -1,0 +1,50 @@
+# CrashLoopBackOff Demo: recommend-service
+# Purpose: Deterministic CrashLoopBackOff deployment for SRE Agent live K8s evidence collection.
+# Container exits with code 1 on every start, producing predictable CrashLoopBackOff behavior.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommend-service
+  namespace: demo
+  labels:
+    app: recommend-service
+    scenario: crashloop-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recommend-service
+  template:
+    metadata:
+      labels:
+        app: recommend-service
+        scenario: crashloop-demo
+    spec:
+      containers:
+        - name: recommend-service
+          image: busybox:1.36
+          command: ["sh", "-c", "echo '[recommend-service] crashloop demo'; exit 1"]
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recommend-service
+  namespace: demo
+  labels:
+    app: recommend-service
+    scenario: crashloop-demo
+spec:
+  selector:
+    app: recommend-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+  type: ClusterIP

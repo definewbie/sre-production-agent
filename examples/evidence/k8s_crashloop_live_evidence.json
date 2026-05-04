@@ -1,0 +1,59 @@
+[ {
+  "id" : "ev-k8s-crashloop-69020ef2",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:11:11.098784Z",
+  "content" : "Pod recommend-service-6495dd76cd-x4lsb is in CrashLoopBackOff state. Container exiting with code 1.",
+  "attributes" : {
+    "pod_name" : "recommend-service-6495dd76cd-x4lsb",
+    "container" : "recommend-service",
+    "exit_code" : 1,
+    "reason" : "CrashLoopBackOff",
+    "restart_count" : 8
+  },
+  "strength" : 0.95,
+  "incident_id" : "inc-k8s-2026-05-03T121111002779Z",
+  "evidence_type" : "container_crash_loop_backoff"
+}, {
+  "id" : "ev-k8s-restart-7745cbe0",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:11:11.099228Z",
+  "content" : "Pod has restarted 8 times. Restart count is abnormally high.",
+  "attributes" : {
+    "restart_count" : 8,
+    "pod_name" : "recommend-service-6495dd76cd-x4lsb"
+  },
+  "strength" : 0.9,
+  "incident_id" : "inc-k8s-2026-05-03T121111002779Z",
+  "evidence_type" : "pod_restart_count_increased"
+}, {
+  "id" : "ev-k8s-notready-2a21ab50",
+  "source" : "kubernetes",
+  "service" : "recommend-service-6495dd76cd-x4lsb",
+  "timestamp" : "2026-05-03T12:11:11.099300Z",
+  "content" : "Pod readiness probe failing. Pod recommend-service-6495dd76cd-x4lsb is not ready.",
+  "attributes" : {
+    "ready" : false,
+    "pod_name" : "recommend-service-6495dd76cd-x4lsb"
+  },
+  "strength" : 0.85,
+  "incident_id" : "inc-k8s-2026-05-03T121111002779Z",
+  "evidence_type" : "pod_not_ready"
+}, {
+  "id" : "ev-k8s-deploy-meta-8221cd2a",
+  "source" : "kubernetes",
+  "service" : "recommend-service",
+  "timestamp" : "2026-05-03T12:11:11.142146Z",
+  "content" : "Deployment recommend-service has 0/1 desired replicas ready. [DEGRADED]",
+  "attributes" : {
+    "deployment_name" : "recommend-service",
+    "replicas" : 1,
+    "updated_replicas" : 1,
+    "available_replicas" : 0,
+    "ready_replicas" : 0
+  },
+  "strength" : 0.7,
+  "incident_id" : "inc-k8s-2026-05-03T121111002779Z",
+  "evidence_type" : "deployment_metadata"
+} ]

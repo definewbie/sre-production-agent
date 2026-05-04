@@ -58,22 +58,32 @@ The SRE Production Agent follows a **hexagonal architecture** pattern: the core 
 
 ```
 sre-production-agent (parent POM)
-├── sre-agent-core           ← Pure Java, zero Spring
-├── sre-agent-llm            ← Depends on core, zero Spring (LLM synthesis)
-├── sre-agent-k8s-provider   ← Depends on core, zero Spring, zero K8s client lib (fixture-based K8s evidence)
-├── sre-agent-cli            ← Depends on core + k8s-provider, uses Picocli
-└── sre-agent-server         ← Depends on core + llm + k8s-provider, uses Spring Boot
+├── sre-agent-core                  ← Pure Java, zero Spring
+├── sre-agent-llm                   ← Depends on core, zero Spring (LLM synthesis + LLM Hypothesis Proposer)
+├── sre-agent-k8s-provider          ← Depends on core, zero Spring, zero K8s client lib (fixture-based K8s evidence)
+├── sre-agent-prometheus-provider   ← Depends on core, zero Spring (Prometheus metric evidence)
+├── sre-agent-loki-provider         ← Depends on core, zero Spring (Loki log evidence)
+├── sre-agent-alertmanager-provider ← Depends on core, zero Spring (Alertmanager alert evidence)
+├── sre-agent-trace-provider        ← Depends on core, zero Spring (Distributed trace evidence)
+├── sre-agent-probe-executor        ← Depends on core + llm, zero Spring (Probe execution framework)
+├── sre-agent-cli                   ← Depends on core + llm + k8s-provider + prometheus-provider + loki-provider + alertmanager-provider + trace-provider + probe-executor, uses Picocli
+└── sre-agent-server                ← Depends on core + llm + k8s-provider + prometheus-provider + probe-executor, uses Spring Boot
 ```
 
-### Why Five Modules?
+### Why Nine Modules?
+### Why Ten Modules?
 
-| Module | Responsibility | Key Dependency |
-|---|---|---|
-| `sre-agent-core` | Domain model, RCA workflow, scoring, reporting | Jackson only |
-| `sre-agent-llm` | LLM-assisted synthesis (advisory-only narrative) | core + Jackson |
+|| Module | Responsibility | Key Dependency |
+|---|---|---||| `sre-agent-core` | Domain model, RCA workflow, scoring, reporting, evidence taxonomy (Step Q) | Jackson only |
+| `sre-agent-llm` | LLM-assisted synthesis (advisory-only narrative) + LLM Hypothesis Proposer (advisory-only proposals) | core + Jackson |
 | `sre-agent-k8s-provider` | K8s fixture evidence provider | core + Jackson |
-| `sre-agent-cli` | Command-line interface | Picocli + core + k8s-provider |
-| `sre-agent-server` | REST API + Web UI + LLM endpoints | Spring Boot + core + llm + k8s-provider |
+| `sre-agent-prometheus-provider` | Prometheus metric evidence provider (fixture + HTTP) | core + Jackson |
+| `sre-agent-loki-provider` | Loki log evidence provider (fixture + HTTP) | core + Jackson |
+| `sre-agent-alertmanager-provider` | Alertmanager alert evidence provider (fixture + HTTP) — alert lifecycle, incident mapping, severity evidence | Depends on core |
+| `sre-agent-trace-provider` | Distributed trace evidence provider (fixture + HTTP) — span latency, error spans, service dependency graph | core + Jackson |
+| `sre-agent-probe-executor` | Probe execution framework — routes LLM-generated ProbeIntents to evidence providers, collects informational Evidence | core + llm + Jackson |
+| `sre-agent-cli` | Command-line interface | Picocli + core + llm + k8s-provider + prometheus-provider + loki-provider + trace-provider + probe-executor |
+| `sre-agent-server` | REST API + Web UI + LLM endpoints | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
 
 ### Why Core Has Zero Spring Dependency
 
@@ -87,18 +97,29 @@ sre-production-agent (parent POM)
 ```
 core ← llm
 core ← k8s-provider
+core ← prometheus-provider
+core ← loki-provider
+core ← trace-provider
+core ← probe-executor
+llm ← probe-executor
+llm ← cli
+llm ← server
 k8s-provider ← cli
 k8s-provider ← server
-llm  ← server
-core ← cli (also via k8s-provider)
+prometheus-provider ← cli
+prometheus-provider ← server
+trace-provider ← cli
+probe-executor ← cli
+probe-executor ← server
+core ← cli (also via llm + k8s-provider + prometheus-provider + trace-provider + probe-executor)
 cli  ↗   ↖ server  (no dependency between adapters)
 ```
 
 ### LLM Module (`sre-agent-llm`)
 
-Step G introduced `sre-agent-llm` — a pure Java module (zero Spring dependency) that adds **advisory-only** LLM-assisted synthesis on top of the deterministic RCA pipeline.
+Step G introduced `sre-agent-llm` — a pure Java module (zero Spring dependency) that adds **advisory-only** LLM-assisted synthesis on top of the deterministic RCA pipeline. Step R extended this module with the LLM Hypothesis Proposer (`ai.sreagent.llm.proposer`).
 
-**Key architectural invariant: the LLM layer cannot change the decision, confidence scores, or evidence.** It only adds narrative context (executive summary, reasoning, uncertainty explanation) to help on-call engineers interpret the deterministic result.
+**Key architectural invariant: the LLM layer cannot change the decision, confidence scores, or evidence.** It only adds narrative context (executive summary, reasoning, uncertainty explanation) and advisory hypothesis proposals to help on-call engineers interpret the deterministic result.
 
 #### Module Components
 
@@ -110,6 +131,11 @@ Step G introduced `sre-agent-llm` — a pure Java module (zero Spring dependency
 | `LlmReportSynthesizer` | Orchestrates: build prompt → call `LlmClient` → parse markdown sections → build `LlmEnhancedReport`. Deterministic fields always come from `InvestigationResult`, never from LLM output. |
 | `LlmEnhancedReport` | Output record: base decision fields (deterministic) + LLM narrative fields (advisory). `advisoryOnly` flag is always `true`. |
 | `LlmRequest` / `LlmResponse` | Value objects for the LLM client interface. |
+| `LlmHypothesisProposer` | Interface (SPI) for LLM hypothesis proposal. Step R. |
+| `MockLlmHypothesisProposer` | Deterministic mock for proposal. Step R. |
+| `LlmHypothesisProposalPromptBuilder` | Constructs evidence-aware proposal prompts. Step R. |
+| `LlmProposalTriggerPolicy` | Trigger policy: proposes only when inconclusive. Step R. |
+| `ProposalGuardrail` | Enforces advisory-only constraints on proposals. Step R. |
 
 #### Server Integration
 
@@ -126,6 +152,165 @@ The LLM layer is designed so that **removing it entirely does not change any inv
 2. **Structural guardrails** — `LlmReportSynthesizer` always populates `base*` fields from the deterministic `InvestigationResult`, never from LLM output
 3. **Output guardrails** — `LlmEnhancedReport.advisoryOnly` is always `true`; consumers must check this flag
 4. **Scope guardrails** — prompt explicitly tells the LLM not to infer K8s, EC2, RDS, ElastiCache, ALB, CMDB, or topology facts
+
+---
+
+### Prometheus Provider Module (`sre-agent-prometheus-provider`)
+
+Step M introduced `sre-agent-prometheus-provider` — a pure Java module (zero Spring dependency) that collects metric evidence from Prometheus and maps it to the generic `Evidence` objects consumed by the core RCA pipeline.
+
+**Key architectural invariant: `sre-agent-core` has zero Prometheus dependency.** The Prometheus provider is an adapter that translates Prometheus query results into the domain model's `Evidence` record. The core pipeline is unaware that the evidence came from Prometheus.
+
+#### Module Components
+
+| Component | Responsibility |
+|---|---|
+| `PrometheusQueryClient` | Interface (SPI) for executing PromQL queries. Two implementations: `FixturePrometheusQueryClient` (deterministic, for tests/CI) and `HttpPrometheusQueryClient` (production HTTP client). |
+| `PrometheusResponseParser` | Parses Prometheus HTTP API JSON responses. Handles instant/range vectors, NaN/+Inf values, empty results, and missing fields. |
+| `PrometheusQueryTemplateRegistry` | Maps semantic query types (e.g., `LATENCY_P95`, `ERROR_RATE`) to PromQL templates with `{{service}}`/`{{namespace}}` placeholders. |
+| `PrometheusEvidenceMapper` | Maps parsed Prometheus results to semantic `Evidence` types using threshold-based classification (e.g., `metric_latency_p95_spike`, `metric_error_rate_spike`, `metric_no_signal`). |
+| `PrometheusEvidenceProvider` | Orchestrator: resolve template → execute query → parse response → map to evidence. |
+
+#### Evidence Types Produced
+
+| Evidence Type | Condition |
+|---|---|
+| `metric_error_rate_spike` | Error rate exceeds threshold |
+| `metric_latency_p95_spike` | P95 latency exceeds threshold |
+| `metric_latency_p99_spike` | P99 latency exceeds threshold |
+| `metric_downstream_latency_spike` | Downstream dependency latency exceeds threshold |
+| `metric_memory_usage_high` | Memory usage exceeds threshold |
+| `metric_cpu_usage_high` | CPU usage exceeds threshold |
+| `metric_restart_rate_increased` | Pod restart rate exceeds threshold |
+| `metric_request_rate_drop` | Request rate drops below threshold |
+| `metric_no_signal` | Prometheus returns no data for the query |
+
+All evidence carries `source = "prometheus"`, the actual metric value, the threshold applied, and relevant Prometheus labels.
+
+#### Client Modes
+
+| Mode | Implementation | Use Case |
+|---|---|---|
+| Fixture | `FixturePrometheusQueryClient` | Unit tests, CI, deterministic demos |
+| HTTP | `HttpPrometheusQueryClient` | Production Prometheus instances |
+
+Fixture mode requires no running Prometheus. HTTP mode requires `--prometheus-url`.
+
+### Evidence Taxonomy (Step Q)
+
+Step Q added provider-agnostic taxonomy classes to `sre-agent-core` — **not** a new module. The module count at that point remained 9 (now 10 after Step S). These classes normalize evidence across all providers:
+
+| Class | Purpose |
+|---|---|
+| `EvidenceCategory` | metric, log, trace, alert, k8s_resource, deploy, topology |
+| `EvidenceSignal` | spike, drop, saturation, anomaly, recovery, no_signal |
+| `EvidenceSourceKind` | prometheus, loki, jaeger, alertmanager, kubernetes, git, cmdb, manual |
+| `EvidenceSeverity` | critical, high, medium, low, info |
+| `CausalRole` | supporting, counter, contextual, trigger, consequence |
+| `EvidenceTaxonomy` | Composite record combining all classifications |
+| `EvidenceNormalizer` | Maps raw `Evidence` → `EvidenceTaxonomy` |
+
+While evidence types from each provider (K8s, Prometheus, Loki, Alertmanager, Trace) are provider-specific strings, Step Q adds a **provider-agnostic normalization layer** on top, enabling cross-provider evidence correlation. This taxonomy is the foundation for Step R (LLM Hypothesis Proposer), which consumes normalized evidence to propose hypotheses.
+
+### LLM Hypothesis Proposer (Step R)
+
+Step R added `ai.sreagent.llm.proposer` to `sre-agent-llm` — an LLM-based hypothesis proposal system that complements the deterministic pattern-matching engine when investigations are inconclusive.
+
+**Key architectural invariant: LLM proposals are purely advisory.** They never change `InvestigationDecision`, `ConfidenceResult`, `VerificationResult`, and never create `Evidence`. All proposals carry `ProposalStatus.UNVERIFIED_PROPOSAL` with `canAffectDecision=false`.
+
+#### Module Components
+
+| Component | Responsibility |
+|---|---|
+| `LlmHypothesisProposer` | Interface (SPI) for LLM hypothesis proposal. Implementations are pluggable. |
+| `MockLlmHypothesisProposer` | Deterministic mock implementation. Returns predictable proposals without network access. Used as default for tests/CI. |
+| `LlmHypothesisProposalPromptBuilder` | Constructs evidence-aware prompts from alert + evidence, embedding strict guardrails. |
+| `LlmProposalTriggerPolicy` | Determines whether to propose: only triggers when investigation is inconclusive (`competing_hypotheses`, `uncertain`, low confidence, small score gap). |
+| `ProposalGuardrail` | Enforces advisory-only constraints: all proposals are `UNVERIFIED_PROPOSAL`, `canAffectDecision=false`. |
+
+#### New Domain Models
+
+| Model | Purpose |
+|---|---|
+| `ProposalStatus` | Enum: `UNVERIFIED_PROPOSAL` — all LLM proposals start unverified |
+| `ProbeType` | Enum classifying probe categories (metric, log, trace, k8s, custom) |
+| `ProbeIntent` | Describes what a probe aims to verify or refute |
+| `VerificationPlan` | Ordered list of probes to validate/refute a hypothesis |
+| `UnverifiedHypothesisProposal` | A single LLM-proposed hypothesis with rationale and verification plan |
+| `LlmHypothesisProposalResult` | Aggregate result: list of proposals + trigger reason + guardrail metadata |
+
+#### Trigger Policy Behavior
+
+| Scenario | Decision | Triggered? | Proposals |
+|---|---|---|---|
+| Scenario E | `competing_hypotheses` (score gap 0.06) | ✅ Yes | 1 proposal: `deployment_timeout_amplification` |
+| Scenario F | `likely_root_cause` (score 0.95, gap 0.95) | ❌ No | None — high confidence, no proposals needed |
+
+#### Guardrails
+
+1. **Status guardrail** — all proposals are `UNVERIFIED_PROPOSAL`; they cannot be promoted to verified without human review
+2. **Decision guardrail** — `canAffectDecision=false` ensures proposals cannot influence the deterministic investigation decision
+3. **Evidence guardrail** — proposals never create `Evidence` objects; they are purely informational
+4. **Scope guardrail** — LLM cannot modify `InvestigationDecision`, `ConfidenceResult`, or `VerificationResult`
+
+#### CLI Integration
+
+```bash
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  propose-hypotheses \
+  --alert examples/alerts/competing_hypotheses.json \
+  --evidence examples/evidence/competing_hypotheses.json \
+  --output /tmp/proposals.json
+```
+
+---
+
+### Probe Executor Module (`sre-agent-probe-executor`)
+
+Step S introduced `sre-agent-probe-executor` — a pure Java module (zero Spring dependency) that routes LLM-generated `ProbeIntent` objects to existing evidence providers and collects new informational `Evidence`.
+
+**Key architectural invariant: probe execution does NOT bypass Verification or mutate RCA decisions.** Collected probe evidence is informational only. `canAffectDecision` is always `false`, enforced at compile time via `ProbeExecutionPolicy`.
+
+#### Module Components
+
+| Component | Responsibility |
+|---|---|
+| `ProbeIntentRouter` | Routes `ProbeType` to the appropriate evidence provider. Supports Prometheus, Loki, Trace, Kubernetes, and Alertmanager. |
+| `ProbeExecutionPolicy` | Enforces `canAffectDecision=false` and rejects LIVE mode. Only FIXTURE mode is supported in Step S. |
+| `FixtureProbeExecutor` | Generates fixture `Evidence` per probe type by delegating to existing fixture clients from provider modules. |
+| `PrometheusProbeMapper` | Maps metric probe intents to `FixturePrometheusQueryClient` calls. |
+| `LokiProbeMapper` | Maps log probe intents to `FixtureLokiQueryClient` calls. |
+| `TraceProbeMapper` | Maps trace probe intents to `FixtureTraceQueryClient` calls. |
+| `KubernetesProbeMapper` | Maps K8s probe intents to `K8sFixtureLoader` calls. |
+| `AlertmanagerProbeMapper` | Maps alert probe intents to `FixtureAlertmanagerQueryClient` calls. |
+
+#### Guardrails
+
+1. **Decision guardrail** — `canAffectDecision=false` is enforced by `ProbeExecutionPolicy`; probe evidence cannot influence the deterministic investigation decision
+2. **Mode guardrail** — only FIXTURE mode is supported in Step S; LIVE mode is explicitly rejected
+3. **Verification guardrail** — probe evidence does NOT bypass the Verification pipeline; it goes through the same classification
+4. **Immutability guardrail** — probe execution does NOT mutate the existing RCA decision or `InvestigationResult`
+
+#### CLI Integration
+
+```bash
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  propose-and-execute-probes \
+  --alert examples/alerts/competing_hypotheses.json \
+  --evidence examples/evidence/competing_hypotheses.json \
+  --output /tmp/probe-results.json
+```
+
+#### REST Integration
+
+```
+POST /api/investigations/scenario-e/propose-and-execute-probes
+  → InvestigationService.proposeAndExecuteProbes()
+    → LlmHypothesisProposer.propose() (Step R)
+    → ProbeIntentRouter.route()
+    → FixtureProbeExecutor.execute()
+    → List<Evidence> (informational only)
+```
 
 ---
 
@@ -169,6 +354,12 @@ All domain objects are **Java 21 records** — immutable and concise.
 | `EventTraceEntry` | A single audit log entry |
 | `RcaReport` | Structured report (reserved for future use) |
 | `LlmEnhancedReport` | Advisory-only LLM synthesis: deterministic base fields + narrative fields (executive summary, reasoning, uncertainty, next steps, limitations, unverified proposals) |
+| `ProposalStatus` | Enum: `UNVERIFIED_PROPOSAL` — all LLM proposals start unverified |
+| `ProbeType` | Enum classifying probe categories (metric, log, trace, k8s, custom) |
+| `ProbeIntent` | Describes what a probe aims to verify or refute |
+| `VerificationPlan` | Ordered list of probes to validate/refute a hypothesis |
+| `UnverifiedHypothesisProposal` | A single LLM-proposed hypothesis with rationale and verification plan |
+| `LlmHypothesisProposalResult` | Aggregate result: list of proposals + trigger reason + guardrail metadata |
 
 ---
 
@@ -265,10 +456,13 @@ The architecture is designed for controlled extension:
 
 | Extension | What to Add | Where |
 |---|---|---|
-| Real Prometheus metrics | `PrometheusEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
-| Real Loki logs | `LokiEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
-| K8s events (fixtures) | `K8sFixtureEvidenceProvider` | `sre-agent-k8s-provider/` |
-| Real K8s API | `KubernetesEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
+| ~~Prometheus metrics~~ | ✅ `PrometheusEvidenceProvider` — implemented in Step M | `sre-agent-prometheus-provider/` |
+| Real Loki logs | `LokiEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` or new module |
+| K8s events (fixtures) | `K8sFixtureEvidenceProvider` ✅ | `sre-agent-k8s-provider/` |
+| Real K8s API | `KubernetesEvidenceProvider implements EvidenceProvider` ✅ | `sre-agent-k8s-provider/` |
+| Alertmanager alerts | ✅ `AlertmanagerEvidenceProvider` — implemented in Step O | `sre-agent-alertmanager-provider/` |
+| Distributed traces | ✅ `TraceEvidenceProvider` — implemented in Step P | `sre-agent-trace-provider/` |
+| Probe execution | ✅ `FixtureProbeExecutor` + `ProbeIntentRouter` — implemented in Step S | `sre-agent-probe-executor/` |
 | EC2 instance metrics | `Ec2EvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | AWS managed services (RDS, ElastiCache, ALB) | `AwsManagedServiceEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | CMDB / service topology | `CmdbTopologyProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
@@ -380,22 +574,32 @@ SRE Production Agent 采用**六边形架构**模式：核心 RCA（根因分析
 
 ```
 sre-production-agent (parent POM)
-├── sre-agent-core           ← 纯 Java，零 Spring 依赖
-├── sre-agent-llm            ← 依赖 core，零 Spring 依赖（LLM 综合分析）
-├── sre-agent-k8s-provider   ← 依赖 core，零 Spring 依赖，零 K8s 客户端库（基于 fixture 的 K8s 证据）
-├── sre-agent-cli            ← 依赖 core + k8s-provider，使用 Picocli
-└── sre-agent-server         ← 依赖 core + llm + k8s-provider，使用 Spring Boot
+├── sre-agent-core                  ← 纯 Java，零 Spring 依赖
+├── sre-agent-llm                   ← 依赖 core，零 Spring 依赖（LLM 综合分析 + LLM 假设提议器）
+├── sre-agent-k8s-provider          ← 依赖 core，零 Spring 依赖，零 K8s 客户端库（基于 fixture 的 K8s 证据）
+├── sre-agent-prometheus-provider   ← 依赖 core，零 Spring 依赖（Prometheus 指标证据）
+├── sre-agent-loki-provider         ← 依赖 core，零 Spring 依赖（Loki 日志证据）
+├── sre-agent-alertmanager-provider ← 依赖 core，零 Spring 依赖（Alertmanager 告警证据）
+├── sre-agent-trace-provider        ← 依赖 core，零 Spring 依赖（分布式追踪证据）
+├── sre-agent-probe-executor        ← 依赖 core + llm，零 Spring 依赖（探测执行框架）
+├── sre-agent-cli                   ← 依赖 core + llm + k8s-provider + prometheus-provider + trace-provider + probe-executor，使用 Picocli
+└── sre-agent-server                ← 依赖 core + llm + k8s-provider + prometheus-provider + probe-executor，使用 Spring Boot
 ```
 
-### 为什么是五个模块？
+### 为什么是十个模块？
 
-| 模块 | 职责 | 关键依赖 |
-|---|---|---|
-| `sre-agent-core` | 领域模型、RCA 工作流、评分、报告 | 仅 Jackson |
-| `sre-agent-llm` | LLM 辅助综合分析（仅限咨询性叙述） | core + Jackson |
-| `sre-agent-k8s-provider` | K8s fixture 证据提供者 | core + Jackson |
-| `sre-agent-cli` | 命令行界面 | Picocli + core + k8s-provider |
-| `sre-agent-server` | REST API + Web UI + LLM 端点 | Spring Boot + core + llm + k8s-provider |
+||| 模块 | 职责 | 关键依赖 |
+||---|---|---|
+|||| `sre-agent-core` | 领域模型、RCA 工作流、评分、报告、证据分类体系（Step Q） | 仅 Jackson |
+||| `sre-agent-llm` | LLM 辅助综合分析（仅限咨询性叙述） | core + Jackson |
+||| `sre-agent-k8s-provider` | K8s fixture 证据提供者 | core + Jackson |
+||| `sre-agent-prometheus-provider` | Prometheus 指标证据提供者（fixture + HTTP） | core + Jackson |
+||| `sre-agent-loki-provider` | Loki 日志证据提供者（fixture + HTTP） | core + Jackson |
+||| `sre-agent-alertmanager-provider` | Alertmanager 告警证据提供者（fixture + HTTP）— 告警生命周期、事件映射、严重性证据 | 依赖 core |
+|||| `sre-agent-trace-provider` | 分布式追踪证据提供者（fixture + HTTP）— span 延迟、错误 span、服务依赖图 | core + Jackson |
+||| `sre-agent-probe-executor` | 探测执行框架 — 将 LLM 生成的 ProbeIntent 路由到证据提供者，收集信息性证据 | core + llm + Jackson |
+|||| `sre-agent-cli` | 命令行界面 | Picocli + core + k8s-provider + prometheus-provider + trace-provider + probe-executor |
+||| `sre-agent-server` | REST API + Web UI + LLM 端点 | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
 
 ### 为什么 Core 零 Spring 依赖
 
@@ -409,18 +613,29 @@ sre-production-agent (parent POM)
 ```
 core ← llm
 core ← k8s-provider
+core ← prometheus-provider
+core ← loki-provider
+core ← trace-provider
+core ← probe-executor
+llm ← probe-executor
 k8s-provider ← cli
 k8s-provider ← server
+prometheus-provider ← cli
+prometheus-provider ← server
+trace-provider ← cli
+probe-executor ← cli
+probe-executor ← server
+llm  ← cli
 llm  ← server
-core ← cli (also via k8s-provider)
+core ← cli (also via k8s-provider + prometheus-provider + trace-provider + probe-executor)
 cli  ↗   ↖ server  (适配器之间无依赖)
 ```
 
 ### LLM 模块（`sre-agent-llm`）
 
-Step G 引入了 `sre-agent-llm` — 一个纯 Java 模块（零 Spring 依赖），在确定性 RCA 管道之上增加了**仅限咨询性**的 LLM 辅助综合分析。
+Step G 引入了 `sre-agent-llm` — 一个纯 Java 模块（零 Spring 依赖），在确定性 RCA 管道之上增加了**仅限咨询性**的 LLM 辅助综合分析。Step R 扩展了该模块，增加了 LLM 假设提议器（`ai.sreagent.llm.proposer`）。
 
-**关键架构不变量：LLM 层不能更改决策、置信度分数或证据。** 它只添加叙述性上下文（执行摘要、推理过程、不确定性说明）来帮助值班工程师解读确定性结果。
+**关键架构不变量：LLM 层不能更改决策、置信度分数或证据。** 它只添加叙述性上下文（执行摘要、推理过程、不确定性说明）和咨询性假设提议来帮助值班工程师解读确定性结果。
 
 #### 模块组件
 
@@ -432,6 +647,11 @@ Step G 引入了 `sre-agent-llm` — 一个纯 Java 模块（零 Spring 依赖�
 | `LlmReportSynthesizer` | 编排流程：构建提示词 → 调用 `LlmClient` → 解析 markdown 段落 → 构建 `LlmEnhancedReport`。确定性字段始终来自 `InvestigationResult`，绝不来自 LLM 输出。 |
 | `LlmEnhancedReport` | 输出记录：基础决策字段（确定性）+ LLM 叙述字段（咨询性）。`advisoryOnly` 标志始终为 `true`。 |
 | `LlmRequest` / `LlmResponse` | LLM 客户端接口的值对象。 |
+| `LlmHypothesisProposer` | LLM 假设提议接口（SPI）。Step R。 |
+| `MockLlmHypothesisProposer` | 确定性模拟提议实现。Step R。 |
+| `LlmHypothesisProposalPromptBuilder` | 构建证据感知的提议提示词。Step R。 |
+| `LlmProposalTriggerPolicy` | 触发策略：仅在不确定时提议。Step R。 |
+| `ProposalGuardrail` | 强制执行仅咨询性约束。Step R。 |
 
 #### Server 集成
 
@@ -448,6 +668,57 @@ LLM 层的设计确保**完全移除它不会改变任何调查结果**：
 2. **结构防护** — `LlmReportSynthesizer` 始终从确定性 `InvestigationResult` 填充 `base*` 字段，绝不使用 LLM 输出
 3. **输出防护** — `LlmEnhancedReport.advisoryOnly` 始终为 `true`；消费者必须检查此标志
 4. **范围防护** — 提示词明确告知 LLM 不要推断 K8s、EC2、RDS、ElastiCache、ALB、CMDB 或拓扑事实
+
+### LLM 假设提议器（Step R）
+
+Step R 在 `sre-agent-llm` 中添加了 `ai.sreagent.llm.proposer` — 一个基于 LLM 的假设提议系统，在调查结果不确定时补充确定性模式匹配引擎。
+
+**关键架构约束：LLM 提议纯粹是咨询性的。** 它们不会改变 `InvestigationDecision`、`ConfidenceResult`、`VerificationResult`，也不会创建 `Evidence`。所有提议都带有 `ProposalStatus.UNVERIFIED_PROPOSAL` 且 `canAffectDecision=false`。
+
+#### 模块组件
+
+| 组件 | 职责 |
+|---|---|
+| `LlmHypothesisProposer` | LLM 假设提议接口（SPI）。实现可插拔。 |
+| `MockLlmHypothesisProposer` | 确定性模拟实现。返回可预测的提议，无需网络访问。测试/CI 中作为默认值使用。 |
+| `LlmHypothesisProposalPromptBuilder` | 从告警 + 证据构建感知证据的提示词，嵌入严格防护措施。 |
+| `LlmProposalTriggerPolicy` | 触发策略：仅在调查不确定时提议（`competing_hypotheses`、`uncertain`、低置信度、小分数差距）。 |
+| `ProposalGuardrail` | 强制执行仅咨询性约束：所有提议为 `UNVERIFIED_PROPOSAL`，`canAffectDecision=false`。 |
+
+#### 新领域模型
+
+| 模型 | 用途 |
+|---|---|
+| `ProposalStatus` | 枚举：`UNVERIFIED_PROPOSAL` — 所有 LLM 提议初始为未验证 |
+| `ProbeType` | 枚举，分类探测类别（指标、日志、追踪、K8s、自定义） |
+| `ProbeIntent` | 描述探测旨在验证或反驳的内容 |
+| `VerificationPlan` | 有序探测列表，用于验证/反驳假设 |
+| `UnverifiedHypothesisProposal` | 单个 LLM 提议的假设，包含推理和验证计划 |
+| `LlmHypothesisProposalResult` | 聚合结果：提议列表 + 触发原因 + 防护元数据 |
+
+#### 触发策略行为
+
+| 场景 | 决策 | 是否触发？ | 提议 |
+|---|---|---|---|
+| Scenario E | `competing_hypotheses`（分数差距 0.06） | ✅ 是 | 1 个提议：`deployment_timeout_amplification` |
+| Scenario F | `likely_root_cause`（分数 0.95，差距 0.95） | ❌ 否 | 无 — 高置信度，无需提议 |
+
+#### 防护措施
+
+1. **状态防护** — 所有提议为 `UNVERIFIED_PROPOSAL`；未经人工审查不能提升为已验证
+2. **决策防护** — `canAffectDecision=false` 确保提议不能影响确定性调查决策
+3. **证据防护** — 提议从不创建 `Evidence` 对象；纯粹是信息性的
+4. **范围防护** — LLM 不能修改 `InvestigationDecision`、`ConfidenceResult` 或 `VerificationResult`
+
+#### CLI 集成
+
+```bash
+java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
+  propose-hypotheses \
+  --alert examples/alerts/competing_hypotheses.json \
+  --evidence examples/evidence/competing_hypotheses.json \
+  --output /tmp/proposals.json
+```
 
 ---
 
@@ -491,6 +762,12 @@ Step 10: Collect event trace → List<EventTraceEntry>
 | `EventTraceEntry` | 单条审计日志记录 |
 | `RcaReport` | 结构化报告（保留供未来使用） |
 | `LlmEnhancedReport` | 仅限咨询性的 LLM 综合分析：确定性基础字段 + 叙述字段（执行摘要、推理、不确定性、下一步、局限性、未验证建议） |
+| `ProposalStatus` | LLM 提议状态（UNVERIFIED_PROPOSAL / VERIFIED / DISCARDED） |
+| `ProbeType` | 探测类型（LOG_QUERY / METRIC_QUERY / K8S_API / DEPLOYMENT_CHECK） |
+| `ProbeIntent` | 探测意图：类型 + 目标 + 预期结果 |
+| `VerificationPlan` | 验证计划：提议的探测列表 |
+| `UnverifiedHypothesisProposal` | 未验证假设提议：ID + 描述 + 置信度 + 来源 + 可影响决策标记 + 验证计划 |
+| `LlmHypothesisProposalResult` | LLM 假设提议结果：提议列表 + 触发原因 + 空原因 |
 
 ---
 
@@ -585,13 +862,15 @@ EventTraceEntry {
 
 ### 证据提供者
 
-| 扩展 | 添加内容 | 位置 |
-|---|---|---|
-| 真实 Prometheus 指标 | `PrometheusEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
-| 真实 Loki 日志 | `LokiEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
-| K8s 事件（fixtures） | `K8sFixtureEvidenceProvider` | `sre-agent-k8s-provider/` |
-| 真实 K8s API | `KubernetesEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
-| EC2 实例指标 | `Ec2EvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
+|| 扩展 | 添加内容 | 位置 |
+||---|---|---|
+|| 真实 Prometheus 指标 | ✅ `PrometheusEvidenceProvider` — Step M 已实现 | `sre-agent-prometheus-provider/` |
+|| 真实 Loki 日志 | ✅ `LokiEvidenceProvider` — Step N 已实现 | `sre-agent-loki-provider/` |
+|| K8s 事件（fixtures） | ✅ `K8sFixtureEvidenceProvider` — Step H 已实现 | `sre-agent-k8s-provider/` |
+|| 真实 K8s API | ✅ `KubernetesEvidenceProvider` — Step L 已实现 | `sre-agent-k8s-provider/` |
+|| Alertmanager 告警 | ✅ `AlertmanagerEvidenceProvider` — Step O 已实现 | `sre-agent-alertmanager-provider/` |
+|| 分布式追踪 | ✅ `TraceEvidenceProvider` — Step P 已实现 | `sre-agent-trace-provider/` |
+|| EC2 实例指标 | `Ec2EvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | AWS 托管服务（RDS、ElastiCache、ALB） | `AwsManagedServiceEvidenceProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 | CMDB / 服务拓扑 | `CmdbTopologyProvider implements EvidenceProvider` | `sre-agent-core/evidence/` |
 

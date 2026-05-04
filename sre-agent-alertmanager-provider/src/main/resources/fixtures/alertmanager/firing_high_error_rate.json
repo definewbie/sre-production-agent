@@ -1,0 +1,22 @@
+[
+  {
+    "labels": {
+      "alertname": "HighErrorRate",
+      "service": "order-service",
+      "namespace": "demo",
+      "severity": "warning"
+    },
+    "annotations": {
+      "summary": "order-service error rate is high",
+      "description": "5xx error rate exceeded threshold"
+    },
+    "startsAt": "2026-04-28T10:08:00Z",
+    "endsAt": "0001-01-01T00:00:00Z",
+    "status": {
+      "state": "active",
+      "silencedBy": [],
+      "inhibitedBy": []
+    },
+    "fingerprint": "abc123def456"
+  }
+]

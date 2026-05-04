@@ -1,0 +1,176 @@
+{
+  "incidentId" : "inc_20260428_1008",
+  "proposalId" : "llm_prop_deployment_timeout_amplification",
+  "status" : "EXECUTED",
+  "evidence" : [ {
+    "id" : "probe_prom_89dd6115",
+    "source" : "prometheus",
+    "service" : "order-service",
+    "timestamp" : "2026-05-04T07:01:40.752143Z",
+    "content" : "Prometheus fixture: metric_error_rate_spike detected for order-service. Strength=0.75. Intent: Check order-service timeout error rate before and after deploy",
+    "attributes" : {
+      "probeType" : "PROMETHEUS_QUERY",
+      "queryIntent" : "Check order-service timeout error rate before and after deploy",
+      "mode" : "fixture"
+    },
+    "strength" : 0.75,
+    "incident_id" : "inc_20260428_1008",
+    "evidence_type" : "metric_error_rate_spike"
+  }, {
+    "id" : "probe_prom_4b9c22a6",
+    "source" : "prometheus",
+    "service" : "payment-service",
+    "timestamp" : "2026-05-04T07:01:40.752203Z",
+    "content" : "Prometheus fixture: metric_latency_p95_spike detected for payment-service. Strength=0.75. Intent: Check payment-service p95 latency during incident window",
+    "attributes" : {
+      "probeType" : "PROMETHEUS_QUERY",
+      "queryIntent" : "Check payment-service p95 latency during incident window",
+      "mode" : "fixture"
+    },
+    "strength" : 0.75,
+    "incident_id" : "inc_20260428_1008",
+    "evidence_type" : "metric_latency_p95_spike"
+  }, {
+    "id" : "probe_loki_692f6b02",
+    "source" : "loki",
+    "service" : "order-service",
+    "timestamp" : "2026-05-04T07:01:40.752370Z",
+    "content" : "Loki fixture: log_downstream_timeout detected for order-service. Strength=0.70. Intent: Search order-service logs for retry exhausted and downstream timeout",
+    "attributes" : {
+      "probeType" : "LOKI_QUERY",
+      "queryIntent" : "Search order-service logs for retry exhausted and downstream timeout",
+      "mode" : "fixture"
+    },
+    "strength" : 0.7,
+    "incident_id" : "inc_20260428_1008",
+    "evidence_type" : "log_downstream_timeout"
+  }, {
+    "id" : "probe_trace_7439733d",
+    "source" : "tracing",
+    "service" : "order-service",
+    "timestamp" : "2026-05-04T07:01:40.752518Z",
+    "content" : "Trace fixture: trace_error_span detected for order-service. Strength=0.72. Intent: Inspect order-service to payment-service span latency and error spans",
+    "attributes" : {
+      "probeType" : "TRACE_QUERY",
+      "queryIntent" : "Inspect order-service to payment-service span latency and error spans",
+      "mode" : "fixture"
+    },
+    "strength" : 0.72,
+    "incident_id" : "inc_20260428_1008",
+    "evidence_type" : "trace_error_span"
+  }, {
+    "id" : "probe_k8s_420e5eb1",
+    "source" : "kubernetes",
+    "service" : "order-service",
+    "timestamp" : "2026-05-04T07:01:40.752680Z",
+    "content" : "Kubernetes fixture: pod_restart_count_increased detected for order-service. Strength=0.65. Intent: Check order-service pod restart/readiness to rule out local runtime instability",
+    "attributes" : {
+      "probeType" : "KUBERNETES_QUERY",
+      "queryIntent" : "Check order-service pod restart/readiness to rule out local runtime instability",
+      "mode" : "fixture"
+    },
+    "strength" : 0.65,
+    "incident_id" : "inc_20260428_1008",
+    "evidence_type" : "pod_restart_count_increased"
+  } ],
+  "normalizedEvidence" : [ {
+    "originalEvidenceType" : "metric_error_rate_spike",
+    "normalizedType" : "metric_error_rate_spike",
+    "category" : "METRIC",
+    "signal" : "ERROR_RATE_SPIKE",
+    "sourceKind" : "PROMETHEUS",
+    "severity" : "WARNING",
+    "causalRole" : "SYMPTOM",
+    "entity" : "order-service",
+    "service" : "order-service",
+    "namespace" : null,
+    "strength" : 0.75,
+    "timestamp" : "2026-05-04T07:01:40.752143Z",
+    "content" : "Prometheus fixture: metric_error_rate_spike detected for order-service. Strength=0.75. Intent: Check order-service timeout error rate before and after deploy",
+    "attributes" : {
+      "probeType" : "PROMETHEUS_QUERY",
+      "queryIntent" : "Check order-service timeout error rate before and after deploy",
+      "mode" : "fixture"
+    }
+  }, {
+    "originalEvidenceType" : "metric_latency_p95_spike",
+    "normalizedType" : "metric_latency_p95_spike",
+    "category" : "METRIC",
+    "signal" : "LATENCY_SPIKE",
+    "sourceKind" : "PROMETHEUS",
+    "severity" : "WARNING",
+    "causalRole" : "SYMPTOM",
+    "entity" : "payment-service",
+    "service" : "payment-service",
+    "namespace" : null,
+    "strength" : 0.75,
+    "timestamp" : "2026-05-04T07:01:40.752203Z",
+    "content" : "Prometheus fixture: metric_latency_p95_spike detected for payment-service. Strength=0.75. Intent: Check payment-service p95 latency during incident window",
+    "attributes" : {
+      "probeType" : "PROMETHEUS_QUERY",
+      "queryIntent" : "Check payment-service p95 latency during incident window",
+      "mode" : "fixture"
+    }
+  }, {
+    "originalEvidenceType" : "log_downstream_timeout",
+    "normalizedType" : "log_downstream_timeout",
+    "category" : "LOG",
+    "signal" : "DOWNSTREAM_LATENCY",
+    "sourceKind" : "LOKI",
+    "severity" : "WARNING",
+    "causalRole" : "CAUSE_CANDIDATE",
+    "entity" : "order-service",
+    "service" : "order-service",
+    "namespace" : null,
+    "strength" : 0.7,
+    "timestamp" : "2026-05-04T07:01:40.752370Z",
+    "content" : "Loki fixture: log_downstream_timeout detected for order-service. Strength=0.70. Intent: Search order-service logs for retry exhausted and downstream timeout",
+    "attributes" : {
+      "probeType" : "LOKI_QUERY",
+      "queryIntent" : "Search order-service logs for retry exhausted and downstream timeout",
+      "mode" : "fixture"
+    }
+  }, {
+    "originalEvidenceType" : "trace_error_span",
+    "normalizedType" : "trace_error_span",
+    "category" : "TRACE",
+    "signal" : "ERROR_SPAN",
+    "sourceKind" : "TRACE",
+    "severity" : "WARNING",
+    "causalRole" : "CAUSE_CANDIDATE",
+    "entity" : "order-service",
+    "service" : "order-service",
+    "namespace" : null,
+    "strength" : 0.72,
+    "timestamp" : "2026-05-04T07:01:40.752518Z",
+    "content" : "Trace fixture: trace_error_span detected for order-service. Strength=0.72. Intent: Inspect order-service to payment-service span latency and error spans",
+    "attributes" : {
+      "probeType" : "TRACE_QUERY",
+      "queryIntent" : "Inspect order-service to payment-service span latency and error spans",
+      "mode" : "fixture"
+    }
+  }, {
+    "originalEvidenceType" : "pod_restart_count_increased",
+    "normalizedType" : "pod_restart_count_increased",
+    "category" : "KUBERNETES",
+    "signal" : "RESTART",
+    "sourceKind" : "KUBERNETES",
+    "severity" : "WARNING",
+    "causalRole" : "SYMPTOM",
+    "entity" : "order-service",
+    "service" : "order-service",
+    "namespace" : null,
+    "strength" : 0.65,
+    "timestamp" : "2026-05-04T07:01:40.752680Z",
+    "content" : "Kubernetes fixture: pod_restart_count_increased detected for order-service. Strength=0.65. Intent: Check order-service pod restart/readiness to rule out local runtime instability",
+    "attributes" : {
+      "probeType" : "KUBERNETES_QUERY",
+      "queryIntent" : "Check order-service pod restart/readiness to rule out local runtime instability",
+      "mode" : "fixture"
+    }
+  } ],
+  "executedProbeIds" : [ "Check order-service timeout error rate before and after deploy", "Check payment-service p95 latency during incident window", "Search order-service logs for retry exhausted and downstream timeout", "Inspect order-service to payment-service span latency and error spans", "Check order-service pod restart/readiness to rule out local runtime instability" ],
+  "skippedProbeIds" : [ ],
+  "errors" : [ ],
+  "canAffectDecision" : false
+}

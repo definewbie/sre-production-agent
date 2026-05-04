@@ -1,0 +1,15 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "namespace": "demo",
+          "pod": "payment-service-abc123-def456"
+        },
+        "value": [1714292400.000, "2147483648"]
+      }
+    ]
+  }
+}

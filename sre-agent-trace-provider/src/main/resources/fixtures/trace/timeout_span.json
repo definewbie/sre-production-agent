@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "traceID": "trace-timeout-001",
+      "spans": [
+        {
+          "spanID": "span-root-005",
+          "operationName": "POST /transfer",
+          "startTime": 1714292400000000,
+          "duration": 5000000,
+          "processID": "p1",
+          "references": [],
+          "tags": [
+            {"key": "http.status_code", "value": "504"}
+          ]
+        },
+        {
+          "spanID": "span-downstream-005",
+          "operationName": "POST downstream /validate",
+          "startTime": 1714292400100000,
+          "duration": 4500000,
+          "processID": "p2",
+          "references": [
+            {"refType": "CHILD_OF", "spanID": "span-root-005"}
+          ],
+          "tags": [
+            {"key": "timeout", "value": "true"},
+            {"key": "error", "value": "true"}
+          ]
+        }
+      ],
+      "processes": {
+        "p1": {
+          "serviceName": "payment-service"
+        },
+        "p2": {
+          "serviceName": "risk-control-service"
+        }
+      }
+    }
+  ]
+}

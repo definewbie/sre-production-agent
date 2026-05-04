@@ -75,6 +75,42 @@ public class KubernetesEvidenceProvider {
     }
 
     /**
+     * Collect semantic Kubernetes evidence mapped to RCA pattern evidence types.
+     * This method produces evidence types like container_crash_loop_backoff, 
+     * pod_restart_count_increased, pod_not_ready, deployment_metadata — matching
+     * the types expected by the pod_crash_loop diagnostic pattern.
+     *
+     * Use this for live kubectl evidence collection. Use collectEvidence() for 
+     * generic K8s evidence collection.
+     */
+    public List<Evidence> collectSemanticEvidence(IncidentTask incident) throws IOException {
+        List<Evidence> evidence = new ArrayList<>();
+        String ns = incident.namespace();
+        Map<String, String> labels = Map.of("app", incident.service());
+
+        // 1. Collect Pod status → semantic evidence (multiple evidence items)
+        String podJson = reader.listResources("pods", ns, labels);
+        KubernetesJsonParser.ParsedPod pod = parser.parsePod(podJson);
+        if (pod != null) {
+            evidence.addAll(mapper.mapPodToSemanticEvidence(pod, incident.id()));
+        }
+
+        // 2. Collect Deployment status → deployment_metadata evidence
+        String deployJson = reader.readResource("deployments", incident.service(), ns, null);
+        KubernetesJsonParser.ParsedDeployment deployment = parser.parseDeployment(deployJson);
+        if (deployment != null) {
+            evidence.add(mapper.mapDeploymentToMetadataEvidence(deployment, incident.id()));
+        }
+
+        // 3. Collect Events as additional context
+        String eventsJson = reader.listResources("events", ns, labels);
+        List<KubernetesJsonParser.ParsedEvent> events = parser.parseEvents(eventsJson);
+        evidence.addAll(mapper.mapEventsToEvidence(events, incident.id()));
+
+        return evidence;
+    }
+
+    /**
      * Quick health check — is the K8s reader functional?
      */
     public boolean isHealthy() {

@@ -1,0 +1,38 @@
+{
+  "data": [
+    {
+      "traceID": "trace-root-slow-001",
+      "spans": [
+        {
+          "spanID": "span-root-003",
+          "operationName": "GET /api/v1/products",
+          "startTime": 1714292400000000,
+          "duration": 3500000,
+          "processID": "p1",
+          "references": [],
+          "tags": [
+            {"key": "http.status_code", "value": "200"}
+          ]
+        },
+        {
+          "spanID": "span-db-003",
+          "operationName": "SELECT products",
+          "startTime": 1714292400050000,
+          "duration": 2000000,
+          "processID": "p1",
+          "references": [
+            {"refType": "CHILD_OF", "spanID": "span-root-003"}
+          ],
+          "tags": [
+            {"key": "db.system", "value": "postgresql"}
+          ]
+        }
+      ],
+      "processes": {
+        "p1": {
+          "serviceName": "catalog-service"
+        }
+      }
+    }
+  ]
+}

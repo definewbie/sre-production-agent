@@ -1,0 +1,10 @@
+{
+  "incidentId" : "inc_2026-05-04T053014695527Z",
+  "baseDecisionType" : "likely_root_cause",
+  "baseSelectedHypothesisId" : "hyp_pod_crash_loop",
+  "baseConfidenceScore" : 0.95,
+  "baseScoreGap" : 0.7,
+  "proposals" : [ ],
+  "advisoryOnly" : true,
+  "modelProvider" : "mock"
+}

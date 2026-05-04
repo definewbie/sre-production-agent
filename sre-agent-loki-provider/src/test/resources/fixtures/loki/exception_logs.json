@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": {
+          "service": "order-service",
+          "namespace": "demo"
+        },
+        "values": [
+          ["1714292400000000000", "ERROR java.lang.NullPointerException: cannot resolve user context"],
+          ["1714292401000000000", "ERROR RuntimeException: failed to process order batch"],
+          ["1714292402000000000", "WARN IllegalStateException: cache entry expired during write-back"],
+          ["1714292403000000000", "ERROR com.fasterxml.jackson.databind.JsonMappingException: Unexpected end-of-input"]
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": {
+          "service": "order-service",
+          "namespace": "demo"
+        },
+        "values": [
+          ["1714292400000000000", "POST /api/v2/checkout 503 - service unavailable"],
+          ["1714292401000000000", "GET /api/v2/products 500 - internal server error"],
+          ["1714292402000000000", "PUT /api/v2/orders/12345 502 - bad gateway"],
+          ["1714292403000000000", "status=500 path=/api/v2/inventory method=GET duration=3200ms"]
+        ]
+      }
+    ]
+  }
+}

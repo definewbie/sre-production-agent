@@ -1,0 +1,60 @@
+{
+  "incidents" : [ {
+    "id" : "inc_alertmanager_abc123def456",
+    "service" : "order-service",
+    "namespace" : "demo",
+    "severity" : "warning",
+    "labels" : {
+      "alertname" : "HighErrorRate",
+      "service" : "order-service",
+      "namespace" : "demo",
+      "severity" : "warning"
+    },
+    "annotations" : {
+      "summary" : "order-service error rate is high",
+      "description" : "5xx error rate exceeded threshold"
+    },
+    "alert_name" : "HighErrorRate",
+    "started_at" : "2026-04-28T10:08:00Z"
+  } ],
+  "evidence" : [ {
+    "id" : "d9cdb1c6-d3f0-4f6e-bb6a-8d77db190343",
+    "source" : "alertmanager",
+    "service" : "order-service",
+    "timestamp" : "2026-04-28T10:08:00Z",
+    "content" : "Alertmanager shows HighErrorRate firing for order-service.",
+    "attributes" : {
+      "alertName" : "HighErrorRate",
+      "service" : "order-service",
+      "namespace" : "demo",
+      "severity" : "warning",
+      "state" : "active",
+      "startsAt" : "2026-04-28T10:08:00Z",
+      "fingerprint" : "abc123def456",
+      "labels" : {
+        "alertname" : "HighErrorRate",
+        "service" : "order-service",
+        "namespace" : "demo",
+        "severity" : "warning"
+      },
+      "annotations" : {
+        "summary" : "order-service error rate is high",
+        "description" : "5xx error rate exceeded threshold"
+      },
+      "silencedBy" : [ ],
+      "inhibitedBy" : [ ]
+    },
+    "strength" : 0.8,
+    "incident_id" : "inc-alertmanager-1777864150325",
+    "evidence_type" : "alert_firing"
+  } ],
+  "summary" : {
+    "reader" : "fixture",
+    "rawResponseLength" : 506,
+    "totalAlertCount" : 1,
+    "filteredAlertCount" : 1,
+    "incidentCount" : 1,
+    "evidenceCount" : 1,
+    "evidenceTypes" : [ "alert_firing" ]
+  }
+}

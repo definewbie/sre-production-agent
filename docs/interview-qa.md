@@ -344,6 +344,39 @@ The UI applies distinct visual badges:
 A guardrail notice is also displayed at the bottom of the LLM section, reiterating that the LLM cannot modify decisions or scores. This three-badge approach ensures that no one reading the report confuses synthesized text for verified findings.
 
 ---
+
+## Q25: What is the Probe Execution Framework and what guardrails does it enforce?
+
+Step S introduces the Probe Execution Framework (`sre-agent-probe-executor`). After the LLM Hypothesis Proposer generates hypotheses, it also emits **ProbeIntents** — structured suggestions like "check p95 latency" or "check error rate". The probe executor routes these intents to the appropriate evidence providers (Prometheus, Loki, Trace, Kubernetes, Alertmanager) and collects the resulting Evidence.
+
+**Key guardrails:**
+- `canAffectDecision` is always `false` — probe evidence is informational only and cannot change the RCA decision.
+- This is enforced at **compile time** via the `ProbeExecutionResult` constructor, which throws `IllegalArgumentException` if `canAffectDecision=true`.
+- Only `FIXTURE` mode is supported in Step S — no live backend probes.
+- `ProbeExecutionPolicy` validates every plan before execution: max probes limit, mode check, canAffectDecision check.
+
+---
+
+## Q26: Why is probe execution in a separate module from LLM hypothesis generation?
+
+Separation of concerns:
+- `sre-agent-llm` owns hypothesis generation — it proposes *what to investigate*.
+- `sre-agent-probe-executor` owns *how to investigate* — it routes intents, executes against providers, and collects Evidence.
+- The core RCA pipeline (`sre-agent-core`) remains completely unaware of probes.
+
+This means you can swap or upgrade the probe execution logic without touching the LLM module, and vice versa. It also keeps `sre-agent-core` dependency-free (zero LLM, zero Spring, zero provider-specific imports).
+
+---
+
+## Q27: What is the `canAffectDecision` guardrail and why is it compile-time enforced?
+
+Probe evidence supplements the RCA but must never override the deterministic pipeline's conclusion. If probe evidence could flip a decision, the entire auditability guarantee breaks — an engineer would not be able to reproduce the decision from the original evidence alone.
+
+The guardrail is compile-time enforced because runtime checks can be bypassed or forgotten. The `ProbeExecutionResult` record constructor rejects `canAffectDecision=true` with an `IllegalArgumentException`, ensuring no code path — intentional or accidental — can create a result that claims to affect the decision.
+
+In future Step W (post-probe RCA re-run policy), this will be relaxed under strict conditions, but for Step S the answer is: probes observe, they do not decide.
+
+---
 ## 中文版
 
 ## Q1: 这和一个日志聊天机器人有什么区别？
@@ -688,3 +721,36 @@ UI 使用不同的视觉徽章：
 - **Mock Provider** 徽章——在 `MockLlmClient` 激活时显示，让审阅者知道 LLM 文本是占位符，不是真正的 AI 输出。
 
 LLM 部分底部还显示一个防护栏提示，再次强调 LLM 不能修改决策或分数。这种三徽章方式确保阅读报告的人不会将综合文本与经验证的发现混淆。
+
+---
+
+## Q25: Probe Execution Framework 是什么，有哪些防护栏？
+
+Step S 引入了 Probe Execution Framework（`sre-agent-probe-executor`）。LLM Hypothesis Proposer 生成假设的同时，也会输出 **ProbeIntents** —— 结构化的探测建议，如"检查 p95 延迟"或"检查错误率"。Probe executor 将这些意图路由到对应的 evidence provider（Prometheus、Loki、Trace、Kubernetes、Alertmanager），并收集返回的 Evidence。
+
+**关键防护栏：**
+- `canAffectDecision` 始终为 `false` —— probe evidence 仅供参考，不能改变 RCA 决策。
+- 通过 **编译时强制**：`ProbeExecutionResult` 构造器在 `canAffectDecision=true` 时抛出 `IllegalArgumentException`。
+- Step S 仅支持 `FIXTURE` 模式 —— 无真实后端探测。
+- `ProbeExecutionPolicy` 在执行前验证每个 plan：最大 probes 数限制、模式检查、canAffectDecision 检查。
+
+---
+
+## Q26: 为什么 probe execution 和 LLM 假设生成分属不同模块？
+
+关注点分离：
+- `sre-agent-llm` 负责假设生成 —— 提出"调查什么"。
+- `sre-agent-probe-executor` 负责"怎么调查" —— 路由意图、执行 provider 调用、收集 Evidence。
+- 核心 RCA 管道（`sre-agent-core`）完全不感知 probe 的存在。
+
+这意味着可以独立替换或升级 probe 执行逻辑，不影响 LLM 模块，反之亦然。同时也保持了 `sre-agent-core` 零依赖（零 LLM、零 Spring、零 provider 特定 import）。
+
+---
+
+## Q27: `canAffectDecision` 防护栏是什么，为什么要编译时强制？
+
+Probe evidence 补充 RCA 但绝不能覆盖确定性管道的结论。如果 probe evidence 能翻转决策，整个可审计性保证就崩溃了 —— 工程师将无法仅凭原始 evidence 复现决策。
+
+编译时强制是因为运行时检查可以被绕过或遗忘。`ProbeExecutionResult` record 构造器在 `canAffectDecision=true` 时抛出 `IllegalArgumentException`，确保没有任何代码路径 —— 无论有意还是无意 —— 能创建声称影响决策的 result。
+
+在未来的 Step W（post-probe RCA re-run policy）中，这个限制会在严格条件下放宽，但在 Step S 中：probes 只观察，不做决策。

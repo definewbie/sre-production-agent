@@ -23,6 +23,11 @@
         <module>sre-agent-core</module>
         <module>sre-agent-llm</module>
         <module>sre-agent-k8s-provider</module>
+        <module>sre-agent-prometheus-provider</module>
+        <module>sre-agent-loki-provider</module>
+        <module>sre-agent-alertmanager-provider</module>
+        <module>sre-agent-trace-provider</module>
+        <module>sre-agent-probe-executor</module>
         <module>sre-agent-server</module>
         <module>sre-agent-cli</module>
     </modules>

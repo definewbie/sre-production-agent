@@ -97,6 +97,123 @@ public class KubernetesEvidenceMapper {
         return evidenceList;
     }
 
+    /**
+     * Map a parsed Pod into semantic Evidence objects matching RCA pattern evidence types.
+     * Unlike mapPodToEvidence (generic k8s_pod_status), this method detects fault conditions
+     * and generates specific evidence types that the pod_crash_loop pattern expects:
+     *   - container_crash_loop_backoff
+     *   - pod_restart_count_increased
+     *   - pod_not_ready
+     */
+    public List<Evidence> mapPodToSemanticEvidence(KubernetesJsonParser.ParsedPod pod, String incidentId) {
+        List<Evidence> evidenceList = new ArrayList<>();
+        String podName = pod.name();
+
+        // 1. CrashLoopBackOff detection
+        //    a) Explicit waiting state with CrashLoopBackOff reason
+        //    b) Terminated with Error + high restart count → infer CrashLoopBackOff cycle
+        boolean isCrashLoop = "CrashLoopBackOff".equals(pod.waitingReason())
+            || ("Error".equals(pod.terminatedReason()) && pod.restartCount() >= 2)
+            || ("Error".equals(pod.terminatedReason()) && pod.restartCount() >= 1 && !"Running".equals(pod.phase()));
+
+        if (isCrashLoop) {
+            Map<String, Object> attrs = new LinkedHashMap<>();
+            attrs.put("pod_name", podName);
+            attrs.put("container", pod.containerName());
+            attrs.put("exit_code", pod.terminatedExitCode());
+            attrs.put("reason", "CrashLoopBackOff");
+            attrs.put("restart_count", pod.restartCount());
+
+            String content = "Pod " + podName + " is in CrashLoopBackOff state. Container exiting with code "
+                    + pod.terminatedExitCode() + ".";
+            evidenceList.add(new Evidence(
+                "ev-k8s-crashloop-" + UUID.randomUUID().toString().substring(0, 8),
+                incidentId,
+                SOURCE_KUBERNETES,
+                "container_crash_loop_backoff",
+                podName,
+                Instant.now(),
+                content,
+                attrs,
+                0.95
+            ));
+        }
+
+        // 2. Restart count increased
+        if (pod.restartCount() >= 2) {
+            Map<String, Object> attrs = new LinkedHashMap<>();
+            attrs.put("restart_count", pod.restartCount());
+            attrs.put("pod_name", podName);
+
+            String content = "Pod has restarted " + pod.restartCount()
+                    + " times. Restart count is abnormally high.";
+            evidenceList.add(new Evidence(
+                "ev-k8s-restart-" + UUID.randomUUID().toString().substring(0, 8),
+                incidentId,
+                SOURCE_KUBERNETES,
+                "pod_restart_count_increased",
+                podName,
+                Instant.now(),
+                content,
+                attrs,
+                0.90
+            ));
+        }
+
+        // 3. Pod not ready
+        if (!"Running".equals(pod.phase()) || !pod.waitingReason().isEmpty() || pod.restartCount() > 0) {
+            Map<String, Object> attrs = new LinkedHashMap<>();
+            attrs.put("ready", false);
+            attrs.put("pod_name", podName);
+
+            String content = "Pod readiness probe failing. Pod " + podName + " is not ready.";
+            evidenceList.add(new Evidence(
+                "ev-k8s-notready-" + UUID.randomUUID().toString().substring(0, 8),
+                incidentId,
+                SOURCE_KUBERNETES,
+                "pod_not_ready",
+                podName,
+                Instant.now(),
+                content,
+                attrs,
+                0.85
+            ));
+        }
+
+        return evidenceList;
+    }
+
+    /**
+     * Map a parsed Deployment into a deployment_metadata Evidence object.
+     * Matches the evidence type expected by the pod_crash_loop pattern.
+     */
+    public Evidence mapDeploymentToMetadataEvidence(KubernetesJsonParser.ParsedDeployment deployment, String incidentId) {
+        Map<String, Object> attrs = new LinkedHashMap<>();
+        attrs.put("deployment_name", deployment.name());
+        attrs.put("replicas", deployment.replicas());
+        attrs.put("updated_replicas", deployment.updatedReplicas());
+        attrs.put("available_replicas", deployment.availableReplicas());
+        attrs.put("ready_replicas", deployment.readyReplicas());
+
+        String content = "Deployment " + deployment.name() + " has "
+                + deployment.readyReplicas() + "/" + deployment.replicas() + " desired replicas ready.";
+        if (deployment.readyReplicas() < deployment.replicas()) {
+            content = content + " [DEGRADED]";
+        }
+
+        return new Evidence(
+            "ev-k8s-deploy-meta-" + UUID.randomUUID().toString().substring(0, 8),
+            incidentId,
+            SOURCE_KUBERNETES,
+            "deployment_metadata",
+            deployment.name(),
+            Instant.now(),
+            content,
+            attrs,
+            0.70
+        );
+    }
+
     private String buildPodContent(KubernetesJsonParser.ParsedPod pod) {
         StringBuilder sb = new StringBuilder();
         sb.append("Pod ").append(pod.name()).append(" in namespace ").append(pod.namespace());
