@@ -1,3 +1,4 @@
+
 package ai.sreagent.core.workflow;
 
 import ai.sreagent.core.domain.*;
@@ -24,34 +25,45 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class InvestigationWorkflow {
 
+    /**
+     * Run investigation from JSON files (CLI / static scenarios).
+     */
     public InvestigationResult run(File alertFile, File evidenceFile) throws Exception {
-        EventTraceStore traceStore = new InMemoryEventTraceStore();
-        String incidentId = "inc_" + Instant.now().toString().replace(":", "").replace(".", "");
-        AtomicInteger eventCounter = new AtomicInteger(0);
-
-        // 1. Load alert
         EvidenceLoader loader = new EvidenceLoader();
         IncidentTask incident = loader.loadAlert(alertFile);
+        List<Evidence> evidence = loader.loadEvidence(evidenceFile);
+        return runFromMemory(incident, evidence);
+    }
+
+    /**
+     * Run investigation from in-memory domain objects.
+     * Used by live scenario runners (Step V) and server-side orchestration.
+     * No file I/O required.
+     */
+    public InvestigationResult runFromMemory(IncidentTask incident, List<Evidence> evidence) {
+        EventTraceStore traceStore = new InMemoryEventTraceStore();
+        String incidentId = incident.id() != null ? incident.id()
+                : "inc_" + Instant.now().toString().replace(":", "").replace(".", "");
+        AtomicInteger eventCounter = new AtomicInteger(0);
+
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "INCIDENT_CREATED",
                 Map.of("alert", incident.alertName(), "service", incident.service())));
 
-        // 2. Load evidence
-        List<Evidence> evidence = loader.loadEvidence(evidenceFile);
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "EVIDENCE_LOADED",
                 Map.of("count", evidence.size())));
 
-        // 3. Load patterns
+        // Load patterns
         PatternRegistry registry = BuiltinPatterns.defaultRegistry();
         Map<String, DiagnosticPattern> patternMap = new LinkedHashMap<>();
         registry.all().forEach(p -> patternMap.put(p.id(), p));
 
-        // 4. Generate hypotheses
+        // Generate hypotheses
         HypothesisEngine hypEngine = new HypothesisEngine();
         List<Hypothesis> hypotheses = hypEngine.generate(incident, registry.all());
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "HYPOTHESES_GENERATED",
                 Map.of("count", hypotheses.size())));
 
-        // 5. Verify hypotheses
+        // Verify hypotheses
         VerificationEngine verEngine = new VerificationEngine();
         Map<String, VerificationResult> verMap = verEngine.verifyAll(hypotheses, patternMap, evidence);
         List<VerificationResult> verResults = new ArrayList<>(verMap.values());
@@ -63,7 +75,7 @@ public class InvestigationWorkflow {
                             "contradictions", vr.contradictions().size())));
         }
 
-        // 6. Score confidence
+        // Score confidence
         ConfidenceScorer scorer = new ConfidenceScorer();
         List<ConfidenceResult> confResults = scorer.scoreAll(hypotheses, patternMap, verResults, evidence);
         for (ConfidenceResult cr : confResults) {
@@ -71,7 +83,7 @@ public class InvestigationWorkflow {
                     Map.of("hypothesisId", cr.hypothesisId(), "score", cr.score())));
         }
 
-        // 7. Compare hypotheses
+        // Compare hypotheses
         HypothesisComparator comparator = new HypothesisComparator();
         HypothesisComparison comparison = comparator.compare(incident, confResults, verResults, evidence);
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "HYPOTHESES_COMPARED",
@@ -79,20 +91,19 @@ public class InvestigationWorkflow {
                         "competing", comparison.competingHypothesisIds(),
                         "gap", comparison.scoreGap())));
 
-        // 8. Generate decision
+        // Generate decision
         InvestigationDecision decision = comparator.decide(incident, comparison, confResults);
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "DECISION_MADE",
                 Map.of("decisionType", decision.decisionType(),
                         "selectedHypothesisId", decision.selectedHypothesisId(),
                         "confidenceScore", decision.confidenceScore())));
 
-        // 9. Generate report
+        // Generate report
         MarkdownReporter reporter = new MarkdownReporter();
         String markdownReport = reporter.generate(incident, hypotheses, verResults, confResults, comparison, decision, evidence);
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "REPORT_GENERATED",
                 Map.of()));
 
-        // 10. Collect trace
         List<EventTraceEntry> eventTrace = traceStore.getByIncidentId(incidentId);
 
         return new InvestigationResult(

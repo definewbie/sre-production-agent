@@ -34,6 +34,27 @@
             <artifactId>sre-agent-probe-executor</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Observability providers (Step V: live evidence collection) -->
+        <dependency>
+            <groupId>ai.sreagent</groupId>
+            <artifactId>sre-agent-prometheus-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.sreagent</groupId>
+            <artifactId>sre-agent-loki-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.sreagent</groupId>
+            <artifactId>sre-agent-trace-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.sreagent</groupId>
+            <artifactId>sre-agent-alertmanager-provider</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

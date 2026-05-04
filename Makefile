@@ -240,3 +240,22 @@ demo-fault-inventory-latency:
 demo-fault-inventory-error:
 	@echo "Injecting 80%% error rate on inventory-service..."
 	@curl -s -X POST http://localhost:18083/fault-config -H 'Content-Type: application/json' -d '{"mode":"error","latencyMs":0,"errorRate":0.8,"timeoutRate":0.0}' && echo ""
+
+# ─── Live Scenario (Step V) ──────────────────────────────────
+
+.PHONY: live-scenario-simulate live-scenario-run live-scenario-reset live-scenario-latest
+
+live-scenario-simulate:
+	@echo "Running live scenario simulation (fixture)..."
+	@curl -s http://localhost:8080/api/live-scenario/simulate | python3 -m json.tool
+
+live-scenario-run:
+	@echo "Running live scenario with fault injection..."
+	@curl -s -X POST http://localhost:8080/api/live-scenario/run -H 'Content-Type: application/json' -d '{"mode":"live","faultMode":"latency","waitSeconds":5}' | python3 -m json.tool
+
+live-scenario-reset:
+	@echo "Resetting all demo service faults..."
+	@curl -s -X POST http://localhost:8080/api/live-scenario/reset | python3 -m json.tool
+
+live-scenario-latest:
+	@curl -s http://localhost:8080/api/live-scenario/latest | python3 -m json.tool

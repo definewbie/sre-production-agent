@@ -401,6 +401,47 @@ body {
     .header-badges { display: none; }
     .demo-cards { grid-template-columns: 1fr; }
 }
+/* ---- Live Investigation CN (Step V) ---- */
+.live-cn-btn-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.live-fault-opt.active, .live-mode-opt.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.live-step {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.75rem; padding: 0.35rem 0; color: var(--dim);
+    transition: all 0.2s;
+}
+.live-step.active { color: var(--text); font-weight: 600; }
+.live-step.done { color: var(--green); }
+.live-step-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border); flex-shrink: 0;
+    transition: all 0.2s;
+}
+.live-step.active .live-step-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.live-step.done .live-step-dot { background: var(--green); }
+.live-evidence-src {
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.6rem 0.8rem; background: var(--surface);
+    margin-bottom: 0.5rem;
+}
+.live-evidence-src-hdr {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 0.3rem;
+}
+.live-evidence-src-name { font-size: 0.75rem; font-weight: 600; }
+.live-evidence-src-count { font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 3px; }
+.live-evidence-types { font-size: 0.65rem; color: var(--dim); }
+.live-decision-tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 600;
+    padding: 0.3rem 0.8rem; border-radius: 4px; margin-bottom: 0.6rem;
+}
+.live-decision-tag.competing { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.live-decision-tag.resolved { background: rgba(34,197,94,0.15); color: var(--green); }
+.live-decision-grid { display: grid; gap: 0.3rem; }
+.live-decision-row { display: flex; gap: 0.75rem; font-size: 0.75rem; }
+.live-decision-key { width: 100px; flex-shrink: 0; color: var(--dim); }
+.live-hyp-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+.live-hyp-table th { text-align: left; font-weight: 600; color: var(--dim); padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.6rem; text-transform: uppercase; }
+.live-hyp-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.03); }
 </style>
 </head>
 <body>
@@ -418,6 +459,7 @@ body {
         <span class="badge badge-static">Static Evidence</span>
         <button id="labStatusBtn" onclick="toggleLabStatus()" style="margin-left:0.8rem;padding:0.25rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--fg);border-radius:4px;cursor:pointer;font-size:0.7rem">Lab Status</button>
         <button id="demoServicesBtn" onclick="toggleDemoServices()" style="margin-left:0.4rem;padding:0.25rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--fg);border-radius:4px;cursor:pointer;font-size:0.7rem">Demo Services</button>
+        <button id="liveInvestBtn" onclick="toggleLiveInvest()" style="margin-left:0.4rem;padding:0.25rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--fg);border-radius:4px;cursor:pointer;font-size:0.7rem">实时排查</button>
     </div>
 </div>
 
@@ -685,6 +727,95 @@ body {
                 <div class="demo-log-box" id="demoActivityLog">
                     <div class="demo-log-empty">No activity yet</div>
                 </div>
+            </div>
+
+        </div>
+
+        <!-- 实时排查面板 (Step V) -->
+        <div id="liveInvestSection" style="display:none">
+
+            <!-- 场景描述 -->
+            <div class="card" style="margin-bottom:0.8rem">
+                <div class="card-label">场景描述 <span style="font-size:0.55rem;color:var(--accent);font-weight:400">Scenario G</span></div>
+                <div class="live-cn-desc">
+                    <div style="font-size:0.8rem;font-weight:600;margin-bottom:0.4rem">支付延迟 → 订单错误率飙升</div>
+                    <div style="font-size:0.7rem;color:var(--dim);line-height:1.6">
+                        模拟真实故障场景：向 payment-service 注入延迟故障，等待指标传播，然后从 Prometheus / Loki / Trace / K8s 多信号源收集证据，
+                        最终由确定性 RCA 引擎给出根因分析结论。
+                    </div>
+                    <div class="live-cn-topo" style="margin-top:0.6rem">
+                        <span class="topo-svc">traffic-generator</span>
+                        <span class="topo-arrow"> → </span>
+                        <span class="topo-svc">order-service</span> <span style="color:var(--dim);font-size:0.65rem">/checkout</span>
+                        <span class="topo-arrow"> → </span>
+                        <span class="topo-svc" style="border-color:var(--red)">payment-service</span> <span style="color:var(--red);font-size:0.65rem">/charge ⚠ 故障注入点</span>
+                        <span class="topo-arrow"> → </span>
+                        <span class="topo-svc">inventory-service</span> <span style="color:var(--dim);font-size:0.65rem">/reserve</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 故障注入控制 -->
+            <div class="card" style="margin-bottom:0.8rem">
+                <div class="card-label">故障注入控制</div>
+                <div style="margin-bottom:0.5rem">
+                    <div style="font-size:0.7rem;color:var(--dim);margin-bottom:0.4rem">选择故障类型：</div>
+                    <div class="live-cn-btn-row">
+                        <button class="demo-btn demo-btn-green live-fault-opt active" data-fault="latency" onclick="selectFault(this)">延迟注入</button>
+                        <button class="demo-btn demo-btn-red live-fault-opt" data-fault="error" onclick="selectFault(this)">错误注入</button>
+                        <button class="demo-btn demo-btn-red live-fault-opt" data-fault="timeout" onclick="selectFault(this)">超时注入</button>
+                    </div>
+                </div>
+                <div style="margin-bottom:0.5rem">
+                    <div style="font-size:0.7rem;color:var(--dim);margin-bottom:0.4rem">运行模式：</div>
+                    <div class="live-cn-btn-row">
+                        <button class="demo-btn demo-btn-blue live-mode-opt active" data-mode="simulation" onclick="selectMode(this)">模拟模式（Fixture）</button>
+                        <button class="demo-btn demo-btn-yellow live-mode-opt" data-mode="live" onclick="selectMode(this)">实时模式（Live）</button>
+                    </div>
+                </div>
+                <div style="margin-top:0.6rem">
+                    <button class="btn btn-primary" id="liveRunBtn" onclick="runLiveScenario()" style="font-size:0.8rem;padding:0.5rem 1.5rem">
+                        🚀 开始排查
+                    </button>
+                    <button class="btn btn-ghost" id="liveResetBtn" onclick="resetLiveScenario()" style="margin-left:0.4rem">重置故障</button>
+                </div>
+            </div>
+
+            <!-- 排查进度 -->
+            <div class="card" style="margin-bottom:0.8rem;display:none" id="liveProgressCard">
+                <div class="card-label">排查进度</div>
+                <div id="liveProgressContent">
+                    <div class="live-step" id="liveStep0"><span class="live-step-dot"></span>等待中</div>
+                    <div class="live-step" id="liveStep1"><span class="live-step-dot"></span>注入故障</div>
+                    <div class="live-step" id="liveStep2"><span class="live-step-dot"></span>等待指标传播</div>
+                    <div class="live-step" id="liveStep3"><span class="live-step-dot"></span>收集证据（Prometheus / Loki / Trace / K8s）</div>
+                    <div class="live-step" id="liveStep4"><span class="live-step-dot"></span>运行 RCA 分析</div>
+                    <div class="live-step" id="liveStep5"><span class="live-step-dot"></span>生成报告</div>
+                </div>
+            </div>
+
+            <!-- 证据收集报告 -->
+            <div class="card" style="margin-bottom:0.8rem;display:none" id="liveEvidenceCard">
+                <div class="card-label">证据收集报告</div>
+                <div id="liveEvidenceContent"></div>
+            </div>
+
+            <!-- RCA 决策结论 -->
+            <div class="card" style="margin-bottom:0.8rem;display:none" id="liveDecisionCard">
+                <div class="card-label">RCA 决策结论</div>
+                <div id="liveDecisionContent"></div>
+            </div>
+
+            <!-- 假设对比 -->
+            <div class="card" style="margin-bottom:0.8rem;display:none" id="liveHypCard">
+                <div class="card-label">假设对比</div>
+                <div id="liveHypContent"></div>
+            </div>
+
+            <!-- Markdown 报告 -->
+            <div class="card" style="display:none" id="liveReportCard">
+                <div class="card-label">详细报告</div>
+                <div id="liveReportContent" style="font-size:0.7rem;line-height:1.6;white-space:pre-wrap;color:var(--dim);max-height:400px;overflow-y:auto"></div>
             </div>
 
         </div>
@@ -1357,6 +1488,254 @@ function demoLog(msg, level) {
     if (entries.length > 100) {
         entries[0].remove();
     }
+}
+
+/* ---- 实时排查面板 (Step V) ---- */
+var liveInvestVisible = false;
+var liveFaultMode = 'latency';
+var liveRunMode = 'simulation';
+
+function selectFault(btn) {
+    document.querySelectorAll('.live-fault-opt').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    liveFaultMode = btn.dataset.fault;
+}
+
+function selectMode(btn) {
+    document.querySelectorAll('.live-mode-opt').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    liveRunMode = btn.dataset.mode;
+}
+
+function toggleLiveInvest() {
+    liveInvestVisible = !liveInvestVisible;
+    var section = document.getElementById('liveInvestSection');
+    var btn = document.getElementById('liveInvestBtn');
+    var workspace = document.getElementById('workspace');
+
+    if (liveInvestVisible) {
+        // close other panels
+        if (labStatusVisible) toggleLabStatus();
+        if (demoServicesVisible) toggleDemoServices();
+
+        section.style.display = '';
+        btn.style.background = 'var(--accent)';
+        btn.style.color = '#fff';
+        btn.style.borderColor = 'var(--accent)';
+
+        // hide investigation cards
+        var cards = workspace.querySelectorAll('.card, .tabs-card, .progress-card, .decision-card, .hyp-card');
+        for (var i = 0; i < cards.length; i++) {
+            var c = cards[i];
+            if (c.id !== 'liveInvestSection' && c.parentNode && c.parentNode.id !== 'liveInvestSection') {
+                c.style.display = 'none';
+            }
+        }
+    } else {
+        section.style.display = 'none';
+        btn.style.background = 'var(--surface)';
+        btn.style.color = 'var(--fg)';
+        btn.style.borderColor = 'var(--border)';
+
+        // restore cards
+        var cards = workspace.querySelectorAll('.card, .tabs-card, .progress-card, .decision-card, .hyp-card');
+        for (var i = 0; i < cards.length; i++) {
+            var c = cards[i];
+            if (c.id !== 'liveInvestSection' && c.parentNode && c.parentNode.id !== 'liveInvestSection') {
+                c.style.display = '';
+            }
+        }
+        document.getElementById('probeCard').style.display = 'none';
+    }
+}
+
+function setLiveStep(idx) {
+    for (var i = 0; i <= 5; i++) {
+        var el = document.getElementById('liveStep' + i);
+        el.classList.remove('active', 'done');
+        if (i < idx) el.classList.add('done');
+        else if (i === idx) el.classList.add('active');
+    }
+}
+
+function runLiveScenario() {
+    var runBtn = document.getElementById('liveRunBtn');
+    runBtn.disabled = true;
+    runBtn.textContent = '排查中...';
+
+    // show progress
+    document.getElementById('liveProgressCard').style.display = '';
+    document.getElementById('liveEvidenceCard').style.display = 'none';
+    document.getElementById('liveDecisionCard').style.display = 'none';
+    document.getElementById('liveHypCard').style.display = 'none';
+    document.getElementById('liveReportCard').style.display = 'none';
+
+    setLiveStep(0);
+
+    // animate steps then call API
+    var step = 1;
+    var timer = setInterval(function() {
+        if (step <= 2) {
+            setLiveStep(step);
+            step++;
+        } else {
+            clearInterval(timer);
+            setLiveStep(3);
+            callLiveApi();
+        }
+    }, 600);
+}
+
+function callLiveApi() {
+    var endpoint = liveRunMode === 'live' ? '/api/live-scenario/run' : '/api/live-scenario/simulate';
+    var options = { method: liveRunMode === 'live' ? 'POST' : 'GET' };
+
+    if (liveRunMode === 'live') {
+        options.headers = { 'Content-Type': 'application/json' };
+        options.body = JSON.stringify({
+            mode: 'live',
+            faultMode: liveFaultMode,
+            waitSeconds: 5
+        });
+    }
+
+    fetch(endpoint, options)
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function(data) {
+            setLiveStep(5);
+            renderLiveResult(data);
+        })
+        .catch(function(err) {
+            setLiveStep(3);
+            document.getElementById('liveEvidenceContent').innerHTML =
+                '<div style="color:var(--red);font-size:0.75rem">请求失败: ' + (err.message || '未知错误') + '</div>';
+            document.getElementById('liveEvidenceCard').style.display = '';
+        })
+        .finally(function() {
+            var runBtn = document.getElementById('liveRunBtn');
+            runBtn.disabled = false;
+            runBtn.textContent = '🚀 开始排查';
+        });
+}
+
+function renderLiveResult(data) {
+    // Evidence Report
+    var er = data.evidenceReport;
+    if (er) {
+        document.getElementById('liveEvidenceCard').style.display = '';
+        var html = '<div style="margin-bottom:0.5rem;font-size:0.75rem;color:var(--dim)">共收集 ' +
+            (er.totalEvidenceCount || 0) + ' 条证据</div>';
+
+        var sources = er.sources || {};
+        var srcKeys = Object.keys(sources);
+        for (var i = 0; i < srcKeys.length; i++) {
+            var src = sources[srcKeys[i]];
+            var statusColor = src.available ? '#10b981' : '#ef4444';
+            html += '<div class="live-evidence-src">'
+                + '<div class="live-evidence-src-hdr">'
+                + '<span class="live-evidence-src-name">' + (src.sourceName || srcKeys[i]) + '</span>'
+                + '<span class="live-evidence-src-count" style="background:' + statusColor + '22;color:' + statusColor + '">'
+                + (src.available ? '✓ ' + src.evidenceCount + ' 条' : '✗ 不可用') + '</span>'
+                + '</div>';
+            if (src.evidenceTypes && src.evidenceTypes.length > 0) {
+                html += '<div class="live-evidence-types">' + src.evidenceTypes.join(', ') + '</div>';
+            }
+            if (src.error) {
+                html += '<div style="font-size:0.65rem;color:var(--red);margin-top:0.2rem">' + src.error + '</div>';
+            }
+            html += '</div>';
+        }
+
+        var warnings = er.warnings || [];
+        if (warnings.length > 0) {
+            html += '<div style="font-size:0.65rem;color:var(--yellow);margin-top:0.3rem">⚠ ' + warnings.join('; ') + '</div>';
+        }
+
+        document.getElementById('liveEvidenceContent').innerHTML = html;
+    }
+
+    // Decision
+    var rca = data.baseRca;
+    if (rca) {
+        document.getElementById('liveDecisionCard').style.display = '';
+
+        var dec = rca.decision || {};
+        var decType = dec.decisionType || 'unknown';
+        var isCompeting = decType === 'competing_hypotheses';
+        var tagClass = isCompeting ? 'competing' : 'resolved';
+        var tagText = isCompeting ? '⚠ 存在竞争假设' : '✓ 已定位根因';
+
+        var dhtml = '<div class="live-decision-tag ' + tagClass + '">' + tagText + '</div>';
+        dhtml += '<div class="live-decision-grid">';
+        dhtml += '<div class="live-decision-row"><span class="live-decision-key">决策类型</span><span>' + decType + '</span></div>';
+        dhtml += '<div class="live-decision-row"><span class="live-decision-key">选定假设</span><span>' + (dec.selectedHypothesisId || '-') + '</span></div>';
+        dhtml += '<div class="live-decision-row"><span class="live-decision-key">置信度</span><span>' + (dec.confidenceScore != null ? dec.confidenceScore.toFixed(2) : '-') + '</span></div>';
+        if (dec.scoreGap != null) {
+            dhtml += '<div class="live-decision-row"><span class="live-decision-key">分数差距</span><span>' + dec.scoreGap.toFixed(2) + '</span></div>';
+        }
+        dhtml += '</div>';
+        dhtml += '<div style="font-size:0.6rem;color:var(--dim);margin-top:0.5rem">'
+            + (isCompeting ? '分数差距低于阈值，系统保留不确定性，不强制选择单一根因。' : '系统已确定根因。')
+            + ' <span style="opacity:0.6">决策是确定性的，LLM 不影响分数。</span></div>';
+
+        document.getElementById('liveDecisionContent').innerHTML = dhtml;
+
+        // Hypotheses table
+        var hyps = rca.hypotheses || [];
+        if (hyps.length > 0) {
+            document.getElementById('liveHypCard').style.display = '';
+            var hhtml = '<table class="live-hyp-table"><thead><tr>'
+                + '<th>假设</th><th>分数</th><th>支持</th><th>反驳</th><th>矛盾</th>'
+                + '</tr></thead><tbody>';
+            for (var h = 0; h < hyps.length; h++) {
+                var hyp = hyps[h];
+                var pct = Math.round((hyp.score || 0) * 100);
+                hhtml += '<tr>'
+                    + '<td style="font-weight:600">' + (hyp.name || hyp.id || '-') + '</td>'
+                    + '<td><div style="display:flex;align-items:center;gap:0.3rem">'
+                    + '<div style="flex:1;height:4px;background:var(--border);border-radius:2px">'
+                    + '<div style="height:100%;width:' + pct + '%;background:var(--accent);border-radius:2px"></div></div>'
+                    + '<span style="font-size:0.65rem;color:var(--dim)">' + (hyp.score || 0).toFixed(2) + '</span></div></td>'
+                    + '<td>' + (hyp.supportingEvidence != null ? hyp.supportingEvidence.size : '-') + '</td>'
+                    + '<td>' + (hyp.counterEvidence != null ? hyp.counterEvidence.size : '-') + '</td>'
+                    + '<td>' + (hyp.contradictions != null ? hyp.contradictions.size : '-') + '</td>'
+                    + '</tr>';
+            }
+            hhtml += '</tbody></table>';
+            document.getElementById('liveHypContent').innerHTML = hhtml;
+        }
+
+        // Report
+        if (rca.markdownReport) {
+            document.getElementById('liveReportCard').style.display = '';
+            document.getElementById('liveReportContent').textContent = rca.markdownReport;
+        }
+    }
+
+    // Handle failed scenario
+    if (data.status === 'FAILED') {
+        document.getElementById('liveDecisionCard').style.display = '';
+        document.getElementById('liveDecisionContent').innerHTML =
+            '<div style="color:var(--red);font-size:0.75rem">场景执行失败: ' + (data.errorMessage || '未知错误') + '</div>';
+    }
+}
+
+function resetLiveScenario() {
+    fetch('/api/live-scenario/reset', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('liveProgressCard').style.display = 'none';
+            document.getElementById('liveEvidenceCard').style.display = 'none';
+            document.getElementById('liveDecisionCard').style.display = 'none';
+            document.getElementById('liveHypCard').style.display = 'none';
+            document.getElementById('liveReportCard').style.display = 'none';
+        })
+        .catch(function(err) {
+            alert('重置失败: ' + (err.message || '未知错误'));
+        });
 }
 </script>
 </body>

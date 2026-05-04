@@ -4,8 +4,8 @@
 
 || Target Role | Priority Step | Reason |
 |---|---|---|
-|| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → Step V: Complex Live RCA | Demonstrates principled LLM + evidence + probe integration |
-|| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → Step V: Complex Live RCA | Demonstrates full observability pipeline |
+|| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → ~~Step V~~ ✅ Done → Step W: Post-Probe RCA Re-run | Demonstrates principled LLM + evidence + probe integration ||
+|| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → ~~Step V~~ ✅ Done → Step W: Post-Probe RCA Re-run | Demonstrates full observability pipeline ||
 || Engineering Manager / Architect | Polish architecture narrative | Demonstrates design trade-off reasoning |
 
 ---
@@ -494,6 +494,65 @@ List<Evidence> (probe evidence, informational only)
 
 ---
 
+## Step V: Complex Live RCA Scenario + 中文 Live Investigation Console ✅ COMPLETED
+
+**Status:** Completed. Multi-signal live RCA orchestration with real observability data collection and Chinese-language investigation console UI.
+
+**What was built:**
+- `LiveScenarioService` — orchestrates Scenario G: fault injection → evidence collection → RCA workflow → result assembly
+- `LiveEvidenceCollector` — Spring component that collects evidence from all 5 providers (Prometheus, Loki, Trace, K8s, Alertmanager) in a single pass
+- `LiveScenarioController` — REST API: `POST /api/live-scenario/simulate`, `GET /api/live-scenario/{id}`, `POST /api/live-scenario/{id}/reset`
+- `LiveScenarioResult` / `LiveEvidenceReport` — response DTOs with per-source evidence breakdown
+- `InvestigationWorkflow.runFromMemory()` — in-memory RCA execution without temp file I/O
+- 中文 Live Investigation Console UI — dark-themed panel with fault mode selection (延迟注入/错误注入/超时注入), simulation mode, real-time evidence display, and RCA result visualization
+- Makefile targets: `live-scenario-simulate`, `live-scenario-status`, `live-scenario-reset`
+- Server pom.xml: added all 5 provider dependencies for live evidence collection
+- 12 new tests (560 total, up from 548, 0 failures)
+
+**Architecture:**
+```
+LiveScenarioController (REST)
+  ↓
+LiveScenarioService (orchestrator)
+  ├── DemoServiceClient → fault injection on demo services
+  ├── LiveEvidenceCollector → multi-signal collection
+  │   ├── PrometheusEvidenceProvider → HttpPrometheusQueryClient
+  │   ├── LokiEvidenceProvider → HttpLokiQueryClient
+  │   ├── TraceEvidenceProvider → HttpTraceQueryClient
+  │   ├── KubernetesEvidenceProvider → JavaClientKubernetesResourceReader
+  │   └── AlertmanagerEvidenceProvider → HttpAlertmanagerQueryClient
+  ├── InvestigationWorkflow.runFromMemory() → RCA pipeline
+  └── LiveScenarioResult → response
+```
+
+**Scenario G flow:**
+```
+traffic-generator → order-service /checkout
+  → payment-service /charge (fault injected: latency/error/timeout)
+  → inventory-service /reserve
+  ↓
+Prometheus/Loki/Jaeger/K8s/Alertmanager evidence collected
+  ↓
+RCA workflow: Evidence → Hypothesis → Verification → Confidence → Decision
+```
+
+**Key design decisions:**
+- `runFromMemory()` avoids writing temp files — alert and evidence objects passed directly to the workflow
+- LiveEvidenceCollector is a Spring `@Component` — injects all provider clients via constructor
+- Simulation mode uses fixture clients (no live endpoints required for tests)
+- UI is fully Chinese-localized — fault modes, evidence labels, RCA results all in Chinese
+- Provider API calls use builder pattern for all request objects
+- TraceClientConfig requires 4 parameters: baseUrl, backendType, timeout, headers
+
+**Why this matters:**
+- Demonstrates end-to-end multi-signal RCA with real observability data
+- Validates the adapter pattern at scale — all 5 providers work together in a single investigation
+- Shows the platform can handle complex incident scenarios beyond static fixtures
+- Chinese UI demonstrates localization capability for non-English-speaking SRE teams
+- `runFromMemory()` enables programmatic RCA execution without filesystem dependencies
+
+---
+
 ## Step T: Local Observability Stack ✅ COMPLETED
 
 **Status:** Completed. Observability status service with health checking, local stack management scripts, and Live Lab Status UI.
@@ -570,9 +629,9 @@ These are not committed — listed for discussion only:
 
 | 目标岗位 | 优先步骤 | 原因 |
 |---|---|---|
-|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → Step V: 复杂实时 RCA | 展示了规范的 LLM + 证据 + 探测集成能力 |
-|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → Step V: 复杂实时 RCA | 展示了完整的可观测性流水线 |
-| 工程经理 / 架构师 | 完善架构叙事 | 展示了设计权衡推理能力 |
+|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → ~~Step V~~ ✅ 已完成 → Step W: 探测后 RCA 重跑 | 展示了规范的 LLM + 证据 + 探测集成能力 ||
+|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → ~~Step V~~ ✅ 已完成 → Step W: 探测后 RCA 重跑 | 展示了完整的可观测性流水线 ||
+|| 工程经理 / 架构师 | 完善架构叙事 | 展示了设计权衡推理能力 |
 
 ---
 

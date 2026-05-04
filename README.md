@@ -380,6 +380,50 @@ make demo-fault-payment-latency  # inject 1500ms latency
 
 ---
 
+## Complex Live RCA Scenario + 中文 Investigation Console (Step V)
+
+Step V adds **multi-signal live RCA orchestration** with a Chinese-language investigation console UI. It wires all 5 evidence providers (Prometheus, Loki, Trace, K8s, Alertmanager) into a single Scenario G investigation with fault injection on demo services.
+
+**Architecture:**
+```
+LiveScenarioController (REST)
+  ↓
+LiveScenarioService (orchestrator)
+  ├── DemoServiceClient → fault injection
+  ├── LiveEvidenceCollector → multi-signal collection
+  │   ├── PrometheusEvidenceProvider
+  │   ├── LokiEvidenceProvider
+  │   ├── TraceEvidenceProvider
+  │   ├── KubernetesEvidenceProvider
+  │   └── AlertmanagerEvidenceProvider
+  ├── InvestigationWorkflow.runFromMemory() → RCA pipeline
+  └── LiveScenarioResult → response
+```
+
+**Scenario G flow:**
+```
+traffic-generator → order-service /checkout
+  → payment-service /charge (fault: latency/error/timeout)
+  → inventory-service /reserve
+  ↓
+Multi-signal evidence → RCA → Decision
+```
+
+**REST API:**
+- `POST /api/live-scenario/simulate` — run Scenario G (simulation or live mode)
+- `GET /api/live-scenario/{id}` — get scenario status and results
+- `POST /api/live-scenario/{id}/reset` — clear fault injection and results
+
+**UI:** "🔍 实时排查" button opens Chinese-language investigation console with fault mode selection, run mode toggle, step progress indicator, and RCA result visualization.
+
+**Makefile targets:** `live-scenario-simulate`, `live-scenario-status`, `live-scenario-reset`
+
+**Key design:** `InvestigationWorkflow.runFromMemory()` enables programmatic RCA without filesystem I/O. Simulation mode uses fixture clients (no live endpoints required for tests). UI is fully Chinese-localized.
+
+**12 new tests** (560 total, up from 548, 0 failures)
+
+---
+
 ## LLM Hypothesis Proposer (Step R)
 
 Step R adds an **LLM Hypothesis Proposer** to the `sre-agent-llm` module that generates advisory hypothesis proposals when the deterministic RCA workflow produces inconclusive results. This bridges the gap between deterministic investigation and AI-assisted exploration.
@@ -497,7 +541,7 @@ fixture-based (unit tests/CI) and HTTP client (production). `demo-services` prov
 mvn test
 ```
 
-Expected: 548 tests passing.
+Expected: 560 tests passing.
 
 ### Run CLI Demo
 
