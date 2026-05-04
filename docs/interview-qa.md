@@ -377,6 +377,44 @@ The guardrail is compile-time enforced because runtime checks can be bypassed or
 In future Step W (post-probe RCA re-run policy), this will be relaxed under strict conditions, but for Step S the answer is: probes observe, they do not decide.
 
 ---
+
+## Q28: How does the Observability Status Service check endpoint health without requiring live endpoints?
+
+The `EndpointHealthChecker` is an **interface** with a single method: `check(url) → EndpointStatus`. The default implementation (`HttpEndpointHealthChecker`) makes HTTP GET requests to check connectivity and measure latency. In tests, this interface is mocked — no live Prometheus, Loki, or Tempo instance is needed.
+
+This follows the same pattern as `LlmClient` / `MockLlmClient`: the interface defines the contract, and a test-friendly implementation is always available. The 23 new tests (ObservabilityEndpointStatusTest, ObservabilityStatusServiceTest, ObservabilityEndpointConfigTest, HttpEndpointHealthCheckerTest) all use mocked health checkers, so `mvn test` passes without any observability stack running.
+
+The endpoint URLs themselves come from `application.properties`, not from hardcoded constants. This means different environments (local kind, staging, production) can configure different endpoint lists without code changes.
+
+---
+
+## Q29: Why is `EndpointHealthChecker` an interface rather than just using `RestTemplate` directly?
+
+Three reasons:
+
+1. **Testability.** Making HTTP calls in unit tests means either starting real servers or using mock HTTP servers. By extracting an interface, tests inject a mock that returns predetermined results instantly. No network, no timeouts, no flaky tests.
+
+2. **Extensibility.** Not every observability endpoint speaks HTTP the same way. Prometheus has `/-/healthy`, Grafana has `/api/health`, and some systems might need gRPC or TCP checks. The interface allows different implementations per endpoint type without changing the service layer.
+
+3. **Consistent with project patterns.** Every external dependency in this project is behind an interface: `LlmClient`, `PrometheusQueryClient`, `LokiQueryClient`, `TraceQueryClient`, `KubernetesResourceReader`. `EndpointHealthChecker` follows the same hexagonal architecture principle — infrastructure concerns are behind SPI boundaries, not embedded in business logic.
+
+---
+
+## Q30: What does the Live Lab Status page show and why does it matter for a demo?
+
+The Live Lab Status page (toggled via the "Lab Status" button in the header) shows real-time health status of all configured observability endpoints — Prometheus, Loki, Tempo, Alertmanager, and Grafana. For each endpoint it displays: name, URL, status (UP/DOWN/UNKNOWN), response latency, and last-checked timestamp.
+
+This matters for three reasons:
+
+1. **Demo credibility.** When demonstrating the SRE agent to interviewers, being able to show "all observability endpoints are running and healthy" is a concrete signal that this isn't just a toy project — there's real infrastructure behind it.
+
+2. **Developer experience.** During local development, the page provides at-a-glance confirmation that the observability stack is up before running scenarios. If Prometheus is down, you see it immediately rather than getting cryptic connection errors later.
+
+3. **Bridges infrastructure and application.** Step T's scripts (`scripts/observability/`) manage the infrastructure (Helm install, port-forward), and the status page reflects that infrastructure state back into the application. This demonstrates the full-stack thinking that SRE and platform engineering roles require.
+
+**Important:** Step T does NOT deploy demo services or inject faults — that's Step U and Step V. Step T focuses purely on observability stack lifecycle management and health visibility.
+
+---
 ## 中文版
 
 ## Q1: 这和一个日志聊天机器人有什么区别？
@@ -754,3 +792,41 @@ Probe evidence 补充 RCA 但绝不能覆盖确定性管道的结论。如果 pr
 编译时强制是因为运行时检查可以被绕过或遗忘。`ProbeExecutionResult` record 构造器在 `canAffectDecision=true` 时抛出 `IllegalArgumentException`，确保没有任何代码路径 —— 无论有意还是无意 —— 能创建声称影响决策的 result。
 
 在未来的 Step W（post-probe RCA re-run policy）中，这个限制会在严格条件下放宽，但在 Step S 中：probes 只观察，不做决策。
+
+---
+
+## Q28：可观测性状态服务如何在不依赖活跃端点的情况下检查端点健康状态？
+
+`EndpointHealthChecker` 是一个**接口**，只有一个方法：`check(url) → EndpointStatus`。默认实现（`HttpEndpointHealthChecker`）通过 HTTP GET 请求检查连通性并测量延迟。在测试中，这个接口被模拟（mock）——不需要运行任何真实的 Prometheus、Loki 或 Tempo 实例。
+
+这与 `LlmClient` / `MockLlmClient` 的模式相同：接口定义契约，测试友好的实现始终可用。23 个新测试（ObservabilityEndpointStatusTest、ObservabilityStatusServiceTest、ObservabilityEndpointConfigTest、HttpEndpointHealthCheckerTest）都使用模拟的健康检查器，因此 `mvn test` 在没有运行任何可观测性栈的情况下也能通过。
+
+端点 URL 本身来自 `application.properties`，而非硬编码常量。这意味着不同环境（本地 kind、staging、生产）可以配置不同的端点列表，无需修改代码。
+
+---
+
+## Q29：为什么 `EndpointHealthChecker` 是接口而不是直接使用 `RestTemplate`？
+
+三个原因：
+
+1. **可测试性。** 在单元测试中发起 HTTP 调用意味着要么启动真实服务器，要么使用模拟 HTTP 服务器。通过提取接口，测试可以注入一个即时返回预定结果的模拟对象。无网络、无超时、无脆弱测试。
+
+2. **可扩展性。** 并非每个可观测性端点都以相同方式使用 HTTP。Prometheus 使用 `/-/healthy`，Grafana 使用 `/api/health`，某些系统可能需要 gRPC 或 TCP 检查。接口允许每种端点类型有不同的实现，而无需更改服务层。
+
+3. **与项目模式一致。** 本项目中的每个外部依赖都在接口之后：`LlmClient`、`PrometheusQueryClient`、`LokiQueryClient`、`TraceQueryClient`、`KubernetesResourceReader`。`EndpointHealthChecker` 遵循相同的六边形架构原则——基础设施关注点在 SPI 边界之后，而非嵌入在业务逻辑中。
+
+---
+
+## Q30：Live Lab Status 页面显示什么？为什么它对演示很重要？
+
+Live Lab Status 页面（通过页面头部的 "Lab Status" 按钮切换）显示所有已配置可观测性端点的实时健康状态——Prometheus、Loki、Tempo、Alertmanager 和 Grafana。对于每个端点，它显示：名称、URL、状态（UP/DOWN/UNKNOWN）、响应延迟和最后检查时间戳。
+
+这很重要的三个原因：
+
+1. **演示可信度。** 在向面试官展示 SRE agent 时，能够展示"所有可观测性端点都在运行且健康"是一个具体信号，表明这不是一个玩具项目——背后有真实的基础设施。
+
+2. **开发者体验。** 在本地开发期间，该页面在运行场景之前提供一目了然的确认：可观测性栈已启动。如果 Prometheus 宕机，你可以立即看到，而不是在之后遇到晦涩的连接错误。
+
+3. **连接基础设施与应用。** Step T 的脚本（`scripts/observability/`）管理基础设施（Helm 安装、端口转发），状态页面将基础设施状态反映回应用程序中。这展示了 SRE 和平台工程角色所需的全面思考能力。
+
+**重要提示：** Step T 不部署演示服务或注入故障——那是 Step U 和 Step V 的工作。Step T 专注于可观测性栈生命周期管理和健康可见性。

@@ -421,6 +421,78 @@ InvestigationController (REST)
     → Return InvestigationResponse DTO
 ```
 
+### Observability Status Service (Step T)
+
+Step T adds an observability status service that provides real-time health visibility into the local observability stack (Prometheus, Loki, Tempo, Alertmanager, Grafana).
+
+**Architecture:**
+
+```
+ObservabilityStatusController (REST)
+  ↓ GET /api/observability/status
+  ↓ POST /api/observability/check
+  ↓
+ObservabilityStatusService (Spring @Service)
+  ↓
+EndpointHealthChecker (interface)
+  └── HttpEndpointHealthChecker (HTTP connectivity check)
+  ↓
+ObservabilityStatusResponse DTO
+  └── List<EndpointStatus> — per-endpoint name, url, status, latency, last checked
+```
+
+**Components:**
+
+| Component | Responsibility |
+|---|---|
+| `EndpointHealthChecker` | Interface for health-checking observability endpoints. Single method: `check(url) → EndpointStatus`. Mockable in tests. |
+| `HttpEndpointHealthChecker` | Default implementation. Makes HTTP GET requests to check endpoint connectivity and measures response latency. |
+| `ObservabilityStatusService` | Spring `@Service` that orchestrates health checks across all configured endpoints. Reads endpoint list from Spring configuration. |
+| `ObservabilityStatusController` | REST controller exposing status and on-demand check endpoints. |
+| DTOs | `ObservabilityStatusResponse`, `EndpointStatus` — immutable records for API responses. |
+
+**REST API:**
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/observability/status` | GET | Returns cached status of all configured observability endpoints |
+| `/api/observability/check` | POST | Triggers a fresh health check of all endpoints and returns updated status |
+
+**Configuration:**
+
+Endpoint URLs are configured via `application.properties`:
+
+```properties
+observability.endpoints.prometheus.url=http://localhost:9090
+observability.endpoints.loki.url=http://localhost:3100
+observability.endpoints.tempo.url=http://localhost:3200
+observability.endpoints.alertmanager.url=http://localhost:9093
+observability.endpoints.grafana.url=http://localhost:3000
+```
+
+**Key design decisions:**
+
+1. **Interface-based health checking** — `EndpointHealthChecker` is an interface, enabling easy mocking in tests without requiring live endpoints.
+2. **Configuration-driven endpoints** — Endpoints are defined in `application.properties`, not hardcoded. Different environments can configure different endpoint lists.
+3. **Separation from RCA pipeline** — The observability status service is completely independent from the investigation workflow. It does not feed evidence into the RCA pipeline.
+4. **No live endpoint required for tests** — All 23 tests use mocked health checkers, so `mvn test` passes without any observability stack running.
+
+**Local Stack Management:**
+
+Step T also adds `scripts/observability/` with shell scripts for managing the local observability stack via Helm, and corresponding Makefile targets:
+
+| Makefile Target | Script | Purpose |
+|---|---|---|
+| `observability-install` | `install.sh` | Install observability stack via Helm |
+| `observability-uninstall` | `uninstall.sh` | Uninstall observability stack |
+| `observability-status` | `status.sh` | Check Helm release status |
+| `observability-port-forward` | `port-forward.sh` | Port-forward all endpoints to localhost |
+| `observability-check` | `check.sh` | Health-check all endpoints |
+
+**UI — Live Lab Status:**
+
+A "Lab Status" button in the `index.html` header toggles a Live Lab Status page showing real-time health of all observability endpoints with status indicators and latency measurements.
+
 The server adds an `InMemoryInvestigationStore` to cache results for subsequent GET requests (report, trace, summary).
 
 ---
@@ -830,6 +902,78 @@ InvestigationController (REST)
 ```
 
 Server 额外添加了 `InMemoryInvestigationStore` 来缓存结果，供后续 GET 请求使用（报告、追踪、摘要）。
+
+### 可观测性状态服务（Step T）
+
+Step T 新增可观测性状态服务，提供对本地可观测性栈（Prometheus、Loki、Tempo、Alertmanager、Grafana）的实时健康可见性。
+
+**架构：**
+
+```
+ObservabilityStatusController (REST)
+  ↓ GET /api/observability/status
+  ↓ POST /api/observability/check
+  ↓
+ObservabilityStatusService (Spring @Service)
+  ↓
+EndpointHealthChecker (接口)
+  └── HttpEndpointHealthChecker (HTTP 连通性检查)
+  ↓
+ObservabilityStatusResponse DTO
+  └── List<EndpointStatus> — 每个端点的名称、URL、状态、延迟、最后检查时间
+```
+
+**组件：**
+
+| 组件 | 职责 |
+|---|---|
+| `EndpointHealthChecker` | 可观测性端点健康检查接口。单一方法：`check(url) → EndpointStatus`。测试中可 mock。 |
+| `HttpEndpointHealthChecker` | 默认实现。通过 HTTP GET 请求检查端点连通性并测量响应延迟。 |
+| `ObservabilityStatusService` | Spring `@Service`，协调所有已配置端点的健康检查。从 Spring 配置读取端点列表。 |
+| `ObservabilityStatusController` | REST 控制器，暴露状态和按需检查端点。 |
+| DTOs | `ObservabilityStatusResponse`、`EndpointStatus` — 用于 API 响应的不可变 record。 |
+
+**REST API：**
+
+| 端点 | 方法 | 描述 |
+|---|---|---|
+| `/api/observability/status` | GET | 返回所有已配置可观测性端点的缓存状态 |
+| `/api/observability/check` | POST | 触发所有端点的全新健康检查并返回更新后的状态 |
+
+**配置：**
+
+端点 URL 通过 `application.properties` 配置：
+
+```properties
+observability.endpoints.prometheus.url=http://localhost:9090
+observability.endpoints.loki.url=http://localhost:3100
+observability.endpoints.tempo.url=http://localhost:3200
+observability.endpoints.alertmanager.url=http://localhost:9093
+observability.endpoints.grafana.url=http://localhost:3000
+```
+
+**关键设计决策：**
+
+1. **基于接口的健康检查** — `EndpointHealthChecker` 是接口，测试中可轻松 mock，无需实时端点。
+2. **配置驱动的端点** — 端点在 `application.properties` 中定义，非硬编码。不同环境可配置不同的端点列表。
+3. **与 RCA 管道隔离** — 可观测性状态服务完全独立于调查工作流。它不向 RCA 管道提供证据。
+4. **测试无需实时端点** — 所有 23 个测试使用 mock 健康检查器，`mvn test` 无需运行任何可观测性栈。
+
+**本地栈管理：**
+
+Step T 还新增 `scripts/observability/`，包含通过 Helm 管理本地可观测性栈的 shell 脚本，以及对应的 Makefile 目标：
+
+| Makefile 目标 | 脚本 | 用途 |
+|---|---|---|
+| `observability-install` | `install.sh` | 通过 Helm 安装可观测性栈 |
+| `observability-uninstall` | `uninstall.sh` | 卸载可观测性栈 |
+| `observability-status` | `status.sh` | 检查 Helm release 状态 |
+| `observability-port-forward` | `port-forward.sh` | 将所有端点端口转发到 localhost |
+| `observability-check` | `check.sh` | 对所有端点执行健康检查 |
+
+**UI — Live Lab Status：**
+
+`index.html` 头部的 "Lab Status" 按钮可切换 Live Lab Status 页面，显示所有可观测性端点的实时健康状态，包含状态指示器和延迟测量。
 
 ---
 

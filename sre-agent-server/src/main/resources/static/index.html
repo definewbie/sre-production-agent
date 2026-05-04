@@ -290,6 +290,7 @@ body {
         <span class="badge badge-det">Deterministic Decision</span>
         <span class="badge badge-llm">LLM Advisory</span>
         <span class="badge badge-static">Static Evidence</span>
+        <button id="labStatusBtn" onclick="toggleLabStatus()" style="margin-left:0.8rem;padding:0.25rem 0.7rem;border:1px solid var(--border);background:var(--surface);color:var(--fg);border-radius:4px;cursor:pointer;font-size:0.7rem">Lab Status</button>
     </div>
 </div>
 
@@ -480,6 +481,20 @@ body {
                     <p class="tab-empty">Run investigation to see LLM advisory analysis</p>
                 </div>
                 <div class="tab-guard">LLM output is advisory only. It does not modify scores, decisions, or evidence.</div>
+            </div>
+        </div>
+
+        <!-- Live Lab Status (Step T) -->
+        <div id="labStatusSection" style="display:none">
+            <div class="card" style="margin-bottom:0.8rem">
+                <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+                    <span>Live Lab Status <span style="font-size:0.55rem;color:var(--blue);font-weight:400">Step T</span></span>
+                    <button onclick="loadLabStatus()" style="padding:0.2rem 0.6rem;border:1px solid var(--border);background:var(--surface);color:var(--fg);border-radius:4px;cursor:pointer;font-size:0.65rem">Refresh</button>
+                </div>
+                <div id="labStatusContent">
+                    <p class="tab-empty">Checking observability endpoints...</p>
+                </div>
+                <div class="tab-guard">Endpoint health checks require port-forward to be running. See <code>make observability-port-forward</code>.</div>
             </div>
         </div>
 
@@ -864,6 +879,81 @@ function executeProbes() {
             statusEl.textContent = 'Probe execution failed. See server logs.';
             evEl.innerHTML = '<div style="font-size:0.65rem;color:var(--red)">Error: ' + (err.message || 'unknown') + '</div>';
         });
+}
+
+/* ---- Step T: Live Lab Status ---- */
+var labStatusVisible = false;
+
+function toggleLabStatus() {
+    labStatusVisible = !labStatusVisible;
+    var section = document.getElementById('labStatusSection');
+    var btn = document.getElementById('labStatusBtn');
+    var workspace = document.getElementById('workspace');
+    if (labStatusVisible) {
+        section.style.display = '';
+        btn.style.background = 'var(--blue)';
+        btn.style.color = '#fff';
+        btn.style.borderColor = 'var(--blue)';
+        // hide investigation cards, show lab status
+        var cards = workspace.querySelectorAll('.card, .tabs-card');
+        cards.forEach(function(c) {
+            if (c.id !== 'labStatusSection' && !c.id.startsWith('labStatus')) {
+                c.style.display = 'none';
+            }
+        });
+        loadLabStatus();
+    } else {
+        section.style.display = 'none';
+        btn.style.background = 'var(--surface)';
+        btn.style.color = 'var(--fg)';
+        btn.style.borderColor = 'var(--border)';
+        var cards = workspace.querySelectorAll('.card, .tabs-card');
+        cards.forEach(function(c) {
+            if (c.id !== 'labStatusSection') {
+                c.style.display = '';
+            }
+        });
+        document.getElementById('probeCard').style.display = 'none';
+    }
+}
+
+function loadLabStatus() {
+    var container = document.getElementById('labStatusContent');
+    container.innerHTML = '<p class="tab-empty">Checking endpoints...</p>';
+    fetch('/api/observability/status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var html = '<div style="margin-bottom:0.6rem;font-size:0.75rem;color:var(--dim)">'
+                + 'Overall: <span style="color:' + statusColor(data.overallStatus) + ';font-weight:600">' + (data.overallStatus || 'unknown').toUpperCase() + '</span>'
+                + ' &middot; Checked: ' + (data.checkedAt || 'just now')
+                + '</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.6rem">';
+            var endpoints = data.endpoints || [];
+            for (var i = 0; i < endpoints.length; i++) {
+                var ep = endpoints[i];
+                html += '<div style="border:1px solid var(--border);border-radius:6px;padding:0.6rem;background:var(--surface)">'
+                    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem">'
+                    + '<span style="font-weight:600;font-size:0.75rem">' + ep.name + '</span>'
+                    + '<span style="font-size:0.6rem;padding:0.1rem 0.4rem;border-radius:3px;background:' + statusColor(ep.status) + '22;color:' + statusColor(ep.status) + '">' + ep.status + '</span>'
+                    + '</div>'
+                    + '<div style="font-size:0.65rem;color:var(--dim);word-break:break-all">' + (ep.url || '-') + '</div>'
+                    + (ep.latencyMs > 0 ? '<div style="font-size:0.6rem;color:var(--dim);margin-top:0.2rem">' + ep.latencyMs + 'ms</div>' : '')
+                    + '<div style="font-size:0.6rem;color:var(--dim);margin-top:0.15rem">' + (ep.message || '') + '</div>'
+                    + '</div>';
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        })
+        .catch(function(err) {
+            container.innerHTML = '<div style="color:var(--red);font-size:0.7rem">Failed to check: ' + (err.message || 'unknown error') + '</div>';
+        });
+}
+
+function statusColor(s) {
+    if (s === 'connected' || s === 'healthy') return '#10b981';
+    if (s === 'partial') return '#f59e0b';
+    if (s === 'disconnected' || s === 'down') return '#ef4444';
+    return '#6b7280';
 }
 </script>
 </body>

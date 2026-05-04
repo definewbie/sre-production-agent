@@ -1,0 +1,38 @@
+# Jaeger all-in-one values for SRE Agent local lab
+# Simpler than Tempo for local validation
+
+allInOne:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    type: ClusterIP
+  extraEnv:
+    - name: COLLECTOR_OTLP_ENABLED
+      value: "true"
+
+agent:
+  enabled: false
+
+collector:
+  enabled: false
+
+query:
+  enabled: false
+
+storage:
+  type: memory
+
+provisionDataStore:
+  cassandra: false
+  elasticsearch: false
+  kafka: false
+
+# For Jaeger UI port
+service:
+  type: ClusterIP

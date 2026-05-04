@@ -2,6 +2,7 @@
 .PHONY: cluster-up cluster-down kube-context cluster-status namespaces
 .PHONY: deploy-smoke smoke-test clean-smoke
 .PHONY: deploy-crashloop-demo wait-crashloop collect-k8s-evidence-live investigate-k8s-live clean-crashloop-demo live-k8s-demo
+.PHONY: observability-install observability-uninstall observability-status observability-port-forward observability-check
 
 # ─── Build & Test ───────────────────────────────────────────
 
@@ -153,3 +154,24 @@ live-k8s-demo: cluster-status namespaces deploy-crashloop-demo wait-crashloop co
 	@echo ""
 	@echo "Cleanup:  make clean-crashloop-demo"
 	@echo "Tear down: make cluster-down"
+
+# ─── Observability Stack (Step T) ─────────────────────────
+
+observability-install:
+	@scripts/observability/install-observability.sh
+
+observability-uninstall:
+	@scripts/observability/uninstall-observability.sh
+
+observability-status:
+	@echo "=== Observability Stack Status ==="
+	@kubectl -n observability get pods -o wide 2>/dev/null || echo "  (kind cluster not reachable)"
+	@echo ""
+	@echo "=== Helm Releases ==="
+	@helm list -n observability 2>/dev/null || echo "  (no releases found)"
+
+observability-port-forward:
+	@scripts/observability/port-forward-observability.sh
+
+observability-check:
+	@scripts/observability/check-observability.sh

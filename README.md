@@ -318,6 +318,31 @@ java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar
 
 ---
 
+## Observability Status Service (Step T)
+
+Step T adds an observability status service with health checking, local stack management scripts, and a Live Lab Status UI page. It provides real-time visibility into the local observability stack (Prometheus, Loki, Tempo, Alertmanager, Grafana) without deploying demo services or fault injection.
+
+**Key design:** `EndpointHealthChecker` is an interface (mockable in tests), endpoint configuration is via `application.properties`, and no live endpoints are required for tests.
+
+**Backend components:**
+- `EndpointHealthChecker` interface → `HttpEndpointHealthChecker` (HTTP connectivity check)
+- `ObservabilityStatusService` (Spring `@Service`)
+- `ObservabilityStatusController` (REST)
+- DTOs: `ObservabilityStatusResponse`, `EndpointStatus`
+
+**REST API:**
+- `GET /api/observability/status` — cached status of all endpoints
+- `POST /api/observability/check` — trigger fresh health check
+
+**Local stack management (scripts/observability/):**
+- Makefile targets: `observability-install`, `observability-uninstall`, `observability-status`, `observability-port-forward`, `observability-check`
+
+**UI:** "Lab Status" button in header toggles Live Lab Status page showing real-time endpoint health.
+
+**23 new tests** in server module (507 total, up from 484, 0 failures)
+
+---
+
 ## LLM Hypothesis Proposer (Step R)
 
 Step R adds an **LLM Hypothesis Proposer** to the `sre-agent-llm` module that generates advisory hypothesis proposals when the deterministic RCA workflow produces inconclusive results. This bridges the gap between deterministic investigation and AI-assisted exploration.
@@ -588,7 +613,7 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven multi-module
 - Jackson (JSON serialization)
 - Picocli (CLI framework)
-- JUnit 5 + AssertJ (484 tests)
+- JUnit 5 + AssertJ (507 tests)
 - Static HTML + vanilla JS (minimal Web UI)
 
 ---
@@ -708,8 +733,10 @@ sre-production-agent/
     ├── pom.xml
     └── src/main/java/ai/sreagent/server/
         ├── SreAgentApplication.java
-        ├── controller/              # HealthController, InvestigationController
-        └── service/                 # InvestigationService, InvestigationResponse, InMemoryInvestigationStore
+        ├── controller/              # HealthController, InvestigationController, ObservabilityStatusController
+        └── service/                 # InvestigationService, InvestigationResponse, InMemoryInvestigationStore, ObservabilityStatusService
+├── scripts/
+│   └── observability/              # Helm values + install/uninstall/port-forward/check scripts
 ```
 
 ---
@@ -739,7 +766,7 @@ See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 ||| Q | Observability Evidence Taxonomy / Normalization — sre-agent-core | ✅ Done |
 ||| R | LLM Hypothesis Proposer — sre-agent-llm | ✅ Done |
 ||| S | Probe Execution Framework v1 — sre-agent-probe-executor | ✅ Done |
-||| T | Local Observability Stack on kind (Prometheus + Loki + Tempo) | 🔲 Upcoming |
+||| T | Local Observability Stack — health checking + stack management + Live Lab Status UI | ✅ Done |
 ||| U | Instrumented Demo Services | 🔲 Upcoming |
 ||| V | Complex Live RCA Scenarios | 🔲 Upcoming |
 ||| W | Post-Probe RCA Re-run Policy | 🔲 Upcoming |
@@ -1006,7 +1033,7 @@ java --enable-preview -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar
 mvn test
 ```
 
-预期结果：484 个测试全部通过。
+预期结果：507 个测试全部通过。
 
 ### 运行 CLI 演示
 
@@ -1161,7 +1188,7 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven 多模块
 - Jackson（JSON 序列化）
 - Picocli（CLI 框架）
-- JUnit 5 + AssertJ（484 个测试）
+- JUnit 5 + AssertJ（507 个测试）
 - 静态 HTML + 原生 JS（轻量 Web UI）
 
 ---
@@ -1281,8 +1308,10 @@ sre-production-agent/
     ├── pom.xml
     └── src/main/java/ai/sreagent/server/
         ├── SreAgentApplication.java
-        ├── controller/              # HealthController, InvestigationController
-        └── service/                 # InvestigationService, InvestigationResponse, InMemoryInvestigationStore
+        ├── controller/              # HealthController, InvestigationController, ObservabilityStatusController
+        └── service/                 # InvestigationService, InvestigationResponse, InMemoryInvestigationStore, ObservabilityStatusService
+├── scripts/
+│   └── observability/              # Helm values + install/uninstall/port-forward/check 脚本
 ```
 
 ---
@@ -1312,7 +1341,7 @@ sre-production-agent/
 ||| Q | 证据分类体系 / 归一化 — sre-agent-core | ✅ 已完成 |
 ||| R | LLM 假设提议器 — sre-agent-llm | ✅ 已完成 |
 ||| S | 探测执行框架 v1 — sre-agent-probe-executor | ✅ 已完成 |
-||| T | 本地可观测性栈（kind 上的 Prometheus + Loki + Tempo） | 🔲 待开始 |
+||| T | 本地可观测性栈（健康检查 + 栈管理 + Live Lab Status UI） | ✅ 已完成 |
 ||| U | 示例微服务（instrumented demo services） | 🔲 待开始 |
 ||| V | 复杂实时 RCA 场景 | 🔲 待开始 |
 ||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |

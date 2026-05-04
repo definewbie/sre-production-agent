@@ -4,8 +4,8 @@
 
 || Target Role | Priority Step | Reason |
 |---|---|---|
-|| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → Step T: Local Observability Stack | Demonstrates principled LLM + evidence + probe integration |
-|| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → Step T: Local Observability Stack | Demonstrates full observability pipeline |
+||| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → Step U: Instrumented Demo Services | Demonstrates principled LLM + evidence + probe integration |
+||| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → Step U: Instrumented Demo Services | Demonstrates full observability pipeline |
 || Engineering Manager / Architect | Polish architecture narrative | Demonstrates design trade-off reasoning |
 
 ---
@@ -401,7 +401,7 @@ List<Evidence> (source = "trace")
 
 **Test breakdown:** Core:124, LLM:51, K8s:48, Prometheus:43, Loki:30, Alertmanager:45, Trace:66, Server:23, CLI:15 (435 total, 0 failures)
 
-**Next step:** Step T — Local Observability Stack on kind
+**Next step:** Step U — Instrumented Demo Services on kind
 
 ---
 
@@ -452,10 +452,49 @@ List<Evidence> (probe evidence, informational only)
 - The `canAffectDecision=false` guardrail ensures the deterministic pipeline remains authoritative
 
 **Next steps after S:**
-- Step T: Local observability stack on kind (Prometheus + Loki + Tempo + Alertmanager)
+- ~~Step T: Local observability stack on kind (Prometheus + Loki + Tempo + Alertmanager)~~ ✅ Done
 - Step U: Instrumented demo services (order-service, payment-service, recommend-service)
 - Step V: Complex live RCA with real observability data
 - Step W: Post-probe RCA re-run policy (allowing controlled evidence injection into re-investigation)
+
+---
+
+## Step T: Local Observability Stack ✅ COMPLETED
+
+**Status:** Completed. Observability status service with health checking, local stack management scripts, and Live Lab Status UI.
+
+**What was built:**
+- `scripts/observability/` — Helm values + install/uninstall/port-forward/check shell scripts
+- Makefile targets: `observability-install`, `observability-uninstall`, `observability-status`, `observability-port-forward`, `observability-check`
+- Backend: `EndpointHealthChecker` interface, `HttpEndpointHealthChecker`, `ObservabilityStatusService`, `ObservabilityStatusController`, DTOs, Spring config
+- REST API: `GET /api/observability/status`, `POST /api/observability/check`
+- UI: Live Lab Status page in `index.html` (toggle via "Lab Status" button in header)
+- 23 new tests in server module (ObservabilityEndpointStatusTest, ObservabilityStatusServiceTest, ObservabilityEndpointConfigTest, HttpEndpointHealthCheckerTest)
+- Total: 507 tests, 0 failures
+
+**Architecture:**
+```
+ObservabilityStatusController (REST)
+  ↓
+ObservabilityStatusService (Spring @Service)
+  ↓
+EndpointHealthChecker (interface — mockable)
+  └── HttpEndpointHealthChecker (HTTP health check)
+  ↓
+ObservabilityStatusResponse DTO (per-endpoint status)
+```
+
+**Key design decisions:**
+- `EndpointHealthChecker` is an interface — easily mockable in tests, no live endpoint required
+- Endpoint configuration via `application.properties` — configurable per environment
+- Step T does NOT deploy demo services or fault injection — those are Step U/V concerns
+- Scripts manage local observability stack lifecycle (Helm install/uninstall/port-forward)
+
+**Why this matters:**
+- Provides real-time visibility into the local observability stack (Prometheus, Loki, Tempo, Alertmanager, Grafana)
+- Demonstrates Spring Boot service layer patterns (interface → implementation → controller → DTO)
+- Bridges the gap between infrastructure scripts and application-level health awareness
+- Foundation for Step U (instrumented demo services) which will use the same stack
 
 ---
 
@@ -496,8 +535,8 @@ These are not committed — listed for discussion only:
 
 | 目标岗位 | 优先步骤 | 原因 |
 |---|---|---|
-|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → Step T: 本地可观测性栈 | 展示了规范的 LLM + 证据 + 探测集成能力 |
-|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → Step T: 本地可观测性栈 | 展示了完整的可观测性流水线 |
+|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → Step U: 仪表化演示服务 | 展示了规范的 LLM + 证据 + 探测集成能力 |
+|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → Step U: 仪表化演示服务 | 展示了完整的可观测性流水线 |
 | 工程经理 / 架构师 | 完善架构叙事 | 展示了设计权衡推理能力 |
 
 ---
@@ -752,7 +791,7 @@ ScoredHypothesis (pod_crash_loop, score=0.95, likely_root_cause)
 
 **测试分布：** Core:124, LLM:51, K8s:48, Prometheus:43, Loki:30, Alertmanager:45, Trace:66, Server:23, CLI:15（共 435 个，0 失败）
 
-**下一步：** Step T — kind 上的本地可观测性栈
+**下一步：** Step U — 仪表化演示服务
 
 ---
 
@@ -785,10 +824,49 @@ ScoredHypothesis (pod_crash_loop, score=0.95, likely_root_cause)
 - `canAffectDecision=false` 防护措施确保确定性流水线保持权威性
 
 **S 之后的后续步骤：**
-- Step T：kind 上的本地可观测性栈（Prometheus + Loki + Tempo + Alertmanager）
+- ~~Step T：kind 上的本地可观测性栈（Prometheus + Loki + Tempo + Alertmanager）~~ ✅ 已完成
 - Step U：仪表化演示服务（order-service、payment-service、recommend-service）
 - Step V：使用真实可观测性数据的复杂实时 RCA
 - Step W：探测后 RCA 重新运行策略（允许受控证据注入重新调查）
+
+---
+
+## Step T: 本地可观测性栈 ✅ 已完成
+
+**状态：** 已完成。可观测性状态服务，包含健康检查、本地栈管理脚本和 Live Lab Status UI。
+
+**已构建内容：**
+- `scripts/observability/` — Helm values + install/uninstall/port-forward/check shell 脚本
+- Makefile 目标：`observability-install`、`observability-uninstall`、`observability-status`、`observability-port-forward`、`observability-check`
+- 后端：`EndpointHealthChecker` 接口、`HttpEndpointHealthChecker`、`ObservabilityStatusService`、`ObservabilityStatusController`、DTOs、Spring 配置
+- REST API：`GET /api/observability/status`、`POST /api/observability/check`
+- UI：`index.html` 中的 Live Lab Status 页面（通过头部 "Lab Status" 按钮切换）
+- server 模块中 23 个新测试（ObservabilityEndpointStatusTest、ObservabilityStatusServiceTest、ObservabilityEndpointConfigTest、HttpEndpointHealthCheckerTest）
+- 总计：507 个测试，0 失败
+
+**架构：**
+```
+ObservabilityStatusController (REST)
+  ↓
+ObservabilityStatusService (Spring @Service)
+  ↓
+EndpointHealthChecker (接口 — 可 mock)
+  └── HttpEndpointHealthChecker (HTTP 健康检查)
+  ↓
+ObservabilityStatusResponse DTO (每个端点的状态)
+```
+
+**关键设计决策：**
+- `EndpointHealthChecker` 是一个接口 — 测试中易于 mock，无需实时端点
+- 端点配置通过 `application.properties` — 可按环境配置
+- Step T 不部署演示服务或故障注入 — 这些属于 Step U/V 的范围
+- 脚本管理本地可观测性栈的生命周期（Helm install/uninstall/port-forward）
+
+**重要性：**
+- 提供对本地可观测性栈（Prometheus、Loki、Tempo、Alertmanager、Grafana）的实时可见性
+- 展示了 Spring Boot 服务层模式（接口 → 实现 → 控制器 → DTO）
+- 连接基础设施脚本和应用层健康感知的桥梁
+- 为 Step U（仪表化演示服务）奠定基础
 
 ---
 
