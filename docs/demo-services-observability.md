@@ -10,7 +10,7 @@ This document explains how demo services integrate with the observability stack 
 
 1. **Observability stack running** in `observability` namespace:
    ```bash
-   make check-observability
+   make observability-check
    # or
    ./scripts/observability/check-observability.sh
    ```
@@ -23,7 +23,7 @@ This document explains how demo services integrate with the observability stack 
 
 3. **Port-forwards active**:
    ```bash
-   make port-forward-observability
+   make observability-port-forward
    make demo-port-forward
    ```
 
