@@ -76,15 +76,24 @@ public class LlmReportSynthesizer {
 
     /**
      * Extract a section from LLM output by heading.
-     * Sections are marked as "## Heading" in markdown.
+     * Supports both English and Chinese section titles.
      */
     private String extractSection(String content, String heading) {
-        // Try ## heading first, then # heading
+        // Try the exact heading first
         Pattern pattern = Pattern.compile(
                 "##\\s+" + Pattern.quote(heading) + "\\s*\\n(.*?)(?=\\n##|\\Z)",
                 Pattern.DOTALL
         );
         Matcher matcher = pattern.matcher(content);
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        // Fallback: search by keyword in heading line
+        Pattern fallback = Pattern.compile(
+                "##\\s+.*" + Pattern.quote(heading) + ".*\\s*\\n(.*?)(?=\\n##|\\Z)",
+                Pattern.DOTALL
+        );
+        matcher = fallback.matcher(content);
         if (matcher.find()) {
             return matcher.group(1).trim();
         }

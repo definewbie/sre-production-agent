@@ -14,12 +14,12 @@ class LlmHypothesisProposalPromptBuilderTest {
     @DisplayName("system prompt contains guardrail instructions")
     void systemPromptGuardrails() {
         String sys = builder.getSystemPrompt();
-        assertThat(sys).contains("LLM proposes. Verification disposes.");
-        assertThat(sys).contains("must not decide the final root cause");
-        assertThat(sys).contains("must not change RCA decision");
-        assertThat(sys).contains("must not change confidence scores");
-        assertThat(sys).contains("must not invent evidence");
-        assertThat(sys).contains("mark all proposals as unverified");
+        assertThat(sys).contains("LLM 提议，验证裁决");
+        assertThat(sys).contains("你不得决定最终根因");
+        assertThat(sys).contains("你不得更改 RCA 决策");
+        assertThat(sys).contains("你不得更改置信度分数");
+        assertThat(sys).contains("你不得编造证据");
+        assertThat(sys).contains("你必须将所有提议标注为未验证");
     }
 
     @Test

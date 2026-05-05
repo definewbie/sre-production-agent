@@ -188,4 +188,18 @@ class DemoServiceControllerTest {
                 .andExpect(jsonPath("$.services[1].faultConfig").value("normal"))
                 .andExpect(jsonPath("$.services[2].faultConfig").value("normal"));
     }
+
+    @Test
+    @DisplayName("POST /api/demo-services/traffic generates test traffic")
+    void generateTraffic() throws Exception {
+        when(client.generateTraffic(5)).thenReturn(3);
+
+        mockMvc.perform(post("/api/demo-services/traffic"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(5))
+                .andExpect(jsonPath("$.successes").value(3))
+                .andExpect(jsonPath("$.failures").value(2));
+
+        verify(client).generateTraffic(5);
+    }
 }

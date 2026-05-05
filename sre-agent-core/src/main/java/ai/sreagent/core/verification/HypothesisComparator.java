@@ -150,15 +150,15 @@ public class HypothesisComparator {
         String top1Name = hypothesisShortName(top1.hypothesisId());
         if (!nearTie || top2 == null) {
             return String.format(
-                    "%s is the leading hypothesis with score %.2f.",
+                    "%s 为领先假设，分数 %.2f。",
                     top1Name, top1.score()
             );
         }
         String top2Name = hypothesisShortName(top2.hypothesisId());
         return String.format(
-                "%s is slightly stronger due to deployment and config-change evidence, "
-                + "but %s remains a material competing hypothesis due to payment latency and timeout evidence. "
-                + "Score gap: %.2f.",
+                "%s 因部署和配置变更证据略微领先，"
+                + "但 %s 因支付延迟和超时证据仍是重要竞争假设。"
+                + "分数差距：%.2f。",
                 top1Name, top2Name, scoreGap
         );
     }
@@ -169,11 +169,11 @@ public class HypothesisComparator {
             List<ConfidenceResult> allResults
     ) {
         if (comparison.nearTie()) {
-            return "The top two hypotheses are close in score, "
-                    + "so the agent preserves both explanations instead of forcing a single RCA.";
+            return "排名前两位的假设分数接近，"
+                    + "系统保留两种解释，不强制选择单一根因。";
         }
         return String.format(
-                "%s is the leading hypothesis with score %.2f and gap %.2f to the next candidate.",
+                "%s 为领先假设，分数 %.2f，与次选假设差距 %.2f。",
                 hypothesisShortName(top1.hypothesisId()),
                 top1.score(),
                 comparison.scoreGap()
@@ -186,13 +186,13 @@ public class HypothesisComparator {
     ) {
         List<String> probes = new ArrayList<>();
         if (comparison.nearTie()) {
-            probes.add("Compare timeout error rate before and after deployment.");
-            probes.add("Check payment-service latency by endpoint.");
-            probes.add("Roll back order-service in staging or canary and compare error rate.");
-            probes.add("Inspect retry timeout config effect on payment calls.");
+            probes.add("对比部署前后的超时错误率，确认部署是否引入了变化。");
+            probes.add("按接口拆分检查 payment-service 延迟，定位是否为特定接口问题。");
+            probes.add("在 staging 或 canary 环境回滚 order-service，对比错误率变化。");
+            probes.add("检查重试/超时配置变更对 payment 调用的实际影响。");
         } else {
-            probes.add("Gather more evidence for the leading hypothesis.");
-            probes.add("Verify if counter evidence can be ruled out.");
+            probes.add("继续收集领先假设的补充证据。");
+            probes.add("验证反驳证据是否可以被排除。");
         }
         return probes;
     }

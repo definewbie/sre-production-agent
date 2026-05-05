@@ -3,8 +3,11 @@ package ai.sreagent.server.service;
 import ai.sreagent.core.workflow.InvestigationResult;
 import ai.sreagent.llm.client.LlmClient;
 import ai.sreagent.llm.client.MockLlmClient;
+import ai.sreagent.llm.client.OpenAiCompatibleLlmClient;
 import ai.sreagent.llm.model.LlmEnhancedReport;
 import ai.sreagent.llm.synthesis.LlmReportSynthesizer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -19,6 +22,8 @@ import java.util.Optional;
  */
 @Service
 public class LlmSynthesisService {
+
+    private static final Logger log = LoggerFactory.getLogger(LlmSynthesisService.class);
 
     private final LlmReportSynthesizer synthesizer;
     private final InMemoryInvestigationStore store;
@@ -56,11 +61,18 @@ public class LlmSynthesisService {
     private LlmClient resolveClient() {
         String provider = System.getenv().getOrDefault("LLM_PROVIDER", "mock");
         if ("mock".equals(provider)) {
+            log.info("LLM provider: mock (deterministic fallback)");
             return new MockLlmClient();
         }
-        // Future: openai-compatible provider
-        // For now, fall back to mock if config is incomplete
-        return new MockLlmClient();
+        String baseUrl = System.getenv("LLM_BASE_URL");
+        String apiKey = System.getenv("LLM_API_KEY");
+        String model = System.getenv().getOrDefault("LLM_MODEL", "gpt-4o");
+        if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) {
+            log.warn("LLM_PROVIDER={} but LLM_BASE_URL or LLM_API_KEY not set, falling back to mock", provider);
+            return new MockLlmClient();
+        }
+        log.info("LLM provider: {} (model={}, baseUrl={})", provider, model, baseUrl);
+        return new OpenAiCompatibleLlmClient(baseUrl, apiKey, model);
     }
 
     private InvestigationResult runScenarioEQuietly(InvestigationService investigationService) throws Exception {

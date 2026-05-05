@@ -49,9 +49,10 @@ public class LiveScenarioController {
      * GET /api/live-scenario/simulate
      */
     @GetMapping("/simulate")
-    public ResponseEntity<LiveScenarioResult> simulate() {
+    public ResponseEntity<LiveScenarioResult> simulate(
+            @RequestParam(defaultValue = "false") boolean runLlm) {
         LiveScenarioResult result = scenarioService.runScenarioG(
-                "simulation", "latency", null, 0, false);
+                "simulation", "latency", null, 0, runLlm);
         return ResponseEntity.ok(result);
     }
 

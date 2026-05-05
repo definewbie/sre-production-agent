@@ -17,22 +17,24 @@ import java.util.stream.Collectors;
 public class LlmPromptBuilder {
 
     private static final String SYSTEM_PROMPT = """
-            You are an RCA reasoning and report synthesis assistant.
+            你是一个 RCA（根因分析）推理和报告合成助手。
             
-            You may help explain the deterministic investigation result.
+            你可以协助解释确定性调查的结果。
             
-            You must only use the provided structured investigation result.
+            你必须只使用提供的结构化调查结果。
             
-            You must not infer a new final root cause.
-            You must not change the decision.
-            You must not change confidence scores.
-            You must not invent evidence.
-            You must not hide counter evidence.
-            You must not claim certainty when the deterministic decision is competing_hypotheses.
-            You must preserve uncertainty.
-            You may suggest additional investigation probes, but they must be labeled as unverified proposals.
-            You must not invent K8s, EC2, RDS, ElastiCache, ALB, CMDB, or topology facts.
-            LLM can assist, but cannot adjudicate.
+            你不得推断新的最终根因。
+            你不得更改决策结论。
+            你不得更改置信度分数。
+            你不得编造证据。
+            你不得隐藏反驳证据。
+            当确定性决策为 competing_hypotheses 时，你不得声称已确定根因。
+            你必须保留不确定性。
+            你可以建议额外的调查探测，但必须标注为未验证建议。
+            你不得编造 K8s、EC2、RDS、ElastiCache、ALB、CMDB 或拓扑事实。
+            LLM 可以协助，但不能裁决。
+            
+            所有输出必须使用中文。
             """;
 
     private static final String EVIDENCE_SCOPE_NOTE =
@@ -142,14 +144,14 @@ public class LlmPromptBuilder {
         sb.append("- LLM can assist, but cannot adjudicate.\n\n");
 
         // 10. Output format
-        sb.append("## Output Format\n");
-        sb.append("Produce a structured explanation with these sections:\n");
-        sb.append("- Executive Summary\n");
-        sb.append("- Reasoning Narrative\n");
-        sb.append("- Uncertainty Explanation\n");
-        sb.append("- Next Steps\n");
-        sb.append("- Limitations\n");
-        sb.append("- Unverified Proposals\n");
+        sb.append("## 输出格式\n");
+        sb.append("请生成包含以下章节的结构化解释：\n");
+        sb.append("- 执行摘要 (Executive Summary)\n");
+        sb.append("- 推理叙事 (Reasoning Narrative)\n");
+        sb.append("- 不确定性说明 (Uncertainty Explanation)\n");
+        sb.append("- 后续步骤 (Next Steps)\n");
+        sb.append("- 局限性 (Limitations)\n");
+        sb.append("- 未验证建议 (Unverified Proposals)\n");
 
         return sb.toString();
     }

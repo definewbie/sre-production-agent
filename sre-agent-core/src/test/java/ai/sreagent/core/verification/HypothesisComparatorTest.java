@@ -169,7 +169,7 @@ class HypothesisComparatorTest {
         InvestigationDecision decision = comparator.decide(incident, comparison, results);
 
         assertThat(decision.rationale()).isNotBlank();
-        assertThat(decision.rationale()).contains("close in score");
+        assertThat(decision.rationale()).contains("分数接近");
     }
 
     @Test
@@ -181,6 +181,6 @@ class HypothesisComparatorTest {
                 incident, results, verResults, List.of()
         );
 
-        assertThat(comparison.comparisonSummary()).contains("competing hypothesis");
+        assertThat(comparison.comparisonSummary()).contains("竞争假设");
     }
 }

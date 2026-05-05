@@ -58,4 +58,20 @@ public class DemoServiceController {
         return ResponseEntity.ok(
                 client.setAllFaultConfig(Map.of("mode", "normal")));
     }
+
+    /**
+     * Generate synthetic test traffic by calling order-service /checkout.
+     * Returns the number of successful vs total requests.
+     */
+    @PostMapping("/traffic")
+    public ResponseEntity<Map<String, Object>> generateTraffic() {
+        int total = 5;
+        int successes = client.generateTraffic(total);
+        Map<String, Object> result = Map.of(
+                "total", total,
+                "successes", successes,
+                "failures", total - successes
+        );
+        return ResponseEntity.ok(result);
+    }
 }

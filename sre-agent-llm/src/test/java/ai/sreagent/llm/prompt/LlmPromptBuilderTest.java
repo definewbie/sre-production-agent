@@ -55,26 +55,26 @@ class LlmPromptBuilderTest {
     @Test
     void systemPromptContainsConstraints() {
         LlmRequest request = builder.build(createScenarioEResult());
-        assertThat(request.systemPrompt()).containsIgnoringCase("must not invent evidence");
-        assertThat(request.systemPrompt()).containsIgnoringCase("must not change the decision");
+        assertThat(request.systemPrompt()).contains("你不得编造证据");
+        assertThat(request.systemPrompt()).contains("你不得更改决策结论");
     }
 
     @Test
     void systemPromptContainsMultiPlatformPolicy() {
         LlmRequest request = builder.build(createScenarioEResult());
-        assertThat(request.systemPrompt()).containsIgnoringCase("must not invent K8s, EC2, RDS, ElastiCache, ALB, CMDB, or topology facts");
+        assertThat(request.systemPrompt()).contains("你不得编造 K8s");
     }
 
     @Test
     void systemPromptContainsAdjudicatePhrase() {
         LlmRequest request = builder.build(createScenarioEResult());
-        assertThat(request.systemPrompt()).contains("LLM can assist, but cannot adjudicate");
+        assertThat(request.systemPrompt()).contains("LLM 可以协助，但不能裁决");
     }
 
     @Test
     void userPromptContainsConstraints() {
         LlmRequest request = builder.build(createScenarioEResult());
-        assertThat(request.userPrompt()).contains("Do not infer missing K8s, EC2, RDS, ElastiCache, ALB, or CMDB facts");
+        assertThat(request.userPrompt()).contains("Do not infer missing K8s");
     }
 
     private InvestigationResult createScenarioEResult() {

@@ -8,11 +8,19 @@ import ai.sreagent.core.workflow.InvestigationResult;
 import ai.sreagent.core.workflow.InvestigationWorkflow;
 import ai.sreagent.k8s.KubernetesClientConfig;
 import ai.sreagent.k8s.KubernetesResourceReader;
-import ai.sreagent.llm.proposer.LlmHypothesisProposalResult;
+import ai.sreagent.llm.client.LlmClient;
+import ai.sreagent.llm.client.LlmRequest;
+import ai.sreagent.llm.client.MockLlmClient;
+import ai.sreagent.llm.client.OpenAiCompatibleLlmClient;
+import ai.sreagent.llm.prompt.LlmPromptBuilder;
 import ai.sreagent.llm.proposer.LlmHypothesisProposer;
+import ai.sreagent.llm.proposer.LlmHypothesisProposalResult;
+import ai.sreagent.llm.proposer.LlmHypothesisProposerImpl;
 import ai.sreagent.llm.proposer.MockLlmHypothesisProposer;
 import ai.sreagent.server.demo.DemoServiceClient;
 import ai.sreagent.server.demo.DemoServiceConfig;
+import ai.sreagent.server.demo.DemoServicesStatusResponse;
+import ai.sreagent.server.demo.DemoServiceStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -92,6 +100,27 @@ public class LiveScenarioService {
             // Compute effective wait time (used in both live and simulation modes)
             int effectiveWait = Math.max(waitSeconds, 15);
 
+            // Pre-flight check (live mode only): verify demo services are reachable
+            if (!isSimulation) {
+                DemoServicesStatusResponse preflight = demoClient.checkAllServices();
+                long reachableCount = preflight.services().stream()
+                        .filter(DemoServiceStatus::reachable).count();
+                if (reachableCount == 0) {
+                    log.warn("Pre-flight check failed: no demo services reachable. " +
+                            "Aborting live investigation to avoid RCA with zero evidence.");
+                    return LiveScenarioResult.failed(scenarioId,
+                            "Scenario G: Payment Latency → Order Error Spike",
+                            "Demo services 不可达（order/payment/inventory 均无响应）。" +
+                            "请先部署 demo services 到 K8s（scripts/demo-services/deploy-demo-services.sh），" +
+                            "然后再发起实时排查。如无 K8s 环境，可使用 simulation 模式。");
+                }
+                if (reachableCount < preflight.services().size()) {
+                    log.warn("Pre-flight check: {}/{} demo services reachable. " +
+                            "RCA may be incomplete.",
+                            reachableCount, preflight.services().size());
+                }
+            }
+
             // Phase 1: Inject fault (live mode only)
             if (!isSimulation) {
                 injectFault(faultMode, faultParams);
@@ -136,7 +165,7 @@ public class LiveScenarioService {
             if (allEvidence.isEmpty()) {
                 if (isSimulation) {
                     log.info("No evidence collected in simulation mode — using fallback fixture evidence");
-                    allEvidence = buildFallbackEvidence();
+                    allEvidence = buildFallbackEvidence(faultMode);
                 } else {
                     log.warn("No evidence collected in live mode — RCA will run with zero evidence (no fixture fallback)");
                     allWarnings.add("No evidence collected from any live source. RCA results may be inconclusive.");
@@ -187,7 +216,8 @@ public class LiveScenarioService {
                     faultMode, faultParams, isSimulation,
                     rcaResult, mergedReport, llmProposal,
                     effectiveWait, lookbackSec, stepSec,
-                    windowStart, windowEnd, durationMs);
+                    windowStart, windowEnd, durationMs,
+                    runLlmProposal ? runLlmReportSynthesis(rcaResult) : null);
 
             LiveScenarioResult result = LiveScenarioResult.completed(
                     scenarioId, "Scenario G: Payment Latency → Order Error Spike",
@@ -328,14 +358,59 @@ public class LiveScenarioService {
     private LlmHypothesisProposalResult runLlmProposal(InvestigationResult rcaResult,
                                                          List<Evidence> evidence) {
         try {
-            LlmHypothesisProposer proposer = new MockLlmHypothesisProposer();
+            LlmClient client = resolveLlmClient();
+            LlmHypothesisProposer proposer = new LlmHypothesisProposerImpl(client);
             List<NormalizedEvidence> normalized = EvidenceNormalizer.normalizeAll(evidence);
             LlmHypothesisProposalResult result = proposer.propose(rcaResult, normalized);
-            log.info("LLM proposal: {} hypotheses, advisoryOnly={}",
-                    result.proposals().size(), result.advisoryOnly());
+            log.info("LLM proposal: {} hypotheses, advisoryOnly={}, proposer={}",
+                    result.proposals().size(), result.advisoryOnly(), proposer.proposerName());
             return result;
         } catch (Exception e) {
-            log.warn("LLM proposal failed: {}", e.getMessage());
+            log.warn("LLM proposal failed, falling back to mock: {}", e.getMessage());
+            try {
+                return new MockLlmHypothesisProposer().propose(
+                        rcaResult, EvidenceNormalizer.normalizeAll(evidence));
+            } catch (Exception ex) {
+                log.error("Mock fallback also failed: {}", ex.getMessage());
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Resolve LLM client from environment variables.
+     * Returns MockLlmClient if LLM_PROVIDER is not configured.
+     */
+    private LlmClient resolveLlmClient() {
+        String provider = System.getenv().getOrDefault("LLM_PROVIDER", "mock");
+        if ("mock".equals(provider)) {
+            return new MockLlmClient();
+        }
+        String baseUrl = System.getenv("LLM_BASE_URL");
+        String apiKey = System.getenv("LLM_API_KEY");
+        String model = System.getenv().getOrDefault("LLM_MODEL", "gpt-4o");
+        if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) {
+            log.warn("LLM_PROVIDER={} but LLM_BASE_URL or LLM_API_KEY not set, falling back to mock", provider);
+            return new MockLlmClient();
+        }
+        log.info("LLM client: provider={}, model={}, baseUrl={}", provider, model, baseUrl);
+        return new OpenAiCompatibleLlmClient(baseUrl, apiKey, model);
+    }
+
+    /**
+     * Run LLM report synthesis — calls LLM to generate a Chinese narrative report
+     * based on the deterministic investigation result.
+     */
+    private String runLlmReportSynthesis(InvestigationResult rcaResult) {
+        try {
+            LlmClient client = resolveLlmClient();
+            LlmPromptBuilder promptBuilder = new LlmPromptBuilder();
+            LlmRequest request = promptBuilder.build(rcaResult);
+            var response = client.complete(request);
+            log.info("LLM report synthesis complete: {} chars", response.content().length());
+            return response.content();
+        } catch (Exception e) {
+            log.warn("LLM report synthesis failed: {}", e.getMessage());
             return null;
         }
     }
@@ -350,7 +425,8 @@ public class LiveScenarioService {
             InvestigationResult rca, LiveEvidenceReport evidenceReport,
             LlmHypothesisProposalResult llmProposal,
             int waitSeconds, int lookbackSeconds, int stepSeconds,
-            Instant windowStart, Instant windowEnd, long durationMs) {
+            Instant windowStart, Instant windowEnd, long durationMs,
+            String llmSynthesizedReport) {
 
         StringBuilder sb = new StringBuilder();
 
@@ -478,9 +554,16 @@ public class LiveScenarioService {
         }
         sb.append("\n");
 
+        // LLM synthesized report (if available)
+        if (llmSynthesizedReport != null && !llmSynthesizedReport.isBlank()) {
+            sb.append("## LLM 增强分析报告\n\n");
+            sb.append(llmSynthesizedReport);
+            sb.append("\n\n");
+        }
+
         // Footer
         sb.append("---\n");
-        sb.append("*报告生成时间：").append(Instant.now()).append("*\n");
+        sb.append("*报告生成时间：").append(java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Shanghai")).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))).append(" (CST)*\n");
         sb.append("*决策方式：确定性规则引擎（LLM 仅做建议，不参与评分）*\n");
 
         return sb.toString();
@@ -497,36 +580,115 @@ public class LiveScenarioService {
         };
     }
 
-    private List<Evidence> buildFallbackEvidence() {
-        // Minimal static evidence to ensure RCA can produce a result
-        // ONLY used in simulation mode
+    /**
+     * Build fallback evidence for simulation mode, tailored to the fault mode.
+     * Generates evidence that matches the injected fault type so RCA can produce
+     * accurate conclusions even in simulation mode.
+     */
+    private List<Evidence> buildFallbackEvidence(String faultMode) {
         String incId = "inc-scenario-g-fallback";
-        return List.of(
-            new Evidence("ev-fb-1", incId, "prometheus", "metric_latency_p95_spike",
-                    "payment-service", Instant.now(),
-                    "Prometheus indicates p95 latency for payment-service exceeded threshold (2.5s).",
-                    Map.of("queryType", "LATENCY_P95", "value", 2500.0, "threshold", 1000.0,
-                            "unit", "ms"), 0.85),
-            new Evidence("ev-fb-2", incId, "loki", "log_timeout_error",
-                    "order-service", Instant.now(),
-                    "Loki detected timeout errors in order-service logs when calling payment-service.",
-                    Map.of("queryType", "TIMEOUT_ERROR", "downstream", "payment-service"), 0.80),
-            new Evidence("ev-fb-3", incId, "jaeger", "trace_downstream_slow_span",
-                    "payment-service", Instant.now(),
-                    "Jaeger trace shows payment-service span took 2500ms (parent order-service checkout).",
-                    Map.of("queryType", "DOWNSTREAM_SLOW_SPAN", "duration_ms", 2500), 0.75),
-            new Evidence("ev-fb-4", incId, "prometheus", "metric_error_rate_spike",
-                    "order-service", Instant.now(),
-                    "Prometheus indicates error rate for order-service exceeded threshold (8.2%).",
-                    Map.of("queryType", "ERROR_RATE", "value", 0.082, "threshold", 0.05), 0.70),
-            new Evidence("ev-fb-5", incId, "kubernetes", "deployment_metadata",
-                    "order-service", Instant.now(),
-                    "Kubernetes: deployment order-service replicas=3/3 available (healthy).",
-                    Map.of("deployment_name", "order-service", "replicas", 3, "ready_replicas", 3), 0.40),
-            new Evidence("ev-fb-6", incId, "kubernetes", "pod_healthy",
-                    "payment-service", Instant.now(),
-                    "Kubernetes: all payment-service pods Running, restartCount=0 (healthy).",
-                    Map.of("pod_name", "payment-service-abc", "phase", "Running", "restart_count", 0), 0.30)
-        );
+        Instant now = Instant.now();
+        List<Evidence> evidence = new ArrayList<>();
+
+        // Common: Kubernetes evidence (pods healthy regardless of fault type)
+        evidence.add(new Evidence("ev-fb-k8s-1", incId, "kubernetes", "deployment_metadata",
+                "order-service", now,
+                "Kubernetes: deployment order-service replicas=3/3 available (healthy).",
+                Map.of("deployment_name", "order-service", "replicas", 3, "ready_replicas", 3), 0.40));
+        evidence.add(new Evidence("ev-fb-k8s-2", incId, "kubernetes", "pod_healthy",
+                "payment-service", now,
+                "Kubernetes: all payment-service pods Running, restartCount=0 (healthy).",
+                Map.of("pod_name", "payment-service-abc", "phase", "Running", "restart_count", 0), 0.30));
+
+        // Fault-specific evidence
+        switch (faultMode) {
+            case "latency" -> {
+                evidence.add(new Evidence("ev-fb-prom-1", incId, "prometheus", "metric_latency_p95_spike",
+                        "payment-service", now,
+                        "Prometheus: payment-service p95 latency 2500ms (threshold 1000ms).",
+                        Map.of("queryType", "LATENCY_P95", "value", 2500.0, "threshold", 1000.0, "unit", "ms"), 0.85));
+                evidence.add(new Evidence("ev-fb-prom-2", incId, "prometheus", "metric_downstream_latency_p95_spike",
+                        "order-service", now,
+                        "Prometheus: order-service downstream p95 latency to payment-service 2400ms.",
+                        Map.of("queryType", "DOWNSTREAM_LATENCY_P95", "value", 2400.0, "downstream", "payment-service"), 0.80));
+                evidence.add(new Evidence("ev-fb-loki-1", incId, "loki", "log_timeout_error",
+                        "order-service", now,
+                        "Loki: order-service timeout errors calling payment-service /charge.",
+                        Map.of("queryType", "TIMEOUT_ERROR", "downstream", "payment-service"), 0.75));
+                evidence.add(new Evidence("ev-fb-trace-1", incId, "jaeger", "trace_downstream_slow_span",
+                        "payment-service", now,
+                        "Jaeger: payment-service span took 2500ms (parent order-service checkout).",
+                        Map.of("queryType", "DOWNSTREAM_SLOW_SPAN", "duration_ms", 2500), 0.75));
+                evidence.add(new Evidence("ev-fb-prom-3", incId, "prometheus", "metric_error_rate_spike",
+                        "order-service", now,
+                        "Prometheus: order-service error rate 8.2% (threshold 5%).",
+                        Map.of("queryType", "ERROR_RATE", "value", 0.082, "threshold", 0.05), 0.70));
+            }
+            case "error" -> {
+                evidence.add(new Evidence("ev-fb-prom-1", incId, "prometheus", "metric_error_rate_spike",
+                        "payment-service", now,
+                        "Prometheus: payment-service error rate 80% (threshold 5%).",
+                        Map.of("queryType", "ERROR_RATE", "value", 0.80, "threshold", 0.05), 0.90));
+                evidence.add(new Evidence("ev-fb-prom-2", incId, "prometheus", "metric_error_rate_spike",
+                        "order-service", now,
+                        "Prometheus: order-service error rate 45% due to upstream payment failures.",
+                        Map.of("queryType", "ERROR_RATE", "value", 0.45, "threshold", 0.05), 0.85));
+                evidence.add(new Evidence("ev-fb-loki-1", incId, "loki", "log_http_5xx",
+                        "payment-service", now,
+                        "Loki: payment-service returning HTTP 500 errors.",
+                        Map.of("queryType", "HTTP_5XX_LOGS", "status_code", 500), 0.85));
+                evidence.add(new Evidence("ev-fb-loki-2", incId, "loki", "log_http_5xx",
+                        "order-service", now,
+                        "Loki: order-service returning HTTP 502 Bad Gateway to clients.",
+                        Map.of("queryType", "HTTP_5XX_LOGS", "status_code", 502, "upstream", "payment-service"), 0.80));
+                evidence.add(new Evidence("ev-fb-trace-1", incId, "jaeger", "trace_error_span",
+                        "payment-service", now,
+                        "Jaeger: payment-service /charge spans showing HTTP 500 errors.",
+                        Map.of("queryType", "ERROR_SPAN", "status_code", 500), 0.80));
+            }
+            case "timeout" -> {
+                evidence.add(new Evidence("ev-fb-prom-1", incId, "prometheus", "metric_latency_p95_spike",
+                        "payment-service", now,
+                        "Prometheus: payment-service p95 latency exceeds 5000ms (timeout).",
+                        Map.of("queryType", "LATENCY_P95", "value", 5000.0, "threshold", 1000.0, "unit", "ms"), 0.90));
+                evidence.add(new Evidence("ev-fb-prom-2", incId, "prometheus", "metric_downstream_latency_p95_spike",
+                        "order-service", now,
+                        "Prometheus: order-service downstream timeout to payment-service.",
+                        Map.of("queryType", "DOWNSTREAM_LATENCY_P95", "value", 5200.0, "downstream", "payment-service"), 0.85));
+                evidence.add(new Evidence("ev-fb-loki-1", incId, "loki", "log_timeout_error",
+                        "order-service", now,
+                        "Loki: order-service upstream timeout errors — payment-service /charge not responding.",
+                        Map.of("queryType", "TIMEOUT_ERROR", "downstream", "payment-service"), 0.85));
+                evidence.add(new Evidence("ev-fb-loki-2", incId, "loki", "log_downstream_timeout",
+                        "order-service", now,
+                        "Loki: order-service downstream timeout — HttpTimeoutException calling payment-service.",
+                        Map.of("queryType", "DOWNSTREAM_TIMEOUT", "exception", "HttpTimeoutException"), 0.80));
+                evidence.add(new Evidence("ev-fb-trace-1", incId, "jaeger", "trace_timeout_span",
+                        "payment-service", now,
+                        "Jaeger: payment-service /charge spans timing out (>5000ms).",
+                        Map.of("queryType", "TIMEOUT_SPAN", "duration_ms", 5000, "timed_out", true), 0.85));
+                evidence.add(new Evidence("ev-fb-prom-3", incId, "prometheus", "metric_error_rate_spike",
+                        "order-service", now,
+                        "Prometheus: order-service error rate 60% due to payment-service timeouts.",
+                        Map.of("queryType", "ERROR_RATE", "value", 0.60, "threshold", 0.05), 0.80));
+            }
+            default -> {
+                // "normal" or unknown: minimal baseline evidence
+                evidence.add(new Evidence("ev-fb-prom-1", incId, "prometheus", "metric_latency_p95_spike",
+                        "payment-service", now,
+                        "Prometheus: payment-service p95 latency 2500ms (threshold 1000ms).",
+                        Map.of("queryType", "LATENCY_P95", "value", 2500.0, "threshold", 1000.0, "unit", "ms"), 0.85));
+                evidence.add(new Evidence("ev-fb-loki-1", incId, "loki", "log_timeout_error",
+                        "order-service", now,
+                        "Loki: order-service timeout errors calling payment-service.",
+                        Map.of("queryType", "TIMEOUT_ERROR", "downstream", "payment-service"), 0.75));
+                evidence.add(new Evidence("ev-fb-trace-1", incId, "jaeger", "trace_downstream_slow_span",
+                        "payment-service", now,
+                        "Jaeger: payment-service span took 2500ms.",
+                        Map.of("queryType", "DOWNSTREAM_SLOW_SPAN", "duration_ms", 2500), 0.75));
+            }
+        }
+
+        return evidence;
     }
 }
