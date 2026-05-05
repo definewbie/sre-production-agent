@@ -142,4 +142,30 @@ public class DemoServiceClient {
         map.put("inventory-service", config.getInventoryServiceUrl());
         return map;
     }
+
+    /**
+     * Generate synthetic traffic by calling order-service checkout endpoint.
+     * This ensures Prometheus/Loki/Jaeger capture metrics under fault conditions.
+     *
+     * @param requests number of checkout requests to send
+     * @return number of successful requests
+     */
+    public int generateTraffic(int requests) {
+        String orderUrl = config.getOrderServiceUrl();
+        int success = 0;
+        for (int i = 0; i < requests; i++) {
+            try {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(orderUrl + "/checkout"))
+                        .timeout(Duration.ofSeconds(15))
+                        .GET()
+                        .build();
+                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                success++;
+            } catch (Exception e) {
+                // Expected under fault conditions (timeouts, errors) — still counts as traffic
+            }
+        }
+        return success;
+    }
 }

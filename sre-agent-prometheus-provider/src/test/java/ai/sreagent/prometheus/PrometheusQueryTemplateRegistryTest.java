@@ -74,10 +74,10 @@ class PrometheusQueryTemplateRegistryTest {
         @Test
         void shouldContainExpectedMetricNames() {
             PrometheusQueryTemplate errorRate = registry.getTemplate(PrometheusQueryType.ERROR_RATE).orElseThrow();
-            assertThat(errorRate.template()).contains("http_requests_total");
+            assertThat(errorRate.template()).contains("http_server_requests_seconds_count");
 
             PrometheusQueryTemplate latency = registry.getTemplate(PrometheusQueryType.LATENCY_P95).orElseThrow();
-            assertThat(latency.template()).contains("http_request_duration_seconds_bucket");
+            assertThat(latency.template()).contains("http_server_requests_seconds_bucket");
 
             PrometheusQueryTemplate memory = registry.getTemplate(PrometheusQueryType.MEMORY_USAGE).orElseThrow();
             assertThat(memory.template()).contains("container_memory_working_set_bytes");

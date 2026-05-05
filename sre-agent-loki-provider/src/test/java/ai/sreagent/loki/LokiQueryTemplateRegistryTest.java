@@ -61,7 +61,7 @@ class LokiQueryTemplateRegistryTest {
             LokiQueryTemplate template = registry.getTemplate(LokiQueryType.TIMEOUT_ERROR).orElseThrow();
             String query = template.buildQuery("order-service", "demo");
 
-            assertThat(query).contains("service=\"order-service\"");
+            assertThat(query).contains("app=\"order-service\"");
             assertThat(query).contains("namespace=\"demo\"");
             assertThat(query).containsIgnoringCase("timeout");
         }

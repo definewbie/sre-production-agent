@@ -26,6 +26,20 @@ spec:
           env:
             - name: SERVER_PORT
               value: "8082"
+            - name: JAVA_TOOL_OPTIONS
+              value: "-javaagent:/app/otel-agent.jar"
+            - name: OTEL_SERVICE_NAME
+              value: "payment-service"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://jaeger.observability.svc.cluster.local:4317"
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            - name: OTEL_TRACES_EXPORTER
+              value: "otlp"
+            - name: OTEL_METRICS_EXPORTER
+              value: "none"
+            - name: OTEL_LOGS_EXPORTER
+              value: "none"
           resources:
             requests:
               cpu: "100m"

@@ -46,9 +46,13 @@ public class VerificationEngine {
                 .filter(req -> !coveredTypes.contains(req))
                 .toList();
 
-        // Also check: any supporting evidence types that have zero coverage
+        // Also check: any supporting evidence types that have zero coverage.
+        // Provider alias types (metric_*, log_*, trace_*) are optional bonus evidence
+        // from observability providers and should NOT generate missing penalties.
+        // Only core evidence types count as missing.
         List<String> uncoveredSupportingTypes = pattern.supportingEvidenceTypes().stream()
                 .filter(type -> !evidenceTypes.contains(type))
+                .filter(type -> !isProviderAlias(type))
                 .map(type -> "Missing expected evidence type: " + type)
                 .toList();
 
@@ -92,6 +96,17 @@ public class VerificationEngine {
 
     // ── Contradiction rules (deterministic, pattern-specific) ─────────────
 
+    /**
+     * Returns true if the evidence type is a provider alias (from Prometheus, Loki, Trace, etc.)
+     * Provider aliases are bonus evidence that should not generate missing penalties
+     * when absent, since their providers may not be deployed or consulted.
+     */
+    private boolean isProviderAlias(String evidenceType) {
+        return evidenceType.startsWith("metric_")
+                || evidenceType.startsWith("log_")
+                || evidenceType.startsWith("trace_");
+    }
+
     private List<String> detectContradictions(String patternId, Set<String> evidenceTypes) {
         List<String> contradictions = new ArrayList<>();
 
@@ -102,19 +117,23 @@ public class VerificationEngine {
                             "Timeout logs existed before the deployment, so the deployment may not be the only cause."
                     );
                 }
-                if (evidenceTypes.contains("downstream_latency_spike")) {
+                if (evidenceTypes.contains("downstream_latency_spike")
+                        || evidenceTypes.contains("metric_downstream_latency_spike")
+                        || evidenceTypes.contains("trace_downstream_span_slow")) {
                     contradictions.add(
                             "Downstream payment-service latency also increased, so dependency latency remains a competing explanation."
                     );
                 }
             }
             case "downstream_dependency_latency" -> {
-                if (evidenceTypes.contains("downstream_5xx_absent")) {
+                if (evidenceTypes.contains("downstream_5xx_absent")
+                        || evidenceTypes.contains("log_http_5xx")) {
                     contradictions.add(
                             "payment-service 5xx did not increase, so downstream failure is not fully confirmed."
                     );
                 }
-                if (evidenceTypes.contains("deploy_event_near_alert_window")) {
+                if (evidenceTypes.contains("deploy_event_near_alert_window")
+                        || evidenceTypes.contains("metric_error_rate_spike")) {
                     contradictions.add(
                             "A recent deployment is temporally correlated with the alert, so deployment regression remains a competing explanation."
                     );
@@ -122,17 +141,25 @@ public class VerificationEngine {
             }
             case "pod_oom_killed" -> {
                 boolean hasOomEvidence = evidenceTypes.stream()
-                        .anyMatch(t -> t.contains("oom") || t.contains("restart") || t.contains("memory"));
-                if (!hasOomEvidence) {
+                        .anyMatch(t -> t.contains("oom") || t.contains("OOM"));
+                boolean hasMemoryPressure = evidenceTypes.stream()
+                        .anyMatch(t -> t.contains("memory") && !t.contains("_no_signal"));
+                boolean hasRestartEvidence = evidenceTypes.stream()
+                        .anyMatch(t -> t.contains("restart") && !t.contains("_no_signal"));
+                if (!hasOomEvidence && !hasMemoryPressure && !hasRestartEvidence) {
                     contradictions.add(
-                            "No OOMKilled, restart, or memory pressure evidence was found."
+                            "No OOMKilled, memory pressure, or restart evidence was found."
                     );
                 }
             }
             case "pod_crash_loop" -> {
                 boolean hasCrashEvidence = evidenceTypes.stream()
-                        .anyMatch(t -> t.contains("crash") || t.contains("restart") || t.contains("not_ready"));
-                if (!hasCrashEvidence) {
+                        .anyMatch(t -> t.contains("crash"));
+                boolean hasRestartEvidence = evidenceTypes.stream()
+                        .anyMatch(t -> t.contains("restart") && !t.contains("_no_signal"));
+                boolean hasNotReady = evidenceTypes.stream()
+                        .anyMatch(t -> t.contains("not_ready"));
+                if (!hasCrashEvidence && !hasRestartEvidence && !hasNotReady) {
                     contradictions.add(
                             "No crash loop, restart, or pod-not-ready evidence was found."
                     );

@@ -5,13 +5,19 @@ import ai.sreagent.core.domain.DiagnosticPattern;
 import java.util.List;
 import java.util.Map;
 
+import static java.util.Map.entry;
+
 /**
- * Built-in diagnostic patterns for the three core demo scenarios.
+ * Built-in diagnostic patterns for the core demo scenarios.
  * These encode common Kubernetes microservice failure modes.
  *
  * Confidence weights are manually assigned based on SRE diagnostic experience.
  * They are NOT learned from historical incident data.
  * This is an MVP calibration — production systems should learn from real data.
+ *
+ * Each pattern includes both "core" evidence types (from static JSON fixtures)
+ * and "provider alias" types (from Prometheus / Loki / Trace / K8s providers).
+ * This ensures the VerificationEngine matches evidence regardless of source.
  */
 public final class BuiltinPatterns {
 
@@ -26,24 +32,49 @@ public final class BuiltinPatterns {
                 "Error rate or latency must change after deployment"
             ),
             List.of(
+                // Core types (Scenario E static evidence)
                 "deploy_event_near_alert_window",
                 "error_rate_spike_after_deploy",
                 "dependency_timeout_logs",
-                "retry_timeout_config_change"
+                "retry_timeout_config_change",
+                // Provider aliases (Prometheus / Loki / Trace)
+                "metric_error_rate_spike",
+                "metric_latency_p95_spike",
+                "metric_latency_p99_spike",
+                "log_timeout_error",
+                "log_downstream_timeout",
+                "log_exception_spike",
+                "log_http_5xx",
+                "trace_error_span",
+                "trace_root_span_slow"
             ),
             List.of(
                 "historical_timeout_logs_present",
-                "downstream_latency_spike"
+                "downstream_latency_spike",
+                "metric_downstream_latency_spike",
+                "trace_downstream_span_slow",
+                "trace_child_span_dominates_latency"
             ),
-            Map.of(
-                "deploy_event_near_alert_window", 0.12,
-                "error_rate_spike_after_deploy", 0.10,
-                "dependency_timeout_logs", 0.08,
-                "retry_timeout_config_change", 0.12,
-                "historical_timeout_logs_present", 0.04,
-                "downstream_latency_spike", 0.04
+            Map.ofEntries(
+                // Core weights
+                entry("deploy_event_near_alert_window", 0.18),
+                entry("error_rate_spike_after_deploy", 0.14),
+                entry("dependency_timeout_logs", 0.08),
+                entry("retry_timeout_config_change", 0.12),
+                entry("historical_timeout_logs_present", 0.04),
+                entry("downstream_latency_spike", 0.04),
+                // Provider alias weights
+                entry("metric_error_rate_spike", 0.10),
+                entry("metric_latency_p95_spike", 0.08),
+                entry("metric_latency_p99_spike", 0.08),
+                entry("log_timeout_error", 0.08),
+                entry("log_downstream_timeout", 0.08),
+                entry("log_exception_spike", 0.06),
+                entry("log_http_5xx", 0.06),
+                entry("trace_error_span", 0.06),
+                entry("trace_root_span_slow", 0.06)
             ),
-            0.30
+            0.20
         );
     }
 
@@ -56,20 +87,51 @@ public final class BuiltinPatterns {
                 "Caller logs must show timeout or connection errors to the downstream"
             ),
             List.of(
+                // Core types (Scenario E static evidence)
                 "dependency_timeout_logs",
                 "downstream_latency_spike",
-                "service_dependency_match"
+                "service_dependency_match",
+                // Provider aliases (Prometheus / Loki / Trace)
+                "metric_downstream_latency_spike",
+                "metric_latency_p95_spike",
+                "metric_error_rate_spike",
+                "log_timeout_error",
+                "log_downstream_timeout",
+                "log_http_5xx",
+                "log_exception_spike",
+                "log_retry_exhausted",
+                "trace_downstream_span_slow",
+                "trace_dependency_path",
+                "trace_timeout_span",
+                "trace_child_span_dominates_latency"
             ),
             List.of(
                 "downstream_5xx_absent",
-                "deploy_event_near_alert_window"
+                "deploy_event_near_alert_window",
+                "metric_error_rate_spike",
+                "log_http_5xx",
+                "trace_error_span"
             ),
-            Map.of(
-                "dependency_timeout_logs", 0.12,
-                "downstream_latency_spike", 0.14,
-                "service_dependency_match", 0.14,
-                "downstream_5xx_absent", 0.05,
-                "deploy_event_near_alert_window", 0.02
+            Map.ofEntries(
+                // Core weights
+                entry("dependency_timeout_logs", 0.12),
+                entry("downstream_latency_spike", 0.14),
+                entry("service_dependency_match", 0.14),
+                entry("downstream_5xx_absent", 0.05),
+                entry("deploy_event_near_alert_window", 0.02),
+                // Provider alias weights — downstream evidence is strongest signal
+                entry("metric_downstream_latency_spike", 0.16),
+                entry("metric_latency_p95_spike", 0.10),
+                entry("metric_error_rate_spike", 0.06),
+                entry("log_timeout_error", 0.12),
+                entry("log_downstream_timeout", 0.14),
+                entry("log_http_5xx", 0.08),
+                entry("log_exception_spike", 0.06),
+                entry("log_retry_exhausted", 0.08),
+                entry("trace_downstream_span_slow", 0.16),
+                entry("trace_dependency_path", 0.14),
+                entry("trace_timeout_span", 0.12),
+                entry("trace_child_span_dominates_latency", 0.14)
             ),
             0.25
         );
@@ -84,22 +146,36 @@ public final class BuiltinPatterns {
                 "Memory usage must approach or exceed limit"
             ),
             List.of(
+                // Core types (Scenario F K8s evidence)
                 "kubernetes_event_oomkilled",
                 "pod_restart_count_increased",
-                "memory_usage_near_limit"
+                "memory_usage_near_limit",
+                // Provider aliases (Prometheus / K8s)
+                "metric_memory_usage_high",
+                "metric_restart_rate_increased",
+                "metric_cpu_usage_high",
+                "log_oom_message",
+                "log_crash_loop"
             ),
             List.of(
                 "no_restart_observed",
                 "memory_usage_normal"
             ),
-            Map.of(
-                "kubernetes_event_oomkilled", 0.15,
-                "pod_restart_count_increased", 0.10,
-                "memory_usage_near_limit", 0.10,
-                "no_restart_observed", 0.10,
-                "memory_usage_normal", 0.10
+            Map.ofEntries(
+                // Core weights
+                entry("kubernetes_event_oomkilled", 0.15),
+                entry("pod_restart_count_increased", 0.10),
+                entry("memory_usage_near_limit", 0.10),
+                entry("no_restart_observed", 0.10),
+                entry("memory_usage_normal", 0.10),
+                // Provider alias weights
+                entry("metric_memory_usage_high", 0.10),
+                entry("metric_restart_rate_increased", 0.08),
+                entry("metric_cpu_usage_high", 0.06),
+                entry("log_oom_message", 0.12),
+                entry("log_crash_loop", 0.08)
             ),
-            0.35
+            0.10
         );
     }
 
@@ -112,26 +188,42 @@ public final class BuiltinPatterns {
                 "Pod restart count must be elevated"
             ),
             List.of(
+                // Core types (Scenario F K8s evidence)
                 "container_crash_loop_backoff",
                 "pod_restart_count_increased",
                 "pod_not_ready",
-                "deployment_metadata"
+                "deployment_metadata",
+                // Provider aliases (Prometheus / K8s)
+                "metric_restart_rate_increased",
+                "metric_memory_usage_high",
+                "metric_cpu_usage_high",
+                "log_crash_loop",
+                "log_oom_message",
+                "log_exception_spike"
             ),
             List.of(
                 "no_restart_observed",
                 "pod_ready",
                 "container_running_normal"
             ),
-            Map.of(
-                "container_crash_loop_backoff", 0.30,
-                "pod_restart_count_increased", 0.20,
-                "pod_not_ready", 0.15,
-                "deployment_metadata", 0.05,
-                "no_restart_observed", 0.30,
-                "pod_ready", 0.20,
-                "container_running_normal", 0.20
+            Map.ofEntries(
+                // Core weights
+                entry("container_crash_loop_backoff", 0.30),
+                entry("pod_restart_count_increased", 0.20),
+                entry("pod_not_ready", 0.15),
+                entry("deployment_metadata", 0.05),
+                entry("no_restart_observed", 0.30),
+                entry("pod_ready", 0.20),
+                entry("container_running_normal", 0.20),
+                // Provider alias weights
+                entry("metric_restart_rate_increased", 0.15),
+                entry("metric_memory_usage_high", 0.08),
+                entry("metric_cpu_usage_high", 0.06),
+                entry("log_crash_loop", 0.20),
+                entry("log_oom_message", 0.10),
+                entry("log_exception_spike", 0.08)
             ),
-            0.25
+            0.10
         );
     }
 

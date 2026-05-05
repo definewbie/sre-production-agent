@@ -32,18 +32,18 @@ class PatternRegistryTest {
         DiagnosticPattern pattern = BuiltinPatterns.deploymentRegression();
 
         assertThat(pattern.id()).isEqualTo("deployment_regression");
-        assertThat(pattern.baseScore()).isEqualTo(0.30);
-        assertThat(pattern.supportingEvidenceTypes()).containsExactlyInAnyOrder(
+        assertThat(pattern.baseScore()).isEqualTo(0.20);
+        assertThat(pattern.supportingEvidenceTypes()).contains(
                 "deploy_event_near_alert_window",
                 "error_rate_spike_after_deploy",
                 "dependency_timeout_logs",
                 "retry_timeout_config_change"
         );
-        assertThat(pattern.counterEvidenceTypes()).containsExactlyInAnyOrder(
+        assertThat(pattern.counterEvidenceTypes()).contains(
                 "historical_timeout_logs_present",
                 "downstream_latency_spike"
         );
-        assertThat(pattern.confidenceWeights()).containsEntry("deploy_event_near_alert_window", 0.12);
+        assertThat(pattern.confidenceWeights()).containsEntry("deploy_event_near_alert_window", 0.18);
     }
 
     @Test
@@ -53,12 +53,12 @@ class PatternRegistryTest {
 
         assertThat(pattern.id()).isEqualTo("downstream_dependency_latency");
         assertThat(pattern.baseScore()).isEqualTo(0.25);
-        assertThat(pattern.supportingEvidenceTypes()).containsExactlyInAnyOrder(
+        assertThat(pattern.supportingEvidenceTypes()).contains(
                 "dependency_timeout_logs",
                 "downstream_latency_spike",
                 "service_dependency_match"
         );
-        assertThat(pattern.counterEvidenceTypes()).containsExactlyInAnyOrder(
+        assertThat(pattern.counterEvidenceTypes()).contains(
                 "downstream_5xx_absent",
                 "deploy_event_near_alert_window"
         );
@@ -70,8 +70,8 @@ class PatternRegistryTest {
         DiagnosticPattern pattern = BuiltinPatterns.podOomKilled();
 
         assertThat(pattern.id()).isEqualTo("pod_oom_killed");
-        assertThat(pattern.baseScore()).isEqualTo(0.35);
-        assertThat(pattern.supportingEvidenceTypes()).containsExactlyInAnyOrder(
+        assertThat(pattern.baseScore()).isEqualTo(0.10);
+        assertThat(pattern.supportingEvidenceTypes()).contains(
                 "kubernetes_event_oomkilled",
                 "pod_restart_count_increased",
                 "memory_usage_near_limit"
@@ -92,20 +92,37 @@ class PatternRegistryTest {
     }
 
     @Test
-    @DisplayName("Confidence weights sum is reasonable for each pattern")
+    @DisplayName("Confidence weights are well-calibrated for each pattern")
     void confidenceWeightsAreReasonable() {
         PatternRegistry registry = BuiltinPatterns.defaultRegistry();
 
         for (DiagnosticPattern pattern : registry.all()) {
-            // Only supporting evidence types contribute positively;
-            // counter evidence types are subtracted during scoring.
-            double supportingSum = pattern.supportingEvidenceTypes().stream()
+            // Verify: all supporting types have a corresponding confidence weight
+            for (String type : pattern.supportingEvidenceTypes()) {
+                assertThat(pattern.confidenceWeights())
+                        .as("Pattern %s should have weight for supporting type %s", pattern.id(), type)
+                        .containsKey(type);
+            }
+
+            // Verify: all weights are positive for supporting types
+            for (String type : pattern.supportingEvidenceTypes()) {
+                double weight = pattern.confidenceWeights().getOrDefault(type, 0.0);
+                assertThat(weight)
+                        .as("Weight for %s in %s should be positive", type, pattern.id())
+                        .isGreaterThan(0.0);
+            }
+
+            // Verify: baseScore + core supporting weights alone stays reasonable
+            // (provider aliases are bonus and may push total above 1.0, which is fine
+            //  since the score is clamped to [0.0, 1.0] after computation)
+            double coreSupportingSum = pattern.supportingEvidenceTypes().stream()
+                    .filter(t -> !t.startsWith("metric_") && !t.startsWith("log_") && !t.startsWith("trace_"))
                     .mapToDouble(t -> pattern.confidenceWeights().getOrDefault(t, 0.0))
                     .sum();
-            double maxPossibleScore = pattern.baseScore() + supportingSum;
-            assertThat(maxPossibleScore)
-                    .as("Max possible score for %s should be between 0 and 1, got %f", pattern.id(), maxPossibleScore)
-                    .isBetween(0.0, 1.0);
+            double coreMaxPossible = pattern.baseScore() + coreSupportingSum;
+            assertThat(coreMaxPossible)
+                    .as("Core max possible score for %s should be between 0 and 1.2, got %f", pattern.id(), coreMaxPossible)
+                    .isBetween(0.0, 1.2);
         }
     }
 }

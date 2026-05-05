@@ -2,5 +2,5 @@ FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY target/*.jar app.jar
 COPY otel-agent.jar otel-agent.jar
-EXPOSE 8082
+EXPOSE 8081
 ENTRYPOINT ["java", "--enable-preview", "-jar", "app.jar"]

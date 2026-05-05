@@ -27,7 +27,7 @@ class PodCrashLoopPatternTest {
     @Test
     void podCrashLoop_hasRequiredSupportingTypes() {
         DiagnosticPattern pattern = BuiltinPatterns.podCrashLoop();
-        assertThat(pattern.supportingEvidenceTypes()).containsExactlyInAnyOrder(
+        assertThat(pattern.supportingEvidenceTypes()).contains(
                 "container_crash_loop_backoff",
                 "pod_restart_count_increased",
                 "pod_not_ready",
@@ -57,7 +57,7 @@ class PodCrashLoopPatternTest {
     @Test
     void podCrashLoop_hasBaseScore() {
         DiagnosticPattern pattern = BuiltinPatterns.podCrashLoop();
-        assertThat(pattern.baseScore()).isEqualTo(0.25);
+        assertThat(pattern.baseScore()).isEqualTo(0.10);
     }
 
     @Test

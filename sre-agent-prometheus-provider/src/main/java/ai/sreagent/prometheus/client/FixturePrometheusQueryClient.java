@@ -22,14 +22,15 @@ public class FixturePrometheusQueryClient implements PrometheusQueryClient {
 
     // Keyword → fixture file mapping
     // Order matters: more specific patterns first
+    // Updated for Spring Boot Actuator metric names (http_server_requests_seconds_*)
     private static final Map.Entry<String, String>[] KEYWORD_PATTERNS = new Map.Entry[] {
-        Map.entry("http_requests_total{service", "error_rate_spike.json"),           // error rate
-        Map.entry("http_request_duration_seconds_bucket", "latency_p95_spike.json"), // latency
-        Map.entry("http_client_request_duration_seconds_bucket", "downstream_latency_spike.json"), // downstream
+        Map.entry("http_server_requests_seconds_count{service", "error_rate_spike.json"),           // error rate
+        Map.entry("http_server_requests_seconds_bucket", "latency_p95_spike.json"), // latency (histogram_quantile)
+        Map.entry("http_server_requests_seconds_count{uri", "downstream_latency_spike.json"), // downstream latency (per-uri)
         Map.entry("container_memory_working_set_bytes", "memory_usage_high.json"),    // memory
         Map.entry("container_cpu_usage_seconds_total", "memory_usage_high.json"),     // cpu → reuse memory fixture
         Map.entry("kube_pod_container_status_restarts_total", "restart_rate_increased.json"), // restart
-        Map.entry("sum(rate(http_requests_total", "error_rate_spike.json")            // request rate
+        Map.entry("sum(rate(http_server_requests_seconds_count", "error_rate_spike.json")            // request rate
     };
 
     @Override
