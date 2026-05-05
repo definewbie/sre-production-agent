@@ -55,22 +55,22 @@ class MarkdownReporterTest {
 
     @Test
     void reportContainsTitle() {
-        assertThat(report).contains("Competing Hypotheses Report");
+        assertThat(report).contains("竞争假设分析报告");
     }
 
     @Test
     void reportContainsDecision() {
-        assertThat(report).contains("Decision: competing_hypotheses");
+        assertThat(report).contains("竞争假设");
     }
 
     @Test
     void reportContainsLeadingHypothesis() {
-        assertThat(report).contains("deployment_regression");
+        assertThat(report).contains("近期部署引入回归缺陷");
     }
 
     @Test
     void reportContainsCompetingHypothesis() {
-        assertThat(report).contains("downstream_dependency_latency");
+        assertThat(report).contains("下游依赖延迟导致超时");
     }
 
     @Test
@@ -86,21 +86,21 @@ class MarkdownReporterTest {
 
     @Test
     void reportContainsCalibrationNotes() {
-        assertThat(report).contains("Calibration Notes");
+        assertThat(report).contains("校准说明");
     }
 
     @Test
     void reportContainsSuggestedNextProbes() {
-        assertThat(report).contains("Suggested Next Probes");
+        assertThat(report).contains("建议下一步探测");
     }
 
     @Test
     void reportContainsContradictions() {
-        assertThat(report).contains("Contradictions");
+        assertThat(report).contains("矛盾点");
     }
 
     @Test
     void reportContainsCounterEvidence() {
-        assertThat(report).contains("Counter Evidence");
+        assertThat(report).contains("反驳证据");
     }
 }

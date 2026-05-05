@@ -1616,6 +1616,7 @@ function runLiveScenario() {
     document.getElementById('liveDecisionCard').style.display = 'none';
     document.getElementById('liveHypCard').style.display = 'none';
     document.getElementById('liveReportCard').style.display = 'none';
+    document.getElementById('liveLlmCard').style.display = 'none';
 
     setLiveStep(0);
 
@@ -1838,9 +1839,18 @@ function renderLiveResult(data) {
             verifMap[verResults[vi].hypothesis_id] = verResults[vi];
         }
 
+        var decTypeMap = {
+            'likely_root_cause': '高置信根因',
+            'probable_root_cause': '可能根因',
+            'competing_hypotheses': '竞争假设',
+            'uncertain_requires_more_evidence': '不确定（需更多证据）',
+            'insufficient_evidence': '证据不足'
+        };
+        var decTypeZh = decTypeMap[decType] || decType;
+
         var dhtml = '<div class="live-decision-tag ' + tagClass + '">' + tagText + '</div>';
         dhtml += '<div class="live-decision-grid">';
-        dhtml += '<div class="live-decision-row"><span class="live-decision-key">决策类型</span><span>' + escHtml(decType) + '</span></div>';
+        dhtml += '<div class="live-decision-row"><span class="live-decision-key">决策类型</span><span>' + escHtml(decTypeZh) + '</span></div>';
         dhtml += '<div class="live-decision-row"><span class="live-decision-key">选定假设</span><span style="font-family:SF Mono,Fira Code,monospace;font-size:0.65rem">' + escHtml(dec.selected_hypothesis_id || '-') + '</span></div>';
         dhtml += '<div class="live-decision-row"><span class="live-decision-key">置信度</span><span>' + (dec.confidence_score != null ? dec.confidence_score.toFixed(2) : '-') + '</span></div>';
         if (rca.comparison && rca.comparison.score_gap != null) {
@@ -1887,8 +1897,61 @@ function renderLiveResult(data) {
         // Report
         if (rca.markdownReport) {
             document.getElementById('liveReportCard').style.display = '';
-            document.getElementById('liveReportContent').textContent = rca.markdownReport;
+            // Simple markdown-to-HTML: headers, bold, lists, tables
+            var md = rca.markdownReport;
+            var reportHtml = escHtml(md)
+                .replace(/^### (.+)$/gm, '<h4 style="color:var(--accent);margin:0.5rem 0 0.2rem">$1</h4>')
+                .replace(/^## (.+)$/gm, '<h3 style="color:var(--text);margin:0.6rem 0 0.3rem;font-size:0.8rem">$1</h3>')
+                .replace(/^# (.+)$/gm, '<h2 style="color:var(--accent);margin:0.6rem 0 0.3rem;font-size:0.9rem">$1</h2>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--text)">$1</strong>')
+                .replace(/^- (.+)$/gm, '<div style="padding-left:1rem;font-size:0.7rem">• $1</div>')
+                .replace(/^\d+\. (.+)$/gm, '<div style="padding-left:1rem;font-size:0.7rem">$1</div>')
+                .replace(/\|---.*\|/g, '')
+                .replace(/^\|(.+)\|$/gm, function(m) {
+                    var cells = m.split('|').filter(function(c){return c.trim();});
+                    return '<div style="display:flex;gap:0.5rem;font-size:0.65rem;padding:0.15rem 0;border-bottom:1px solid var(--border)">'
+                        + cells.map(function(c){return '<span style="flex:1">' + c.trim() + '</span>';}).join('')
+                        + '</div>';
+                });
+            document.getElementById('liveReportContent').innerHTML = reportHtml;
         }
+    }
+
+    // === LLM Proposal ===
+    var llm = data.llmProposal;
+    if (llm && llm.proposals && llm.proposals.length > 0) {
+        document.getElementById('liveLlmCard').style.display = '';
+        var lpHtml = '<div style="font-size:0.65rem;color:var(--dim);margin-bottom:0.5rem">'
+            + '\\u{1F916} AI 顾问提出的补充假设（仅供参考，不影响确定性决策）</div>';
+        for (var pi = 0; pi < llm.proposals.length; pi++) {
+            var p = llm.proposals[pi];
+            lpHtml += '<div style="background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.15);border-radius:6px;padding:0.6rem;margin-bottom:0.5rem">';
+            lpHtml += '<div style="font-size:0.8rem;font-weight:600;color:var(--purple);margin-bottom:0.3rem">' + escHtml(p.title || '未命名假设') + '</div>';
+            if (p.reasoning) {
+                lpHtml += '<div style="font-size:0.7rem;color:var(--text);margin-bottom:0.4rem">' + escHtml(p.reasoning) + '</div>';
+            }
+            if (p.candidateCause) {
+                lpHtml += '<div style="font-size:0.65rem;color:var(--dim);margin-bottom:0.3rem">\\u{1F4CC} 可能原因: ' + escHtml(p.candidateCause) + '</div>';
+            }
+            if (p.supportingSignals && p.supportingSignals.length > 0) {
+                lpHtml += '<div style="font-size:0.65rem;color:var(--dim);margin-bottom:0.3rem">\\u{1F4CA} 支持信号:</div>';
+                lpHtml += '<div style="padding-left:0.8rem">';
+                for (var si = 0; si < p.supportingSignals.length; si++) {
+                    lpHtml += '<div style="font-size:0.65rem;color:var(--dim)">• ' + escHtml(p.supportingSignals[si]) + '</div>';
+                }
+                lpHtml += '</div>';
+            }
+            if (p.verificationPlan && p.verificationPlan.probeTypes && p.verificationPlan.probeTypes.length > 0) {
+                lpHtml += '<div style="font-size:0.65rem;color:var(--dim);margin-top:0.3rem">\\u{1F50D} 验证计划: ' + p.verificationPlan.probeTypes.join(', ') + '</div>';
+            }
+            lpHtml += '<div style="margin-top:0.3rem;font-size:0.6rem;display:flex;gap:0.4rem">';
+            lpHtml += '<span style="background:rgba(167,139,250,0.1);color:var(--purple);padding:0.1rem 0.4rem;border-radius:3px">' + escHtml(p.status || 'UNVERIFIED') + '</span>';
+            lpHtml += '<span style="background:rgba(113,113,122,0.1);color:var(--dim);padding:0.1rem 0.4rem;border-radius:3px">置信度 ' + (p.priorConfidence != null ? p.priorConfidence.toFixed(2) : '-') + '</span>';
+            lpHtml += '</div>';
+            lpHtml += '</div>';
+        }
+        lpHtml += '<div style="font-size:0.6rem;color:var(--dim);margin-top:0.3rem">模型: ' + escHtml(llm.modelProvider || 'mock') + ' | 仅顾问角色</div>';
+        document.getElementById('liveLlmContent').innerHTML = lpHtml;
     }
 
     // Handle failed scenario
@@ -1922,6 +1985,7 @@ function resetLiveScenario() {
             document.getElementById('liveDecisionCard').style.display = 'none';
             document.getElementById('liveHypCard').style.display = 'none';
             document.getElementById('liveReportCard').style.display = 'none';
+            document.getElementById('liveLlmCard').style.display = 'none';
         })
         .catch(function(err) {
             alert('\u91CD\u7F6E\u5931\u8D25: ' + (err.message || '\u672A\u77E5\u9519\u8BEF'));

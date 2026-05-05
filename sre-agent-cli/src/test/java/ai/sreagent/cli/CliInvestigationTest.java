@@ -22,7 +22,6 @@ class CliInvestigationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        // Copy classpath resources to temp files for CLI file-based loading
         alertFile = tempDir.resolve("alert.json").toFile();
         evidenceFile = tempDir.resolve("evidence.json").toFile();
         outputFile = tempDir.resolve("report.md").toFile();
@@ -39,7 +38,6 @@ class CliInvestigationTest {
         InvestigateCommand cmd = new InvestigateCommand();
         CommandLine cmdLine = new CommandLine(cmd);
 
-        // Inject options via CommandLine parsing
         String[] args = {
                 "--alert", alertFile.getAbsolutePath(),
                 "--evidence", evidenceFile.getAbsolutePath(),
@@ -63,7 +61,7 @@ class CliInvestigationTest {
         runInvestigate();
 
         String report = Files.readString(outputFile.toPath());
-        assertThat(report).contains("competing_hypotheses");
+        assertThat(report).contains("竞争假设");
     }
 
     @Test
@@ -88,8 +86,8 @@ class CliInvestigationTest {
         runInvestigate();
 
         String report = Files.readString(outputFile.toPath());
-        assertThat(report).contains("deployment_regression");
-        assertThat(report).contains("downstream_dependency_latency");
+        assertThat(report).contains("近期部署引入回归缺陷");
+        assertThat(report).contains("下游依赖延迟导致超时");
     }
 
     private void runInvestigate() {

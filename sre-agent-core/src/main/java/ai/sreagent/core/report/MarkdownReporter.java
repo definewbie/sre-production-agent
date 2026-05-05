@@ -32,55 +32,57 @@ public class MarkdownReporter {
                 .collect(Collectors.toMap(Evidence::id, e -> e));
 
         // Title
-        sb.append("# Competing Hypotheses Report: ")
+        sb.append("# 竞争假设分析报告: ")
                 .append(incident.alertName())
-                .append(" on ")
+                .append(" — ")
                 .append(incident.service())
                 .append("\n\n");
 
         // Decision
-        sb.append("## Decision\n\n");
-        sb.append("Decision: ").append(decision.decisionType()).append("\n");
-        sb.append("Selected hypothesis: ").append(decision.selectedHypothesisId()).append("\n");
+        sb.append("## 决策结论\n\n");
+        sb.append("决策类型: ").append(decisionTypeZh(decision.decisionType())).append("\n");
+        sb.append("选定假设: ").append(hypothesisTitleZh(decision.selectedHypothesisId())).append("\n");
         if (!decision.competingHypotheses().isEmpty()) {
-            sb.append("Competing hypothesis: ").append(String.join(", ", decision.competingHypotheses())).append("\n");
+            sb.append("竞争假设: ").append(String.join(", ",
+                    decision.competingHypotheses().stream()
+                            .map(this::hypothesisTitleZh).toList())).append("\n");
         }
-        sb.append("Confidence score: ").append(formatScore(decision.confidenceScore())).append("\n");
-        sb.append("Score gap: ").append(formatScore(comparison.scoreGap())).append("\n\n");
+        sb.append("置信度: ").append(formatScore(decision.confidenceScore())).append("\n");
+        sb.append("分数差距: ").append(formatScore(comparison.scoreGap())).append("\n\n");
 
         // Summary
-        sb.append("## Summary\n\n");
-        sb.append(incident.service()).append(" triggered ").append(incident.alertName());
-        sb.append(" at ").append(incident.startedAt()).append(".\n\n");
+        sb.append("## 事件摘要\n\n");
+        sb.append(incident.service()).append(" 触发了 ").append(incident.alertName());
+        sb.append(" 告警，发生时间 ").append(incident.startedAt()).append("。\n\n");
         sb.append(decision.rationale()).append("\n\n");
 
         // Hypothesis Scores
-        sb.append("## Hypothesis Scores\n\n");
-        sb.append("| Hypothesis | Score | Level | Decision |\n");
+        sb.append("## 假设评分\n\n");
+        sb.append("| 假设 | 分数 | 等级 | 决策 |\n");
         sb.append("|---|---:|---|---|\n");
         confidenceResults.stream()
                 .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
                 .forEach(c -> sb.append(String.format("| %s | %.2f | %s | %s |\n",
-                        c.hypothesisId(), c.score(), c.level(), c.decision())));
+                        hypothesisTitleZh(c.hypothesisId()), c.score(), levelZh(c.level()), decisionZh(c.decision()))));
         sb.append("\n");
 
         // Leading Hypothesis
-        sb.append("## Leading Hypothesis\n\n");
-        sb.append(comparison.leadingHypothesisId()).append("\n\n");
+        sb.append("## 领先假设\n\n");
+        sb.append(hypothesisTitleZh(comparison.leadingHypothesisId())).append("\n\n");
 
         // Competing Hypotheses
         if (!comparison.competingHypothesisIds().isEmpty()) {
-            sb.append("## Competing Hypotheses\n\n");
+            sb.append("## 竞争假设\n\n");
             comparison.competingHypothesisIds().forEach(h ->
-                    sb.append("- ").append(h).append("\n"));
+                    sb.append("- ").append(hypothesisTitleZh(h)).append("\n"));
             sb.append("\n");
         }
 
         // Why Leading Leads
         ConfidenceResult leadingConf = confMap.get(comparison.leadingHypothesisId());
         if (leadingConf != null) {
-            sb.append("## Why ").append(hypothesisTitle(comparison.leadingHypothesisId()))
-                    .append(" Leads\n\n");
+            sb.append("## 为什么 ").append(hypothesisTitleZh(comparison.leadingHypothesisId()))
+                    .append(" 领先\n\n");
             for (String factor : leadingConf.supportingFactors()) {
                 sb.append("- ").append(factor).append("\n");
             }
@@ -91,8 +93,8 @@ public class MarkdownReporter {
         for (String compId : comparison.competingHypothesisIds()) {
             ConfidenceResult compConf = confMap.get(compId);
             if (compConf != null) {
-                sb.append("## Why ").append(hypothesisTitle(compId))
-                        .append(" Remains Plausible\n\n");
+                sb.append("## 为什么 ").append(hypothesisTitleZh(compId))
+                        .append(" 仍然成立\n\n");
                 for (String factor : compConf.supportingFactors()) {
                     sb.append("- ").append(factor).append("\n");
                 }
@@ -101,12 +103,12 @@ public class MarkdownReporter {
         }
 
         // Counter Evidence
-        sb.append("## Counter Evidence\n\n");
+        sb.append("## 反驳证据\n\n");
         for (ConfidenceResult c : confidenceResults.stream()
                 .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
                 .toList()) {
             if (!c.counterFactors().isEmpty()) {
-                sb.append("### Against ").append(c.hypothesisId()).append("\n\n");
+                sb.append("### 针对 ").append(hypothesisTitleZh(c.hypothesisId())).append("\n\n");
                 for (String factor : c.counterFactors()) {
                     sb.append("- ").append(factor).append("\n");
                 }
@@ -115,7 +117,7 @@ public class MarkdownReporter {
         }
 
         // Contradictions
-        sb.append("## Contradictions\n\n");
+        sb.append("## 矛盾点\n\n");
         for (ConfidenceResult c : confidenceResults.stream()
                 .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
                 .toList()) {
@@ -129,7 +131,7 @@ public class MarkdownReporter {
         sb.append("\n");
 
         // Suggested Next Probes
-        sb.append("## Suggested Next Probes\n\n");
+        sb.append("## 建议下一步探测\n\n");
         if (!decision.nextProbes().isEmpty()) {
             for (int i = 0; i < decision.nextProbes().size(); i++) {
                 sb.append(i + 1).append(". ").append(decision.nextProbes().get(i)).append("\n");
@@ -138,7 +140,7 @@ public class MarkdownReporter {
         sb.append("\n");
 
         // Calibration Notes
-        sb.append("## Calibration Notes\n\n");
+        sb.append("## 校准说明\n\n");
         ConfidenceResult firstConf = confidenceResults.stream()
                 .findFirst().orElse(null);
         if (firstConf != null && firstConf.calibrationNotes() != null) {
@@ -146,8 +148,8 @@ public class MarkdownReporter {
         }
 
         // Event Trace Note
-        sb.append("## Event Trace Note\n\n");
-        sb.append("Run the CLI with --show-trace to inspect the investigation path.\n");
+        sb.append("## 事件追踪\n\n");
+        sb.append("使用 CLI --show-trace 查看完整调查路径。\n");
 
         return sb.toString();
     }
@@ -158,5 +160,48 @@ public class MarkdownReporter {
 
     private String hypothesisTitle(String hypothesisId) {
         return hypothesisId.replace("hyp_", "").replace("_", " ");
+    }
+
+    private static final Map<String, String> HYP_TITLE_ZH = Map.of(
+            "hyp_deployment_regression", "近期部署引入回归缺陷",
+            "hyp_downstream_dependency_latency", "下游依赖延迟导致超时",
+            "hyp_pod_oom_killed", "Pod 内存溢出（OOMKilled）",
+            "hyp_pod_crash_loop", "容器崩溃循环"
+    );
+
+    private String hypothesisTitleZh(String hypothesisId) {
+        return HYP_TITLE_ZH.getOrDefault(hypothesisId, hypothesisTitle(hypothesisId));
+    }
+
+    private String decisionTypeZh(String decisionType) {
+        return switch (decisionType) {
+            case "likely_root_cause" -> "高置信根因";
+            case "probable_root_cause" -> "可能根因";
+            case "competing_hypotheses" -> "竞争假设";
+            case "uncertain_requires_more_evidence" -> "不确定（需更多证据）";
+            case "insufficient_evidence" -> "证据不足";
+            default -> decisionType;
+        };
+    }
+
+    private String levelZh(String level) {
+        return switch (level) {
+            case "high" -> "高";
+            case "medium" -> "中";
+            case "low" -> "低";
+            case "critical" -> "关键";
+            default -> level != null ? level : "-";
+        };
+    }
+
+    private String decisionZh(String decision) {
+        return switch (decision) {
+            case "likely_root_cause" -> "高置信根因";
+            case "probable_root_cause" -> "可能根因";
+            case "competing" -> "竞争假设";
+            case "uncertain" -> "不确定";
+            case "insufficient_evidence" -> "证据不足";
+            default -> decision != null ? decision : "-";
+        };
     }
 }

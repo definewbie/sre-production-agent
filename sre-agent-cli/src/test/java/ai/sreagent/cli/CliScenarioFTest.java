@@ -50,7 +50,7 @@ class CliScenarioFTest {
         runInvestigate();
 
         String report = Files.readString(outputFile.toPath());
-        assertThat(report).contains("pod_crash_loop");
+        assertThat(report).contains("容器崩溃循环");
     }
 
     @Test
@@ -58,7 +58,7 @@ class CliScenarioFTest {
         runInvestigate();
 
         String report = Files.readString(outputFile.toPath());
-        assertThat(report).contains("likely_root_cause");
+        assertThat(report).contains("高置信根因");
     }
 
     @Test

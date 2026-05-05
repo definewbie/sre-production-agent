@@ -57,7 +57,7 @@ class ScenarioFApiTest {
 
         mockMvc.perform(get("/api/investigations/" + incidentId + "/report"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("pod_crash_loop")));
+                .andExpect(content().string(containsString("竞争假设分析报告")));
     }
 
     @Test

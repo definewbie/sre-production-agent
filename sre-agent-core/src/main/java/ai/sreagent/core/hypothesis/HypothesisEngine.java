@@ -19,27 +19,27 @@ public class HypothesisEngine {
     static {
         TEMPLATES.put("deployment_regression", new HypothesisTemplate(
                 "hyp_deployment_regression",
-                "Recent deployment introduced a regression",
+                "近期部署引入了回归缺陷",
                 "change_regression",
-                "Recent deployment or config change caused elevated errors"
+                "最近的部署或配置变更导致了错误率升高"
         ));
         TEMPLATES.put("downstream_dependency_latency", new HypothesisTemplate(
                 "hyp_downstream_dependency_latency",
-                "Downstream dependency latency caused timeout errors",
+                "下游依赖延迟导致超时错误",
                 "dependency_latency",
-                "payment-service latency may have caused order-service timeouts"
+                "payment-service 延迟可能导致了 order-service 超时"
         ));
         TEMPLATES.put("pod_oom_killed", new HypothesisTemplate(
                 "hyp_pod_oom_killed",
-                "Pod OOMKilled or resource pressure caused service errors",
+                "Pod 内存溢出（OOMKilled）导致服务异常",
                 "resource_pressure",
-                "Pod memory pressure or OOMKilled events caused instability"
+                "Pod 内存压力或 OOMKilled 事件导致服务不稳定"
         ));
         TEMPLATES.put("pod_crash_loop", new HypothesisTemplate(
                 "hyp_pod_crash_loop",
-                "Container crash loop caused service instability",
+                "容器崩溃循环导致服务不稳定",
                 "kubernetes_crash_loop",
-                "Container is repeatedly crashing or restarting in Kubernetes"
+                "容器在 Kubernetes 中反复崩溃或重启"
         ));
     }
 

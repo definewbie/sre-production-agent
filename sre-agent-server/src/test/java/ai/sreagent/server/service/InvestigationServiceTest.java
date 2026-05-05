@@ -52,7 +52,7 @@ class InvestigationServiceTest {
         InvestigationResponse response = service.runScenarioE();
 
         String report = service.getReport(response.incidentId()).orElseThrow();
-        assertTrue(report.contains("Competing Hypotheses Report"));
+        assertTrue(report.contains("竞争假设分析报告"));
     }
 
     @Test
