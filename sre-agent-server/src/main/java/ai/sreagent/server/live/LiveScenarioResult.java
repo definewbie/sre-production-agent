@@ -22,7 +22,15 @@ public record LiveScenarioResult(
     LlmHypothesisProposalResult llmProposal,
     LiveEvidenceReport evidenceReport,
     long durationMs,
-    String errorMessage
+    String errorMessage,
+    // Time window fields (Phase 4)
+    int waitSeconds,
+    int lookbackSeconds,
+    int stepSeconds,
+    String evidenceWindowStart,
+    String evidenceWindowEnd,
+    // Scenario G dynamic report (Phase 4)
+    String scenarioReport
 ) {
 
     public enum LiveScenarioStatus {
@@ -34,7 +42,8 @@ public record LiveScenarioResult(
      */
     public static LiveScenarioResult running(String scenarioId, String scenarioName) {
         return new LiveScenarioResult(scenarioId, scenarioName, "collecting",
-                LiveScenarioStatus.RUNNING, null, null, null, null, 0, null);
+                LiveScenarioStatus.RUNNING, null, null, null, null, 0, null,
+                0, 0, 0, null, null, null);
     }
 
     /**
@@ -44,10 +53,17 @@ public record LiveScenarioResult(
                                                 InvestigationResult baseRca,
                                                 LlmHypothesisProposalResult llmProposal,
                                                 LiveEvidenceReport evidenceReport,
-                                                long durationMs) {
+                                                long durationMs,
+                                                int waitSeconds, int lookbackSeconds,
+                                                int stepSeconds,
+                                                String evidenceWindowStart,
+                                                String evidenceWindowEnd,
+                                                String scenarioReport) {
         return new LiveScenarioResult(scenarioId, scenarioName, "completed",
                 LiveScenarioStatus.COMPLETED, baseRca.incidentId(), baseRca,
-                llmProposal, evidenceReport, durationMs, null);
+                llmProposal, evidenceReport, durationMs, null,
+                waitSeconds, lookbackSeconds, stepSeconds,
+                evidenceWindowStart, evidenceWindowEnd, scenarioReport);
     }
 
     /**
@@ -56,6 +72,7 @@ public record LiveScenarioResult(
     public static LiveScenarioResult failed(String scenarioId, String scenarioName,
                                              String errorMessage) {
         return new LiveScenarioResult(scenarioId, scenarioName, "failed",
-                LiveScenarioStatus.FAILED, null, null, null, null, 0, errorMessage);
+                LiveScenarioStatus.FAILED, null, null, null, null, 0, errorMessage,
+                0, 0, 0, null, null, null);
     }
 }

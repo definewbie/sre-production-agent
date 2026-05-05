@@ -89,6 +89,9 @@ public class LiveScenarioService {
                 mode, faultMode, waitSeconds, runLlmProposal, isSimulation);
 
         try {
+            // Compute effective wait time (used in both live and simulation modes)
+            int effectiveWait = Math.max(waitSeconds, 15);
+
             // Phase 1: Inject fault (live mode only)
             if (!isSimulation) {
                 injectFault(faultMode, faultParams);
@@ -101,7 +104,6 @@ public class LiveScenarioService {
                 log.info("Traffic generation complete: {}/{} requests succeeded (failures expected under fault)", successes, trafficCount);
 
                 // Wait for metrics propagation (Prometheus scrape interval ~15s)
-                int effectiveWait = Math.max(waitSeconds, 15);
                 if (effectiveWait > 0) {
                     log.info("Waiting {}s for metrics propagation...", effectiveWait);
                     Thread.sleep(effectiveWait * 1000L);
@@ -173,9 +175,26 @@ public class LiveScenarioService {
             }
 
             long durationMs = System.currentTimeMillis() - startTime;
+
+            // Compute evidence time window
+            int lookbackSec = 300;  // 5 minutes default
+            int stepSec = 15;
+            Instant windowEnd = Instant.now();
+            Instant windowStart = windowEnd.minusSeconds(lookbackSec);
+
+            // Generate Scenario G dynamic Chinese report
+            String scenarioReport = buildScenarioGReport(
+                    faultMode, faultParams, isSimulation,
+                    rcaResult, mergedReport, llmProposal,
+                    effectiveWait, lookbackSec, stepSec,
+                    windowStart, windowEnd, durationMs);
+
             LiveScenarioResult result = LiveScenarioResult.completed(
                     scenarioId, "Scenario G: Payment Latency → Order Error Spike",
-                    rcaResult, llmProposal, mergedReport, durationMs);
+                    rcaResult, llmProposal, mergedReport, durationMs,
+                    effectiveWait, lookbackSec, stepSec,
+                    windowStart.toString(), windowEnd.toString(),
+                    scenarioReport);
 
             resultStore.put(scenarioId, result);
             log.info("Scenario G completed in {}ms", durationMs);
@@ -319,6 +338,163 @@ public class LiveScenarioService {
             log.warn("LLM proposal failed: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Build Scenario G dynamic Chinese report.
+     * This is the Scenario-G-specific narrative report, replacing the generic
+     * MarkdownReporter template with context-aware Chinese explanations.
+     */
+    private String buildScenarioGReport(
+            String faultMode, Map<String, Object> faultParams, boolean isSimulation,
+            InvestigationResult rca, LiveEvidenceReport evidenceReport,
+            LlmHypothesisProposalResult llmProposal,
+            int waitSeconds, int lookbackSeconds, int stepSeconds,
+            Instant windowStart, Instant windowEnd, long durationMs) {
+
+        StringBuilder sb = new StringBuilder();
+
+        // Title
+        sb.append("# Scenario G 动态调查报告\n\n");
+
+        // Fault injection config
+        sb.append("## 故障注入配置\n\n");
+        sb.append("| 参数 | 值 |\n");
+        sb.append("|---|---|\n");
+        sb.append("| 模式 | ").append(isSimulation ? "模拟（仿真）" : "真实注入").append(" |\n");
+        sb.append("| 故障类型 | ").append(faultMode).append(" |\n");
+        if (faultParams != null) {
+            if (faultParams.containsKey("latencyMs")) sb.append("| 注入延迟 | ").append(faultParams.get("latencyMs")).append("ms |\n");
+            if (faultParams.containsKey("errorRate")) sb.append("| 错误率 | ").append(faultParams.get("errorRate")).append(" |\n");
+            if (faultParams.containsKey("timeoutMs")) sb.append("| 超时时间 | ").append(faultParams.get("timeoutMs")).append("ms |\n");
+        }
+        sb.append("| 注入目标 | payment-service |\n");
+        sb.append("\n");
+
+        // Time window
+        sb.append("## 证据时间窗口\n\n");
+        sb.append("| 参数 | 值 |\n");
+        sb.append("|---|---|\n");
+        sb.append("| 等待时间 | ").append(waitSeconds).append("秒 |\n");
+        sb.append("| 回溯窗口 | ").append(lookbackSeconds).append("秒 |\n");
+        sb.append("| 查询步长 | ").append(stepSeconds).append("秒 |\n");
+        sb.append("| 窗口起始 | ").append(windowStart).append(" |\n");
+        sb.append("| 窗口结束 | ").append(windowEnd).append(" |\n");
+        sb.append("\n");
+
+        // Evidence summary
+        sb.append("## 证据采集摘要\n\n");
+        sb.append("共采集 **").append(evidenceReport.totalEvidenceCount()).append("** 条证据");
+        sb.append("，总耗时 ").append(durationMs / 1000).append("秒。\n\n");
+
+        if (!evidenceReport.sources().isEmpty()) {
+            sb.append("| 数据源 | 可用 | 证据数 | 类型 |\n");
+            sb.append("|---|---|---:|---|\n");
+            for (var entry : evidenceReport.sources().entrySet()) {
+                var src = entry.getValue();
+                sb.append("| ").append(entry.getKey())
+                  .append(" | ").append(src.available() ? "✓" : "✗")
+                  .append(" | ").append(src.evidenceCount())
+                  .append(" | ").append(String.join(", ", src.evidenceTypes()))
+                  .append(" |\n");
+            }
+            sb.append("\n");
+        }
+
+        if (!evidenceReport.warnings().isEmpty()) {
+            sb.append("**警告：**\n");
+            for (String w : evidenceReport.warnings()) {
+                sb.append("- ").append(w).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // Evidence assessment
+        int totalEv = evidenceReport.totalEvidenceCount();
+        if (totalEv < 10) {
+            sb.append("> 当前时间窗口内采集到的指标信号偏少（").append(totalEv).append(" 条），");
+            sb.append("建议增大 `lookbackSeconds`（当前 ").append(lookbackSeconds).append("）或 `waitSeconds`（当前 ").append(waitSeconds).append("）以获取更充分的证据。\n\n");
+        }
+
+        // Decision summary
+        var decision = rca.decision();
+        var comparison = rca.comparison();
+        sb.append("## 决策结论\n\n");
+        sb.append("- **决策类型：** ").append(decisionTypeZh(decision.decisionType())).append("\n");
+        sb.append("- **选定假设：** ").append(decision.selectedHypothesisId()).append("\n");
+        sb.append("- **置信度：** ").append(String.format("%.2f", decision.confidenceScore())).append("\n");
+        if (comparison != null) {
+            sb.append("- **分数差距：** ").append(String.format("%.2f", comparison.scoreGap())).append("\n");
+            if (comparison.scoreGap() < 0.05) {
+                sb.append("\n> **注意：** 排名前两位的假设分数极为接近，当前判断为近似并列。");
+                sb.append("系统未强制选择唯一根因，建议通过后续探测（post-probe RCA re-run）进一步区分。\n");
+            }
+        }
+        sb.append("\n");
+
+        // Hypothesis breakdown
+        sb.append("## 假设对比\n\n");
+        if (rca.confidenceResults() != null && !rca.confidenceResults().isEmpty()) {
+            sb.append("| 排名 | 假设 | 分数 | 支持证据 | 反驳证据 |\n");
+            sb.append("|---:|---|---:|---:|---:|\n");
+            var sorted = rca.confidenceResults().stream()
+                    .sorted(java.util.Comparator.comparingDouble(
+                            ai.sreagent.core.domain.ConfidenceResult::score).reversed())
+                    .toList();
+            int rank = 1;
+            for (var cr : sorted) {
+                var vr = rca.verificationResults().stream()
+                        .filter(v -> v.hypothesisId().equals(cr.hypothesisId()))
+                        .findFirst().orElse(null);
+                int sup = vr != null ? vr.supportingEvidenceIds().size() : 0;
+                int cnt = vr != null ? vr.counterEvidenceIds().size() : 0;
+                sb.append("| ").append(rank++).append(" | ").append(cr.hypothesisId())
+                  .append(" | ").append(String.format("%.2f", cr.score()))
+                  .append(" | ").append(sup).append(" | ").append(cnt).append(" |\n");
+            }
+            sb.append("\n");
+        }
+
+        // LLM Proposal (if available)
+        if (llmProposal != null) {
+            sb.append("## AI 补充假设（仅供参考，不影响 RCA 结论）\n\n");
+            sb.append("LLM 提出了 ").append(llmProposal.proposals().size()).append(" 条补充假设：\n\n");
+            for (var prop : llmProposal.proposals()) {
+                sb.append("- **").append(prop.title()).append("**（置信度 ")
+                  .append(String.format("%.2f", prop.priorConfidence())).append("）：")
+                  .append(prop.reasoning()).append("\n");
+            }
+            sb.append("\n> 以上假设由 LLM 生成，仅供人工参考。确定性 RCA 决策不受 LLM 影响。\n\n");
+        }
+
+        // Next steps
+        sb.append("## 建议后续操作\n\n");
+        if (decision.nextProbes() != null && !decision.nextProbes().isEmpty()) {
+            for (int i = 0; i < decision.nextProbes().size(); i++) {
+                sb.append(i + 1).append(". ").append(decision.nextProbes().get(i)).append("\n");
+            }
+        } else {
+            sb.append("无需额外探测。\n");
+        }
+        sb.append("\n");
+
+        // Footer
+        sb.append("---\n");
+        sb.append("*报告生成时间：").append(Instant.now()).append("*\n");
+        sb.append("*决策方式：确定性规则引擎（LLM 仅做建议，不参与评分）*\n");
+
+        return sb.toString();
+    }
+
+    private String decisionTypeZh(String decisionType) {
+        return switch (decisionType) {
+            case "likely_root_cause" -> "高置信根因";
+            case "probable_root_cause" -> "可能根因";
+            case "competing_hypotheses" -> "竞争假设";
+            case "uncertain_requires_more_evidence" -> "不确定（需更多证据）";
+            case "insufficient_evidence" -> "证据不足";
+            default -> decisionType;
+        };
     }
 
     private List<Evidence> buildFallbackEvidence() {
