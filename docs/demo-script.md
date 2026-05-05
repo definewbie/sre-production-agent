@@ -22,7 +22,7 @@ Run these **before the interview** to avoid live debugging:
 cd ~/work/projects/sre-production-agent
 source ~/.zshrc
 mvn test
-# Expected: 88 tests passing
+# Expected: 560 tests passing
 
 # 2. Build CLI jar
 mvn -pl sre-agent-cli package -DskipTests
@@ -203,22 +203,37 @@ If the LLM endpoint is unavailable or returns an error:
 
 ---
 
-## Demo Part 3: Web UI (1 minute)
+## Demo Part 3: Web UI — 中文报告 + LLM Proposal 卡片（1.5 分钟）
 
-### Step 1: Open browser
+### 步骤 1：打开浏览器
 
-Navigate to http://localhost:8080/
+导航到 http://localhost:8080/
 
-### Step 2: Click "Run Scenario E"
+### 步骤 2：点击 "Run Scenario E"
 
-**Say:** "The Web UI shows the same results — decision, hypothesis scores as a bar chart, event trace table, and the full Markdown report."
+**讲解：** "Web UI 展示了相同的结果——注意决策类型现在显示为中文'竞争假设'，假设标题也是中文。"
 
-### Step 3: Point out the UI elements
+### 步骤 3：指出 Phase 4 新增 UI 元素
 
-- **Decision card** — shows `competing_hypotheses`, score gap = 0.06
-- **Score bars** — deployment regression (green/leading), downstream latency (amber/competing), OOM killed (gray/insufficient)
-- **Event trace table** — every workflow step with timestamp and detail
-- **Markdown report** — full RCA report in a scrollable panel
+- **决策卡片**——显示 **"竞争假设"**（Phase 4 中文化映射），分数差距 = 0.06
+- **评分柱状图**——"近期部署引入了回归缺陷"（绿色/领先）、"下游依赖延迟导致服务降级"（黄色/竞争）、"Pod OOMKilled 或资源超限"（灰色/证据不足）
+- **Markdown 报告**——现在输出**中文报告**（"竞争假设分析报告"），包含概要/调查时间线/假设评分/调查决策
+- **LLM Proposal 卡片**——如果触发了 LLM 假设提案，会在下方显示卡片：提案标题、推理过程、观测信号、验证计划、置信度、状态
+
+### 步骤 4：展示实时排查控制台（可选）
+
+点击右上角 **"🔍 实时排查"** 按钮：
+
+**讲解：** "这是 Step V 新增的中文调查控制台。可以选择故障模式（延迟/错误/超时/混合），选择运行模式（模拟/实时），然后一键触发多信号 RCA。"
+
+**API 演示：**
+```bash
+# 模拟模式（无需 live 端点）
+curl -s http://localhost:8080/api/live-scenario/simulate | python3 -m json.tool
+
+# 实时模式（需要 kind + demo services）
+curl -s -X POST http://localhost:8080/api/live-scenario/run | python3 -m json.tool
+```
 
 ---
 
@@ -322,7 +337,7 @@ If nothing works:
 cd ~/work/projects/sre-production-agent
 source ~/.zshrc
 mvn test
-# 预期结果：88 个测试全部通过
+# 预期结果：560 个测试全部通过
 
 # 2. 构建 CLI jar 包
 mvn -pl sre-agent-cli package -DskipTests
@@ -500,7 +515,7 @@ curl -s -X POST http://localhost:8080/api/investigations/{id}/llm-summary | pyth
 
 ---
 
-## 演示第三部分：Web UI（1 分钟）
+## 演示第三部分：Web UI — 中文报告 + LLM Proposal 卡片（1.5 分钟）
 
 ### 步骤 1：打开浏览器
 
@@ -508,14 +523,20 @@ curl -s -X POST http://localhost:8080/api/investigations/{id}/llm-summary | pyth
 
 ### 步骤 2：点击 "Run Scenario E"
 
-**讲解：** "Web UI 展示了相同的结果——决策、假设评分柱状图、事件追踪表和完整的 Markdown 报告。"
+**讲解：** "Web UI 展示了相同的结果——注意决策类型现在显示为中文'竞争假设'，假设标题也是中文。"
 
-### 步骤 3：指出 UI 元素
+### 步骤 3：指出 Phase 4 新增 UI 元素
 
-- **决策卡片（Decision card）**——显示 `competing_hypotheses`，分数差距 = 0.06
-- **评分柱状图（Score bars）**——部署回归（绿色/领先）、下游延迟（黄色/竞争）、OOM 终止（灰色/证据不足）
-- **事件追踪表（Event trace table）**——每个工作流步骤，带时间戳和详情
-- **Markdown 报告（Markdown report）**——完整的 RCA 报告，在可滚动面板中展示
+- **决策卡片**——显示 **"竞争假设"**（Phase 4 中文化映射），分数差距 = 0.06
+- **评分柱状图**——"近期部署引入了回归缺陷"（绿色/领先）、"下游依赖延迟导致服务降级"（黄色/竞争）、"Pod OOMKilled 或资源超限"（灰色/证据不足）
+- **Markdown 报告**——现在输出**中文报告**（"竞争假设分析报告"），包含概要/调查时间线/假设评分/调查决策
+- **LLM Proposal 卡片**——如果触发了 LLM 假设提案，会在下方显示卡片：提案标题、推理过程、观测信号、验证计划、置信度、状态
+
+### 步骤 4：展示实时排查控制台（可选）
+
+点击右上角 **"🔍 实时排查"** 按钮：
+
+**讲解：** "这是 Step V 新增的中文调查控制台。可以选择故障模式（延迟/错误/超时/混合），选择运行模式（模拟/实时），然后一键触发多信号 RCA。"
 
 ---
 
@@ -548,12 +569,14 @@ Incident created
 Evidence loaded
 Hypotheses generated: 3
 ...
-Decision: competing_hypotheses
-Selected: hyp_deployment_regression (0.64)
-Competing: hyp_downstream_dependency_latency (0.58)
+Decision: 竞争假设
+Selected: hyp_deployment_regression (0.64) — "近期部署引入了回归缺陷"
+Competing: hyp_downstream_dependency_latency (0.58) — "下游依赖延迟导致服务降级"
 Score gap: 0.06
 Report written to: /tmp/rca-report.md
 ```
+
+**注意：** Phase 4 之后，CLI 报告输出为中文（"竞争假设分析报告"），但 CLI 控制台日志仍为英文。
 
 ### REST API
 
@@ -570,6 +593,8 @@ Report written to: /tmp/rca-report.md
   }
 }
 ```
+
+**注意：** REST API 的 JSON 字段保持英文 key（`decisionType`、`selectedHypothesisId` 等），但 UI 展示会自动映射为中文（"竞争假设"→"高置信根因"等）。Markdown 报告端点返回中文报告。
 
 ---
 

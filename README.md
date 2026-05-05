@@ -427,6 +427,30 @@ Multi-signal evidence → RCA → Decision
 
 ---
 
+## Phase 4 — 中文化全链路 + LLM Proposal UI
+
+Phase 4 将整个 RCA 输出链路从英文转为中文，并新增 LLM Proposal UI 卡片展示。
+
+**变更范围：**
+
+| 组件 | 改动 | 说明 |
+|------|------|------|
+| `HypothesisEngine` | 假设 title / candidateCause 中文 | deployment_regression → "近期部署引入了回归缺陷" 等 4 个模板 |
+| `MarkdownReporter` | 全中文报告输出 | 标题："竞争假设分析报告"，段落：概要/调查时间线/假设评分/调查决策 |
+| `index.html` | decision_type 中文映射 | `likely_root_cause` → "高置信根因" 等 5 种映射 |
+| `index.html` | LLM Proposal 卡片 | 显示 AI 提案的 title/reasoning/signals/verificationPlan/confidence/status |
+| `index.html` | Report 渲染增强 | markdown→HTML 转换（标题/加粗/列表/表格） |
+| 6 个测试文件 | 断言同步更新 | 所有断言从英文改中文 |
+
+**中文映射表：**
+
+- 假设：`deployment_regression`→"近期部署引入了回归缺陷"、`downstream_dependency`→"下游依赖延迟导致服务降级"、`pod_oom`→"Pod OOMKilled 或资源超限"、`pod_crash_loop`→"容器崩溃循环导致服务不可用"
+- 决策：`LIKELY_ROOT_CAUSE`→"高置信根因"、`PROBABLE_ROOT_CAUSE`→"可能根因"、`COMPETING_HYPOTHESES`→"竞争假设"、`UNCERTAIN`→"不确定-需更多证据"、`INSUFFICIENT_DATA`→"数据不足"
+
+**560 tests, 0 failures.**
+
+---
+
 ## LLM Hypothesis Proposer (Step R)
 
 Step R adds an **LLM Hypothesis Proposer** to the `sre-agent-llm` module that generates advisory hypothesis proposals when the deterministic RCA workflow produces inconclusive results. This bridges the gap between deterministic investigation and AI-assisted exploration.
@@ -699,7 +723,7 @@ curl -X POST http://localhost:8080/api/investigations/{incidentId}/llm-summary
 - Maven multi-module
 - Jackson (JSON serialization)
 - Picocli (CLI framework)
-- JUnit 5 + AssertJ (548 tests)
+- JUnit 5 + AssertJ (560 tests)
 - Static HTML + vanilla JS (minimal Web UI)
 
 ---
@@ -859,10 +883,10 @@ See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 ||| R | LLM Hypothesis Proposer — sre-agent-llm | ✅ Done |
 ||| S | Probe Execution Framework v1 — sre-agent-probe-executor | ✅ Done |
 ||| T | Local Observability Stack — health checking + stack management + Live Lab Status UI | ✅ Done |
-||| U | Instrumented Demo Services — fault injection + real metrics/logs/traces | ✅ Done |
-||| U | Instrumented Demo Services | 🔲 Upcoming |
-||| V | Complex Live RCA Scenarios | 🔲 Upcoming |
-||| W | Post-Probe RCA Re-run Policy | 🔲 Upcoming |
+|| U | Instrumented Demo Services — fault injection + real metrics/logs/traces | ✅ Done |
+|| V | Complex Live RCA Scenarios + 中文 Investigation Console | ✅ Done |
+|| Phase 4 | 中文化全链路 (Hypothesis/Report/Decision type) + LLM Proposal UI 卡片 | ✅ Done |
+|| W | Post-Probe RCA Re-run Policy | 🔲 Upcoming |
 
 ---
 
