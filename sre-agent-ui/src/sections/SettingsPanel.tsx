@@ -1,173 +1,165 @@
 import { useState } from 'react'
-import { defaultSettings } from '../data/mockData'
-import { Settings, Save } from 'lucide-react'
+
+interface Settings {
+  waitSeconds: string
+  lookbackSeconds: string
+  stepSeconds: string
+  apiBaseUrl: string
+  environmentName: string
+  refreshInterval: string
+  autoRefresh: boolean
+  showRawEvidence: boolean
+  enableMockData: boolean
+  errorRateThreshold: string
+  p95Threshold: string
+  rcaScoreDiff: string
+}
+
+function SettingInput({ label, value, onChange, unit, hint }: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  unit?: string
+  hint?: string
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
+      <label style={{ width: 150, fontSize: 14, color: 'var(--text)', flexShrink: 0 }}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <input
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          style={{
+            height: 34,
+            border: '1px solid #c8d3e1',
+            borderRadius: 6,
+            padding: '0 12px',
+            fontSize: 14,
+            color: 'var(--text)',
+            width: unit ? 120 : 260,
+            outline: 'none',
+          }}
+        />
+        {unit && <span style={{ marginLeft: 8, fontSize: 13, color: 'var(--muted)' }}>{unit}</span>}
+      </div>
+    </div>
+  )
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <span style={{ fontSize: 14, color: 'var(--text)' }}>{label}</span>
+      <div
+        onClick={onChange}
+        style={{
+          width: 44,
+          height: 24,
+          borderRadius: 12,
+          background: checked ? 'var(--blue)' : '#d0d5dd',
+          position: 'relative',
+          cursor: 'pointer',
+          transition: 'background 0.2s',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{
+          width: 18,
+          height: 18,
+          borderRadius: '50%',
+          background: '#fff',
+          position: 'absolute',
+          top: 3,
+          left: checked ? 23 : 3,
+          transition: 'left 0.2s',
+        }} />
+      </div>
+    </div>
+  )
+}
 
 export default function SettingsPanel() {
-  const [settings, setSettings] = useState(defaultSettings)
+  const [s, setS] = useState<Settings>({
+    waitSeconds: '30',
+    lookbackSeconds: '300',
+    stepSeconds: '15',
+    apiBaseUrl: 'http://localhost:8080',
+    environmentName: 'local-kind-demo',
+    refreshInterval: '30',
+    autoRefresh: true,
+    showRawEvidence: false,
+    enableMockData: true,
+    errorRateThreshold: '1.0',
+    p95Threshold: '1000',
+    rcaScoreDiff: '0.10',
+  })
 
-  const update = (key: string, value: string | number | boolean) => {
-    setSettings(prev => ({ ...prev, [key]: value }))
+  const upd = (key: keyof Settings, value: string | boolean) => {
+    setS(prev => ({ ...prev, [key]: value }))
   }
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">设置</h1>
-          <div className="page-subtitle">SRE Agent 配置参数</div>
-        </div>
-        <button className="btn btn-primary btn-sm">
-          <Save size={14} />
-          保存设置
-        </button>
+      {/* Breadcrumb */}
+      <div className="breadcrumb" style={{ marginBottom: 4 }}>
+        设置 ＞ 时间窗口 / API / 显示偏好
       </div>
 
-      <div className="settings-grid">
-        {/* Left Column: Analysis */}
-        <div className="card">
-          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Settings size={16} />
-            分析参数
-          </div>
+      {/* Page Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <h1 className="page-title">7 设置</h1>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost btn-sm">重置</button>
+          <button className="btn btn-primary btn-sm">保存</button>
+        </div>
+      </div>
 
-          <div className="form-group">
-            <label className="form-label">等待时间（秒）</label>
-            <input
-              className="form-input"
-              type="number"
-              value={settings.waitSeconds}
-              onChange={e => update('waitSeconds', Number(e.target.value))}
-            />
-            <div className="form-hint">异常注入后等待数据采集的时间</div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">回溯窗口（秒）</label>
-            <input
-              className="form-input"
-              type="number"
-              value={settings.lookbackSeconds}
-              onChange={e => update('lookbackSeconds', Number(e.target.value))}
-            />
-            <div className="form-hint">RCA 分析的数据回溯范围</div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">采集步长（秒）</label>
-            <input
-              className="form-input"
-              type="number"
-              value={settings.stepSeconds}
-              onChange={e => update('stepSeconds', Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">错误率阈值（%）</label>
-            <input
-              className="form-input"
-              type="number"
-              step="0.1"
-              value={settings.errorRateThreshold}
-              onChange={e => update('errorRateThreshold', Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">P95 延迟阈值（ms）</label>
-            <input
-              className="form-input"
-              type="number"
-              value={settings.p95Threshold}
-              onChange={e => update('p95Threshold', Number(e.target.value))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">RCA 得分差阈值</label>
-            <input
-              className="form-input"
-              type="number"
-              step="0.01"
-              value={settings.rcaScoreDiff}
-              onChange={e => update('rcaScoreDiff', Number(e.target.value))}
-            />
-            <div className="form-hint">候选根因得分差小于此值时判定为"竞争假设"</div>
+      {/* 2x2 Grid */}
+      <div style={{ display: 'flex', gap: 20, marginBottom: 20 }}>
+        {/* Top Left: Time Window */}
+        <div className="card" style={{ flex: 1, padding: 20 }}>
+          <div className="card-title" style={{ marginBottom: 16 }}>时间窗口默认值</div>
+          <SettingInput label="故障注入后等待" value={s.waitSeconds} onChange={v => upd('waitSeconds', v)} unit="秒 waitSeconds" />
+          <SettingInput label="证据查询窗口" value={s.lookbackSeconds} onChange={v => upd('lookbackSeconds', v)} unit="秒 lookbackSeconds" />
+          <SettingInput label="查询粒度" value={s.stepSeconds} onChange={v => upd('stepSeconds', v)} unit="秒 stepSeconds" />
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.6 }}>
+            说明：真实 RCA 需要覆盖 scrape / ingestion / trace 写入延迟，不建议使用过短窗口。
           </div>
         </div>
 
-        {/* Right Column: System */}
-        <div>
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div className="card-title">系统配置</div>
-
-            <div className="form-group">
-              <label className="form-label">API 地址</label>
-              <input
-                className="form-input"
-                type="text"
-                value={settings.apiBaseUrl}
-                onChange={e => update('apiBaseUrl', e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">环境名称</label>
-              <input
-                className="form-input"
-                type="text"
-                value={settings.environmentName}
-                onChange={e => update('environmentName', e.target.value)}
-              />
-            </div>
-
-            <div className="setting-row">
-              <div>
-                <div style={{ fontWeight: 600 }}>自动刷新</div>
-                <div className="form-hint">每隔 {settings.refreshInterval}s 自动刷新数据</div>
-              </div>
-              <div
-                className={'toggle' + (settings.autoRefresh ? ' active' : '')}
-                onClick={() => update('autoRefresh', !settings.autoRefresh)}
-              >
-                <div className="toggle-knob" />
-              </div>
-            </div>
-
-            <div className="setting-row">
-              <div>
-                <div style={{ fontWeight: 600 }}>显示原始证据</div>
-                <div className="form-hint">在证据页面显示完整 JSON</div>
-              </div>
-              <div
-                className={'toggle' + (settings.showRawEvidence ? ' active' : '')}
-                onClick={() => update('showRawEvidence', !settings.showRawEvidence)}
-              >
-                <div className="toggle-knob" />
-              </div>
-            </div>
-
-            <div className="setting-row">
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--orange)' }}>使用模拟数据</div>
-                <div className="form-hint">当前为演示模式，API 接入后关闭</div>
-              </div>
-              <div
-                className={'toggle' + (settings.enableMockData ? ' active' : '')}
-                onClick={() => update('enableMockData', !settings.enableMockData)}
-              >
-                <div className="toggle-knob" />
-              </div>
-            </div>
+        {/* Top Right: API & Environment */}
+        <div className="card" style={{ flex: 1, padding: 20 }}>
+          <div className="card-title" style={{ marginBottom: 16 }}>API 与环境</div>
+          <SettingInput label="API Base URL" value={s.apiBaseUrl} onChange={v => upd('apiBaseUrl', v)} />
+          <SettingInput label="环境名称" value={s.environmentName} onChange={v => upd('environmentName', v)} />
+          <SettingInput label="刷新间隔" value={s.refreshInterval} onChange={v => upd('refreshInterval', v)} unit="秒" />
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.6 }}>
+            说明：第一版可使用 mock data，后续逐区接入真实 API。
           </div>
+        </div>
+      </div>
 
-          <div className="card">
-            <div className="card-title">关于</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 2 }}>
-              <div><strong>SRE Production Agent</strong> v0.4.0</div>
-              <div>确定性 RCA 决策代理 + 交互式工作台</div>
-              <div>构建时间：2025-05-20</div>
-            </div>
+      <div style={{ display: 'flex', gap: 20 }}>
+        {/* Bottom Left: Display Preferences */}
+        <div className="card" style={{ flex: 1, padding: 20 }}>
+          <div className="card-title" style={{ marginBottom: 16 }}>显示偏好</div>
+          <Toggle label="自动刷新" checked={s.autoRefresh} onChange={() => upd('autoRefresh', !s.autoRefresh)} />
+          <Toggle label="显示 Raw Evidence" checked={s.showRawEvidence} onChange={() => upd('showRawEvidence', !s.showRawEvidence)} />
+          <Toggle label="启用 Mock Data" checked={s.enableMockData} onChange={() => upd('enableMockData', !s.enableMockData)} />
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.6 }}>
+            说明：mock data 必须明确标记，不能伪装成真实 API 数据。
+          </div>
+        </div>
+
+        {/* Bottom Right: Alerts & Thresholds */}
+        <div className="card" style={{ flex: 1, padding: 20 }}>
+          <div className="card-title" style={{ marginBottom: 16 }}>告警与阈值</div>
+          <SettingInput label="错误率异常阈值" value={s.errorRateThreshold} onChange={v => upd('errorRateThreshold', v)} unit="%" />
+          <SettingInput label="P95 延迟异常阈值" value={s.p95Threshold} onChange={v => upd('p95Threshold', v)} unit="ms" />
+          <SettingInput label="RCA 分数差阈值" value={s.rcaScoreDiff} onChange={v => upd('rcaScoreDiff', v)} />
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.6 }}>
+            说明：阈值第一版仅用于前端展示，后续接入后端配置。
           </div>
         </div>
       </div>

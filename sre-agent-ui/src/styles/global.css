@@ -51,7 +51,6 @@ body {
 }
 
 .sidebar {
-  width: 160px;
   background: var(--sidebar);
   color: var(--sidebar-text);
   display: flex;
@@ -61,6 +60,40 @@ body {
   left: 0;
   bottom: 0;
   z-index: 100;
+  transition: width 0.15s ease;
+  overflow: hidden;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.sidebar-resize-handle:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  margin: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--sidebar-muted);
+  transition: all 0.15s;
+}
+
+.sidebar-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--sidebar-text);
 }
 
 .sidebar-brand {
