@@ -53,7 +53,7 @@ public class VerificationEngine {
         List<String> uncoveredSupportingTypes = pattern.supportingEvidenceTypes().stream()
                 .filter(type -> !evidenceTypes.contains(type))
                 .filter(type -> !isProviderAlias(type))
-                .map(type -> "Missing expected evidence type: " + type)
+                .map(type -> STR."Missing expected evidence type: \{type}")
                 .toList();
 
         List<String> allMissing = new ArrayList<>(missingEvidence);
