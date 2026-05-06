@@ -7,6 +7,7 @@
 .PHONY: demo-services-status demo-services-port-forward demo-services-check
 .PHONY: demo-traffic-start demo-fault-normal demo-fault-payment-latency
 .PHONY: demo-fault-payment-error demo-fault-payment-timeout
+.PHONY: frontend-dev frontend-build frontend-clean
 
 # ─── Build & Test ───────────────────────────────────────────
 
@@ -259,3 +260,39 @@ live-scenario-reset:
 
 live-scenario-latest:
 	@curl -s http://localhost:8080/api/live-scenario/latest | python3 -m json.tool
+
+# ─── Frontend (sre-agent-ui: React + Vite) ──────────────────────
+
+.PHONY: ui-install ui-dev ui-build ui-copy ui-clean frontend-dev frontend-build frontend-clean
+
+NPM := $(shell which npm 2>/dev/null)
+
+ui-install:
+	@echo "Installing sre-agent-ui dependencies ..."
+	cd sre-agent-ui && $(NPM) install
+	@echo "Dependencies installed."
+
+ui-dev: frontend-dev
+ui-build: frontend-build
+ui-copy: frontend-build
+ui-clean: frontend-clean
+
+frontend-dev:
+	@echo "Starting frontend dev server on http://localhost:5173 ..."
+	cd sre-agent-ui && $(NPM) run dev -- --host 0.0.0.0 --port 5173
+
+frontend-build:
+	@echo "Building frontend ..."
+	cd sre-agent-ui && $(NPM) run build
+	@echo "Copying to sre-agent-server/static/ ..."
+	rm -rf sre-agent-server/src/main/resources/static/assets
+	rm -f sre-agent-server/src/main/resources/static/index.html
+	cp -r sre-agent-ui/dist/* sre-agent-server/src/main/resources/static/
+	@echo "Frontend build + copy complete."
+
+frontend-clean:
+	@echo "Cleaning frontend build artifacts ..."
+	rm -rf sre-agent-ui/dist
+	rm -rf sre-agent-server/src/main/resources/static/assets
+	rm -f sre-agent-server/src/main/resources/static/index.html
+	@echo "Frontend cleaned."
