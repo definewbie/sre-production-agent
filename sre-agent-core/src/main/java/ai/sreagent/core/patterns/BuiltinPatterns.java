@@ -56,14 +56,18 @@ public final class BuiltinPatterns {
                 "trace_child_span_dominates_latency"
             ),
             Map.ofEntries(
-                // Core weights
+                // Core weights (supporting)
                 entry("deploy_event_near_alert_window", 0.18),
                 entry("error_rate_spike_after_deploy", 0.14),
                 entry("dependency_timeout_logs", 0.08),
                 entry("retry_timeout_config_change", 0.12),
-                entry("historical_timeout_logs_present", 0.04),
-                entry("downstream_latency_spike", 0.04),
-                // Provider alias weights
+                // Counter weights — higher = stronger refutation signal
+                entry("historical_timeout_logs_present", 0.10),
+                entry("downstream_latency_spike", 0.12),
+                entry("metric_downstream_latency_spike", 0.15),
+                entry("trace_downstream_span_slow", 0.15),
+                entry("trace_child_span_dominates_latency", 0.18),
+                // Provider alias weights (supporting)
                 entry("metric_error_rate_spike", 0.10),
                 entry("metric_latency_p95_spike", 0.08),
                 entry("metric_latency_p99_spike", 0.08),
@@ -107,18 +111,15 @@ public final class BuiltinPatterns {
             ),
             List.of(
                 "downstream_5xx_absent",
-                "deploy_event_near_alert_window",
-                "metric_error_rate_spike",
-                "log_http_5xx",
-                "trace_error_span"
+                "deploy_event_near_alert_window"
             ),
             Map.ofEntries(
                 // Core weights
                 entry("dependency_timeout_logs", 0.12),
                 entry("downstream_latency_spike", 0.14),
                 entry("service_dependency_match", 0.14),
-                entry("downstream_5xx_absent", 0.05),
-                entry("deploy_event_near_alert_window", 0.02),
+                entry("downstream_5xx_absent", 0.10),
+                entry("deploy_event_near_alert_window", 0.10),
                 // Provider alias weights — downstream evidence is strongest signal
                 entry("metric_downstream_latency_spike", 0.16),
                 entry("metric_latency_p95_spike", 0.10),

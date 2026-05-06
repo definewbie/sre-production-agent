@@ -2,34 +2,63 @@ package ai.sreagent.core.verification;
 
 import ai.sreagent.core.domain.*;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
- * Computes confidence scores for verified hypotheses using a deterministic,
- * explainable scoring formula.
+ * Computes confidence scores for verified hypotheses using a ratio-based,
+ * type-coverage scoring model.
  *
- * Formula:
- *   rawScore = pattern.baseScore
- *            + sum(weight for each matched supporting evidence type)
- *            - sum(abs(weight) for each matched counter evidence type)
- *            - missingPenalty
- *            - contradictionPenalty
- *   score = clamp(rawScore, 0.0, 1.0), rounded to 2 decimals
+ * <h3>Model v2 — Ratio-Based Coverage</h3>
  *
- * MVP calibration note:
- *   Confidence weights are manually assigned based on SRE diagnostic experience.
- *   They are NOT learned from historical incident data.
- *   Production systems should replace this with data-driven calibration.
+ * <p>Instead of accumulating absolute weights per evidence instance (which allows
+ * evidence quantity to dominate score regardless of counter-evidence), this model
+ * measures <b>evidence type coverage and directional consistency</b>.</p>
+ *
+ * <pre>
+ * supportingCoverage = supporting types matched / total supporting types
+ * counterCoverage    = counter types matched / total counter types
+ *
+ * rawScore = baseScore
+ *          + supportingCoverage × SUPPORTING_BONUS_CAP
+ *          - counterCoverage × COUNTER_PENALTY_CAP
+ *          - missingTypes × MISSING_PENALTY_PER_ITEM
+ *          - contradictions × CONTRADICTION_PENALTY
+ *
+ * score = clamp(rawScore, 0.0, 1.0), rounded to 2 decimals
+ * </pre>
+ *
+ * <p>Key properties:</p>
+ * <ul>
+ *   <li>Score reflects <b>directional consistency</b>, not evidence quantity</li>
+ *   <li>65 supporting + 121 counter → low score (counter coverage dominates)</li>
+ *   <li>126 supporting + 40 counter → high score (supporting coverage dominates)</li>
+ *   <li>Each evidence type counted at most once, regardless of how many instances</li>
+ * </ul>
+ *
+ * <p>MVP calibration note:
+ * Confidence weights are manually assigned based on SRE diagnostic experience.
+ * They are NOT learned from historical incident data.
+ * Production systems should replace this with data-driven calibration.</p>
  */
 public class ConfidenceScorer {
 
-    private static final double MISSING_PENALTY_PER_ITEM = 0.10;
-    private static final double CONTRADICTION_PENALTY = 0.00;
+    /** Maximum bonus from supporting evidence coverage (0–60% of score range) */
+    private static final double SUPPORTING_BONUS_CAP = 0.60;
+
+    /** Maximum penalty from counter evidence coverage (0–30% of score range) */
+    private static final double COUNTER_PENALTY_CAP = 0.30;
+
+    /** Penalty per missing core evidence type */
+    private static final double MISSING_PENALTY_PER_ITEM = 0.03;
+
+    /** Penalty per contradiction */
+    private static final double CONTRADICTION_PENALTY = 0.05;
+
     private static final String CALIBRATION_NOTE =
-            "MVP confidence score is based on manually assigned, explainable SRE diagnostic weights. "
-            + "It is not learned from historical incidents yet.";
+            "MVP confidence score uses ratio-based evidence type coverage model (v2). "
+            + "Score reflects directional consistency, not evidence quantity. "
+            + "Weights are manually calibrated, not learned from historical incidents.";
 
     /**
      * Score a single hypothesis given its verification result, pattern, and evidence.
@@ -42,55 +71,102 @@ public class ConfidenceScorer {
     ) {
         Map<String, Double> weights = pattern.confidenceWeights();
 
-        // Build evidence type → id mapping for factor descriptions
+        // Collect unique evidence types present in supporting and counter evidence
+        Set<String> supportingTypesPresent = new LinkedHashSet<>();
+        Set<String> counterTypesPresent = new LinkedHashSet<>();
+
         List<String> supportingFactors = new ArrayList<>();
         List<String> counterFactors = new ArrayList<>();
 
-        double supportingBonus = 0.0;
+        // Map evidence id → type for fast lookup
+        Map<String, String> evTypeMap = evidence.stream()
+                .collect(Collectors.toMap(Evidence::id, Evidence::evidenceType, (a, b) -> a));
+
         for (String evId : verification.supportingEvidenceIds()) {
-            evidence.stream()
-                    .filter(e -> e.id().equals(evId))
-                    .findFirst()
-                    .ifPresent(e -> {
-                        supportingFactors.add(e.evidenceType() + ": " + e.content());
-                    });
-            // Find the evidence type for weight lookup
-            String evType = evidence.stream()
-                    .filter(e -> e.id().equals(evId))
-                    .map(Evidence::evidenceType)
-                    .findFirst().orElse(null);
-            if (evType != null && weights.containsKey(evType)) {
-                supportingBonus += weights.get(evType);
+            String evType = evTypeMap.get(evId);
+            if (evType != null) {
+                supportingTypesPresent.add(evType);
+                evidence.stream()
+                        .filter(e -> e.id().equals(evId))
+                        .findFirst()
+                        .ifPresent(e -> supportingFactors.add(e.evidenceType() + ": " + e.content()));
             }
         }
 
-        double counterPenalty = 0.0;
         for (String evId : verification.counterEvidenceIds()) {
-            evidence.stream()
-                    .filter(e -> e.id().equals(evId))
-                    .findFirst()
-                    .ifPresent(e -> {
-                        counterFactors.add(e.evidenceType() + ": " + e.content());
-                    });
-            String evType = evidence.stream()
-                    .filter(e -> e.id().equals(evId))
-                    .map(Evidence::evidenceType)
-                    .findFirst().orElse(null);
-            if (evType != null && weights.containsKey(evType)) {
-                counterPenalty += Math.abs(weights.get(evType));
+            String evType = evTypeMap.get(evId);
+            if (evType != null) {
+                counterTypesPresent.add(evType);
+                evidence.stream()
+                        .filter(e -> e.id().equals(evId))
+                        .findFirst()
+                        .ifPresent(e -> counterFactors.add(e.evidenceType() + ": " + e.content()));
             }
         }
 
-        // Only penalize missing evidence types (prefixed "Missing expected evidence type: "),
-        // not human-readable evidenceRequirements which are descriptive text, not matchable types.
+        // --- Ratio-based coverage calculation ---
+        // Supporting coverage: how many of the expected supporting types are actually present
+        int totalSupportingTypes = pattern.supportingEvidenceTypes().size();
+        long matchedSupportingTypes = pattern.supportingEvidenceTypes().stream()
+                .filter(supportingTypesPresent::contains)
+                .count();
+        double supportingCoverage = totalSupportingTypes > 0
+                ? (double) matchedSupportingTypes / totalSupportingTypes
+                : 0.0;
+
+        // Counter coverage: how many of the expected counter types are actually present
+        int totalCounterTypes = pattern.counterEvidenceTypes().size();
+        long matchedCounterTypes = pattern.counterEvidenceTypes().stream()
+                .filter(counterTypesPresent::contains)
+                .count();
+        double counterCoverage = totalCounterTypes > 0
+                ? (double) matchedCounterTypes / totalCounterTypes
+                : 0.0;
+
+        // Apply type-weighted adjustments for supporting coverage
+        // Types with higher weights contribute more to coverage score
+        double weightedSupportingCoverage = 0.0;
+        double totalSupportingWeight = 0.0;
+        for (String type : pattern.supportingEvidenceTypes()) {
+            double w = weights.getOrDefault(type, 0.05); // default weight for unregistered types
+            totalSupportingWeight += w;
+            if (supportingTypesPresent.contains(type)) {
+                weightedSupportingCoverage += w;
+            }
+        }
+        if (totalSupportingWeight > 0) {
+            weightedSupportingCoverage /= totalSupportingWeight;
+        }
+
+        // Apply type-weighted adjustments for counter coverage
+        double weightedCounterCoverage = 0.0;
+        double totalCounterWeight = 0.0;
+        for (String type : pattern.counterEvidenceTypes()) {
+            double w = weights.getOrDefault(type, 0.05); // default weight for unregistered types
+            totalCounterWeight += w;
+            if (counterTypesPresent.contains(type)) {
+                weightedCounterCoverage += w;
+            }
+        }
+        if (totalCounterWeight > 0) {
+            weightedCounterCoverage /= totalCounterWeight;
+        }
+
+        // Missing evidence penalty
         long missingTypeCount = verification.missingEvidence().stream()
                 .filter(m -> m.startsWith("Missing expected evidence type: "))
                 .count();
         double missingPenalty = missingTypeCount * MISSING_PENALTY_PER_ITEM;
+
+        // Contradiction penalty
         double contradictionPenalty = verification.contradictions().size() * CONTRADICTION_PENALTY;
 
-        double rawScore = pattern.baseScore() + supportingBonus - counterPenalty
-                - missingPenalty - contradictionPenalty;
+        // Final score calculation
+        double rawScore = pattern.baseScore()
+                + weightedSupportingCoverage * SUPPORTING_BONUS_CAP
+                - weightedCounterCoverage * COUNTER_PENALTY_CAP
+                - missingPenalty
+                - contradictionPenalty;
 
         double score = Math.round(Math.max(0.0, Math.min(1.0, rawScore)) * 100.0) / 100.0;
 
@@ -119,7 +195,7 @@ public class ConfidenceScorer {
             List<VerificationResult> verifications,
             List<Evidence> evidence
     ) {
-        Map<String, VerificationResult> verByHyp = new java.util.LinkedHashMap<>();
+        Map<String, VerificationResult> verByHyp = new LinkedHashMap<>();
         for (VerificationResult vr : verifications) {
             verByHyp.put(vr.hypothesisId(), vr);
         }
