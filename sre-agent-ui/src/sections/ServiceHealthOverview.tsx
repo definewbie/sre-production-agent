@@ -1,5 +1,12 @@
-import { services, alerts } from '../data/mockData'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  getServiceHealthSummary,
+  ServiceHealthSummary,
+  ServiceHealthView,
+  ServiceHealthStatus,
+} from '../api/client'
 import { ChevronDown, RefreshCw } from 'lucide-react'
+import { alerts } from '../data/mockData'
 
 interface Props {
   onServiceClick: (name: string) => void
@@ -7,7 +14,6 @@ interface Props {
 
 // Mini sparkline SVG component
 function Sparkline({ color, width = 60, height = 20 }: { color: string; width?: number; height?: number }) {
-  // Generate a pseudo-random zigzag path
   const pts = [0.6, 0.35, 0.55, 0.25, 0.5, 0.3]
   const stepX = width / (pts.length - 1)
   const pathD = pts.map((p, i) => {
@@ -23,16 +29,108 @@ function Sparkline({ color, width = 60, height = 20 }: { color: string; width?: 
   )
 }
 
+const statusBadgeClass: Record<ServiceHealthStatus, string> = {
+  healthy: 'badge badge-green',
+  degraded: 'badge badge-orange',
+  down: 'badge badge-red',
+  unknown: 'badge',
+}
+
+const statusLabel: Record<ServiceHealthStatus, string> = {
+  healthy: '正常',
+  degraded: '降级',
+  down: '不可用',
+  unknown: '未知',
+}
+
+const topoEdgeColor: Record<ServiceHealthStatus, string> = {
+  healthy: '#12b76a',
+  degraded: '#f79009',
+  down: '#f04438',
+  unknown: '#98a2b3',
+}
+
+const topoNodeClass: Record<ServiceHealthStatus, string> = {
+  healthy: 'green',
+  degraded: 'orange',
+  down: 'red',
+  unknown: '',
+}
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleTimeString('zh-CN', { hour12: false })
+  } catch {
+    return iso
+  }
+}
+
 export default function ServiceHealthOverview({ onServiceClick }: Props) {
-  const abnormalCount = services.filter(s => s.status === 'abnormal').length
-  const normalCount = services.filter(s => s.status === 'normal').length
-  const alertCount = alerts.length
+  const [summary, setSummary] = useState<ServiceHealthSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadData = useCallback(async () => {
+    setRefreshing(true)
+    setError(null)
+    const result = await getServiceHealthSummary()
+    if (result.data) {
+      setSummary(result.data)
+      setError(result.error)
+    } else {
+      setSummary(null)
+      setError(result.error || '服务健康数据获取失败')
+    }
+    setRefreshing(false)
+    setLoading(false)
+  }, [])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // Loading
+  if (loading) {
+    return (
+      <div>
+        <h1 className="page-title">服务健康总览</h1>
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
+          正在加载服务健康状态...
+        </div>
+      </div>
+    )
+  }
+
+  // Error + no data
+  if (!summary) {
+    return (
+      <div>
+        <h1 className="page-title">服务健康总览</h1>
+        <div style={{ padding: 40, textAlign: 'center' }}>
+          <div style={{ color: 'var(--red)', marginBottom: 12, fontSize: 15 }}>
+            服务健康状态获取失败
+          </div>
+          <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>
+            {error}
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={loadData}>
+            重试
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const svcs = summary.services
+  const hasMixed = summary.source === 'mixed' || svcs.some(s => s.source === 'mixed')
 
   return (
     <div>
       {/* Page Title + Time Controls */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <h1 className="page-title">服务健康总览</h1>
+        <h1 className="page-title">1 服务健康总览</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <button className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             最近 5 分钟
@@ -44,32 +142,63 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
               <div className="toggle-knob" />
             </div>
           </div>
-          <span style={{ fontSize: 13, color: 'var(--muted)' }}>更新时间：14:30:25</span>
+          <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+            更新时间：{formatTime(summary.checkedAt)}
+          </span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={loadData}
+            disabled={refreshing}
+            style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
+            刷新
+          </button>
         </div>
       </div>
 
-      {/* KPI Cards Row — 5 cards per SVG */}
+      {/* Partial error warning */}
+      {error && (
+        <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#856404' }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {/* Mock indicator */}
+      {hasMixed && (
+        <div style={{ background: '#f0f4ff', border: '1px solid #b2ccff', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#3366cc' }}>
+          ℹ 部分指标为 Mock Estimated（错误率、P95 延迟、流量、饱和度、重启数），服务可达性和 fault 状态来自真实 API
+        </div>
+      )}
+
+      {/* KPI Cards Row */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
         <div className="kpi-card">
           <div className="kpi-label">服务总数</div>
-          <div className="kpi-value">{services.length}</div>
+          <div className="kpi-value">{summary.totalServices}</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">异常服务</div>
-          <div className="kpi-value red">{abnormalCount}</div>
+          <div className="kpi-value red">{summary.downServices + summary.degradedServices}</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">健康服务</div>
-          <div className="kpi-value green">{normalCount}</div>
+          <div className="kpi-value green">{summary.healthyServices}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">告警数</div>
-          <div className="kpi-value orange">{alertCount}</div>
+          <div className="kpi-label">
+            告警数
+            <span style={{ fontSize: 11, color: 'var(--orange)', marginLeft: 6, fontWeight: 400 }}>Mock</span>
+          </div>
+          <div className="kpi-value orange">{summary.alerts}</div>
         </div>
         <div className="kpi-card" style={{ minWidth: 200 }}>
-          <div className="kpi-label">影响用户</div>
+          <div className="kpi-label">
+            影响用户
+            <span style={{ fontSize: 11, color: 'var(--orange)', marginLeft: 6, fontWeight: 400 }}>Mock</span>
+          </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-            <div className="kpi-value">128</div>
+            <div className="kpi-value">{summary.affectedUsers}</div>
             <span style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>↑ 12%</span>
           </div>
         </div>
@@ -83,59 +212,85 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
             <tr>
               <th>服务名称</th>
               <th>状态</th>
-              <th>错误率 (5m)</th>
-              <th>P95 延迟 (5m)</th>
-              <th>流量 (rps)</th>
-              <th>饱和度</th>
-              <th>最近重启</th>
+              <th>错误率 (5m)<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
+              <th>P95 延迟 (5m)<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
+              <th>流量 (rps)<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
+              <th>饱和度<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
+              <th>最近重启<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
             </tr>
           </thead>
           <tbody>
-            {services.map(s => (
-              <tr key={s.name} style={{ cursor: 'pointer' }} onClick={() => onServiceClick(s.name)}>
-                <td style={{ fontWeight: 600 }}>{s.name}</td>
-                <td>
-                  <span className={'badge ' + (s.status === 'abnormal' ? 'badge-red' : 'badge-green')}>
-                    {s.status === 'abnormal' ? '异常' : '正常'}
-                  </span>
-                </td>
-                <td>
-                  <span className={s.status === 'abnormal' ? 'red' : 'green'}>
-                    {s.errorRate}
-                  </span>
-                  <span className={'kpi-trend ' + s.errorRateDirection}>
-                    {s.errorRateDirection === 'up' ? '↑' : '↓'}{s.errorRateTrend}
-                  </span>
-                </td>
-                <td>
-                  <span className={s.status === 'abnormal' ? 'red' : 'green'}>
-                    {s.p95Latency}
-                  </span>
-                  <span className={'kpi-trend ' + s.p95Direction}>
-                    {s.p95Direction === 'up' ? '↑' : '↓'}{s.p95Trend}
-                  </span>
-                </td>
-                <td>
-                  {s.rps}
-                  <Sparkline color={s.status === 'abnormal' ? '#2e90fa' : '#12b76a'} />
-                </td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span>{s.saturation}%</span>
-                    <div className="saturation-bar">
-                      <div
-                        className="saturation-fill"
-                        style={{
-                          width: s.saturation + '%',
-                          background: s.saturation > 70 ? 'var(--red)' : 'var(--green)',
-                        }}
-                      />
-                    </div>
-                  </div>
-                </td>
-                <td>{s.restarts}</td>
-              </tr>
-            ))}
+            {svcs.map(s => {
+              const isAbnormal = s.status === 'down' || s.status === 'degraded'
+              const valColor = isAbnormal ? 'red' : 'green'
+              return (
+                <tr key={s.name} style={{ cursor: 'pointer' }} onClick={() => onServiceClick(s.name)}>
+                  <td style={{ fontWeight: 600 }}>{s.name}</td>
+                  <td>
+                    <span className={statusBadgeClass[s.status]}>
+                      {statusLabel[s.status]}
+                    </span>
+                  </td>
+                  <td>
+                    {s.errorRate ? (
+                      <>
+                        <span className={valColor}>{s.errorRate}</span>
+                        {s.errorRateTrend && (
+                          <span className={'kpi-trend ' + (s.errorRateDirection || 'up')}>
+                            {s.errorRateDirection === 'up' ? '↑' : '↓'}{s.errorRateTrend}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span style={{ color: 'var(--muted)' }}>-</span>
+                    )}
+                  </td>
+                  <td>
+                    {s.p95Latency ? (
+                      <>
+                        <span className={valColor}>{s.p95Latency}</span>
+                        {s.p95Trend && (
+                          <span className={'kpi-trend ' + (s.p95Direction || 'up')}>
+                            {s.p95Direction === 'up' ? '↑' : '↓'}{s.p95Trend}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span style={{ color: 'var(--muted)' }}>-</span>
+                    )}
+                  </td>
+                  <td>
+                    {s.rps !== undefined ? (
+                      <>
+                        {s.rps}
+                        <Sparkline color={isAbnormal ? '#2e90fa' : '#12b76a'} />
+                      </>
+                    ) : (
+                      <span style={{ color: 'var(--muted)' }}>-</span>
+                    )}
+                  </td>
+                  <td>
+                    {s.saturation !== undefined ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span>{s.saturation}%</span>
+                        <div className="saturation-bar">
+                          <div
+                            className="saturation-fill"
+                            style={{
+                              width: s.saturation + '%',
+                              background: s.saturation > 70 ? 'var(--red)' : 'var(--green)',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--muted)' }}>-</span>
+                    )}
+                  </td>
+                  <td>{s.restarts !== undefined ? s.restarts : '-'}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -144,50 +299,59 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
       <div style={{ display: 'flex', gap: 20 }}>
         {/* Service Dependency Topology */}
         <div className="card" style={{ flex: '1.5' }}>
-          <div className="card-title">服务依赖拓扑（当前影响路径）</div>
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            服务依赖拓扑（当前影响路径）
+            {summary.topologySource === 'real' && (
+              <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 400 }}>Live</span>
+            )}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 0', gap: 0 }}>
-            {/* order-service */}
-            <div className="topo-node green" style={{ cursor: 'pointer' }} onClick={() => onServiceClick('order-service')}>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>order-service</div>
-              <div style={{ marginTop: 6 }}><span className="badge badge-red">异常</span></div>
-              <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 4 }}>错误率 4.7%</div>
-            </div>
-
-            {/* Arrow */}
-            <div style={{ padding: '0 12px' }}>
-              <svg width="60" height="20">
-                <line x1="0" y1="10" x2="48" y2="10" stroke="#f04438" strokeWidth="2" />
-                <polygon points="48,5 58,10 48,15" fill="#f04438" />
-              </svg>
-            </div>
-
-            {/* payment-service */}
-            <div className="topo-node red" style={{ cursor: 'pointer' }} onClick={() => onServiceClick('payment-service')}>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>payment-service</div>
-              <div style={{ marginTop: 6 }}><span className="badge badge-red">异常</span></div>
-              <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 4 }}>延迟 2.42s</div>
-            </div>
-
-            {/* Arrow */}
-            <div style={{ padding: '0 12px' }}>
-              <svg width="60" height="20">
-                <line x1="0" y1="10" x2="48" y2="10" stroke="#f04438" strokeWidth="2" />
-                <polygon points="48,5 58,10 48,15" fill="#f04438" />
-              </svg>
-            </div>
-
-            {/* inventory-service */}
-            <div className="topo-node green" style={{ cursor: 'pointer' }} onClick={() => onServiceClick('inventory-service')}>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>inventory-service</div>
-              <div style={{ marginTop: 6 }}><span className="badge badge-green">正常</span></div>
-              <div style={{ fontSize: 12, color: 'var(--green)', marginTop: 4 }}>延迟 0.38s</div>
-            </div>
+            {svcs.map((svc, i) => {
+              const isAbnormal = svc.status === 'down' || svc.status === 'degraded'
+              const detailText = isAbnormal
+                ? (svc.faultEnabled ? 'fault: ' + svc.faultType : (svc.errorRate || 'unreachable'))
+                : (svc.p95Latency || '正常')
+              return (
+                <span key={svc.name}>
+                  {/* Node */}
+                  <div
+                    className={'topo-node ' + topoNodeClass[svc.status]}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => onServiceClick(svc.name)}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{svc.name}</div>
+                    <div style={{ marginTop: 6 }}>
+                      <span className={statusBadgeClass[svc.status]}>{statusLabel[svc.status]}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: isAbnormal ? 'var(--red)' : 'var(--green)', marginTop: 4 }}>
+                      {detailText}
+                    </div>
+                  </div>
+                  {/* Arrow between nodes */}
+                  {i < svcs.length - 1 && (() => {
+                    const edge = summary.topology[i]
+                    const edgeColor = edge ? topoEdgeColor[edge.status] : '#98a2b3'
+                    return (
+                      <div style={{ padding: '0 12px' }}>
+                        <svg width="60" height="20">
+                          <line x1="0" y1="10" x2="48" y2="10" stroke={edgeColor} strokeWidth="2" />
+                          <polygon points="48,5 58,10 48,15" fill={edgeColor} />
+                        </svg>
+                      </div>
+                    )
+                  })()}
+                </span>
+              )
+            })}
           </div>
         </div>
 
         {/* Recent Alerts */}
         <div className="card" style={{ flex: '1' }}>
-          <div className="card-title">最近告警</div>
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            最近告警
+            <span style={{ fontSize: 11, color: 'var(--orange)', fontWeight: 400 }}>Mock Alerts</span>
+          </div>
           <div>
             {alerts.map((a, i) => (
               <div key={i} style={{
@@ -221,7 +385,9 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
         </div>
       </div>
 
-      <div className="footer-note">* 所有数据为模拟数据，API 接入后将替换</div>
+      <div className="footer-note">
+        * 服务状态（reachable / fault）来自真实 API · 错误率 / 延迟 / 流量 / 饱和度 / 重启为 Mock Estimated · 告警为 Mock Alerts
+      </div>
     </div>
   )
 }

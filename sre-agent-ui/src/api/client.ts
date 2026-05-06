@@ -286,3 +286,175 @@ export async function getTopBarEnvStatus(): Promise<TopBarEnvStatus> {
 
   return { prometheus, loki, jaeger, demoServices, api, allOk, isMock: false, error: null }
 }
+
+/* ── Service Health View Model (V.2-UI-3) ── */
+
+export type ServiceHealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown'
+
+export interface ServiceHealthView {
+  name: string
+  status: ServiceHealthStatus
+  reachable: boolean
+  url: string
+  health: string
+  /** 以下指标暂时来自 mock，字段本身可空 */
+  errorRate?: string
+  errorRateTrend?: string
+  errorRateDirection?: 'up' | 'down'
+  p95Latency?: string
+  p95Trend?: string
+  p95Direction?: 'up' | 'down'
+  rps?: number
+  saturation?: number
+  restarts?: number
+  faultEnabled: boolean
+  faultType: string
+  message: string
+  source: 'real' | 'mock' | 'mixed'
+}
+
+export interface ServiceHealthSummary {
+  checkedAt: string
+  source: 'real' | 'mock' | 'mixed'
+  totalServices: number
+  healthyServices: number
+  degradedServices: number
+  downServices: number
+  alerts: number
+  affectedUsers: number
+  affectedUsersSource: 'mock'
+  alertsSource: 'mock'
+  services: ServiceHealthView[]
+  topology: Array<{ from: string; to: string; status: ServiceHealthStatus }>
+  topologySource: 'real' | 'mock'
+}
+
+/** 将 faultConfig 字符串映射为展示用类型 */
+function parseFaultType(fc: string): { enabled: boolean; type: string } {
+  if (!fc || fc === 'normal' || fc === 'unknown') return { enabled: false, type: 'normal' }
+  return { enabled: true, type: fc }
+}
+
+/** 将 demo service 映射为 ServiceHealthView */
+function mapDemoService(s: DemoServiceStatus): ServiceHealthView {
+  const fault = parseFaultType(s.faultConfig)
+  let status: ServiceHealthStatus = 'unknown'
+  if (!s.reachable) {
+    status = 'down'
+  } else if (fault.enabled) {
+    status = 'degraded'
+  } else {
+    status = 'healthy'
+  }
+  return {
+    name: s.service,
+    status,
+    reachable: s.reachable,
+    url: s.url,
+    health: s.health,
+    faultEnabled: fault.enabled,
+    faultType: fault.type,
+    message: s.reachable ? (fault.enabled ? 'fault: ' + fault.type : s.health) : 'unreachable',
+    // 暂无真实指标来源
+    source: 'real',
+  }
+}
+
+/** 为服务补充 mock 指标（errorRate, p95Latency 等） */
+function enrichWithMockMetrics(svc: ServiceHealthView, mockLookup: Record<string, ServiceHealthView>): ServiceHealthView {
+  const m = mockLookup[svc.name]
+  if (!m) return { ...svc, source: svc.source }
+  return {
+    ...svc,
+    errorRate: m.errorRate,
+    errorRateTrend: m.errorRateTrend,
+    errorRateDirection: m.errorRateDirection,
+    p95Latency: m.p95Latency,
+    p95Trend: m.p95Trend,
+    p95Direction: m.p95Direction,
+    rps: m.rps,
+    saturation: m.saturation,
+    restarts: m.restarts,
+    source: 'mixed',
+  }
+}
+
+/** 解析 topology 字符串 "order-service → payment-service → inventory-service" */
+function parseTopology(topoStr: string, services: ServiceHealthView[]): ServiceHealthSummary['topology'] {
+  const parts = topoStr.split(/\s*→\s*/)
+  if (parts.length < 2) return []
+  const edges: ServiceHealthSummary['topology'] = []
+  for (let i = 0; i < parts.length - 1; i++) {
+    const fromSvc = services.find(s => s.name === parts[i].trim())
+    const toSvc = services.find(s => s.name === parts[i + 1].trim())
+    const status: ServiceHealthStatus = (fromSvc?.status === 'down' || toSvc?.status === 'down')
+      ? 'down'
+      : (fromSvc?.status === 'degraded' || toSvc?.status === 'degraded')
+        ? 'degraded'
+        : 'healthy'
+    edges.push({ from: parts[i].trim(), to: parts[i + 1].trim(), status })
+  }
+  return edges
+}
+
+/**
+ * getServiceHealthSummary()
+ * 
+ * 从 /api/demo-services/status 获取真实服务列表和可达性。
+ * 指标（errorRate, p95Latency, rps, saturation, restarts）暂无真实 API → 用 mock 补齐。
+ * 告警和影响用户数暂用 mock。
+ * 每个字段都标记来源（real / mock / mixed）。
+ */
+export async function getServiceHealthSummary(): Promise<{ data: ServiceHealthSummary | null; error: string | null }> {
+  const demo = await getDemoServicesStatus()
+
+  if (!demo.data) {
+    return { data: null, error: demo.error || '服务健康数据获取失败' }
+  }
+
+  const rawServices = demo.data.services.map(mapDemoService)
+
+  // Mock 指标补充（errorRate, p95, rps, saturation, restarts）
+  const mockMetrics: Record<string, ServiceHealthView> = {}
+  // 动态 import 避免循环依赖，直接内联 mock 指标
+  const mockDefaults: Record<string, Partial<ServiceHealthView>> = {
+    'order-service': { errorRate: '4.7%', errorRateTrend: '350%', errorRateDirection: 'up', p95Latency: '1.85s', p95Trend: '280%', p95Direction: 'up', rps: 2.1, saturation: 45, restarts: 0 },
+    'payment-service': { errorRate: '0.2%', errorRateTrend: '20%', errorRateDirection: 'up', p95Latency: '2.42s', p95Trend: '480%', p95Direction: 'up', rps: 2.0, saturation: 38, restarts: 0 },
+    'inventory-service': { errorRate: '0.1%', errorRateTrend: '50%', errorRateDirection: 'down', p95Latency: '0.38s', p95Trend: '10%', p95Direction: 'down', rps: 1.8, saturation: 32, restarts: 0 },
+  }
+
+  const services = rawServices.map(svc => {
+    const mock = mockDefaults[svc.name]
+    if (!mock) return svc
+    return {
+      ...svc,
+      ...mock,
+      source: 'mixed' as const,
+    }
+  })
+
+  const healthyCount = services.filter(s => s.status === 'healthy').length
+  const degradedCount = services.filter(s => s.status === 'degraded').length
+  const downCount = services.filter(s => s.status === 'down').length
+
+  const topology = parseTopology(demo.data.topology, services)
+
+  return {
+    data: {
+      checkedAt: new Date().toISOString(),
+      source: 'mixed',
+      totalServices: services.length,
+      healthyServices: healthyCount,
+      degradedServices: degradedCount,
+      downServices: downCount,
+      alerts: 2,
+      affectedUsers: 128,
+      affectedUsersSource: 'mock',
+      alertsSource: 'mock',
+      services,
+      topology,
+      topologySource: 'real',
+    },
+    error: null,
+  }
+}
