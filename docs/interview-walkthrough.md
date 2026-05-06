@@ -32,7 +32,7 @@
 
 ### Module Structure (30 seconds)
 
-> "The project is a Maven multi-module build with three modules. `sre-agent-core` is the pure Java RCA engine — zero Spring dependency. `sre-agent-cli` is a Picocli command-line adapter. `sre-agent-server` is a Spring Boot REST API and minimal Web UI. Both adapters call the same `InvestigationWorkflow`."
+> "The project is a Maven multi-module build with 15 modules — 11 agent modules plus 4 demo microservices. `sre-agent-core` is the pure Java RCA engine — zero Spring dependency. `sre-agent-llm` is the advisory-only LLM layer. `sre-agent-server` provides REST API, Live Scenario, and Web UI. `sre-agent-cli` is the command-line adapter. All adapters call the same `InvestigationWorkflow`. 1194 tests, all deterministic."
 
 ### Core Workflow (1 minute)
 
@@ -110,17 +110,17 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
 
 ## 8:30–9:30: LLM Positioning (1 minute)
 
-> "The LLM is deliberately deferred to Step G. Right now, the entire workflow is deterministic — same input, same output, every step auditable. That's a feature, not a limitation.
+> "The LLM integration is now live in Phase 4. I added `OpenAiCompatibleLlmClient` — verified end-to-end with Zhipu glm-4-flash. The LLM does two things: propose additional root cause hypotheses, and synthesize narrative reports.
 >
-> When I add LLM, it will only be for report synthesis — taking the structured `InvestigationResult` and turning it into a human-readable narrative. The LLM will not decide root cause, modify scores, invent evidence, or override the `InvestigationDecision`.
+> But here's the key — all LLM proposals are marked `advisoryOnly=true` and `canAffectDecision=false`. The LLM cannot decide root cause, modify scores, invent evidence, or override the `InvestigationDecision`. When the LLM is unavailable, the system falls back to `MockLlmClient` and the deterministic workflow still works perfectly.
 >
-> The architecture already has the right boundary: the LLM consumes the investigation output. It doesn't participate in the investigation."
+> The architecture enforces the right boundary: the LLM consumes the investigation output. It never feeds data back into the deterministic workflow."
 
 ---
 
 ## 9:30–10:00: Roadmap and Close (30 seconds)
 
-> "Next steps depend on the role. For an AI Agent position, I'd add LLM synthesis first. For an SRE role, I'd connect real Prometheus and Loki evidence providers. For an architect role, I'd focus on the trade-off narrative and the extension points.
+> "Next steps depend on the role. For an AI Agent position, I'd enhance the LLM hypothesis proposal with structured JSON output. For an SRE role, I'd add post-probe RCA re-runs with live evidence. For an architect role, I'd focus on the trade-off narrative and the extension points.
 >
 > The architecture is designed for controlled extension — new evidence providers, new diagnostic patterns, new adapters — without modifying the core workflow."
 
@@ -166,7 +166,7 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
 
 ### 模块结构（30 秒）
 
-> "项目采用 Maven 多模块构建，包含三个模块。`sre-agent-core` 是纯 Java 的 RCA 引擎——零 Spring 依赖。`sre-agent-cli` 是基于 Picocli 的命令行适配器。`sre-agent-server` 是 Spring Boot REST API 和简易 Web UI。两个适配器都调用同一个 `InvestigationWorkflow`。"
+> "项目采用 Maven 多模块构建，共 15 个模块——11 个 agent 模块加 4 个演示微服务。`sre-agent-core` 是纯 Java 的 RCA 引擎——零 Spring 依赖。`sre-agent-llm` 是 advisory-only LLM 层。`sre-agent-server` 提供 REST API、Live Scenario 和 Web UI。`sre-agent-cli` 是命令行适配器。所有适配器都调用同一个 `InvestigationWorkflow`。1194 个测试，全部确定性。"
 
 ### 核心工作流（1 分钟）
 
@@ -244,9 +244,9 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
 
 ## 8:30–9:30：LLM 定位（1 分钟）
 
-> "LLM 被刻意推迟到步骤 G。目前整个工作流是确定性的——相同输入，相同输出，每一步可审计。这是一个特性，而非局限。
+> "LLM 集成已经在 Phase 4 完成。我添加了 `OpenAiCompatibleLlmClient`——用智谱 glm-4-flash 端到端验证过了。LLM 做两件事：提议额外的根因假设，以及合成叙述报告。
 >
-> 当我加入 LLM 时，它只会用于报告合成——将结构化的 `InvestigationResult` 转化为人类可读的叙述。LLM 不会决定根因、修改评分、捏造证据或覆盖 `InvestigationDecision`。
+> 但关键是——所有 LLM 提议都标记为 `advisoryOnly=true`、`canAffectDecision=false`。LLM 不能决定根因、修改评分、捏造证据或覆盖 `InvestigationDecision`。LLM 不可用时，系统降级到 `MockLlmClient`，确定性工作流照常运行。
 >
 > 架构已经划定了正确的边界：LLM 消费调查结果，它不参与调查过程。"
 
@@ -254,7 +254,7 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
 
 ## 9:30–10:00：路线图与总结（30 秒）
 
-> "下一步取决于职位方向。对于 AI Agent 岗位，我会先加 LLM 合成。对于 SRE 岗位，我会接入真实的 Prometheus 和 Loki 证据提供者。对于架构师岗位，我会聚焦权衡叙事和扩展点。
+> "下一步取决于职位方向。对于 AI Agent 岗位，我会增强 LLM 假设提议的结构化 JSON 输出。对于 SRE 岗位，我会加入 probe 后的 RCA 重跑和实时证据补充。对于架构师岗位，我会聚焦权衡叙事和扩展点。
 >
 > 架构设计为可控扩展——新的证据提供者、新的诊断模式、新的适配器——无需修改核心工作流。"
 

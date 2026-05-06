@@ -194,8 +194,8 @@ mvn test
 **Result:**
 ```
 Modules: 15 (11 + demo-services 4)
-Tests: 560 total, 0 failures, 0 errors
-Time: ~26s
+Tests: 1194 total, 0 failures, 0 errors
+Time: ~42s
 BUILD SUCCESS
 ```
 
@@ -302,3 +302,65 @@ UI:
 - 置信度变化
 - 为什么结论发生变化
 - 人工确认入口，可选
+
+---
+
+## Phase 4 Post-Validation (commit `cdaecac`)
+
+### P1: 全量中文化
+
+| 文件 | 变更 |
+|------|------|
+| `HypothesisComparator` | 所有比较逻辑字符串→中文（"分数接近"、"竞争假设"、"需要更多证据"） |
+| `LlmPromptBuilder.SYSTEM_PROMPT` | 英文约束→中文（"你不得编造证据"、"LLM 提议，验证裁决"） |
+| `LlmHypothesisProposalPromptBuilder.SYSTEM_PROMPT` | 英文→中文 |
+| 测试断言 | 英文断言→中文（6个测试文件） |
+
+### P2: 真实 LLM 接入
+
+| 组件 | 说明 |
+|------|------|
+| `OpenAiCompatibleLlmClient` | 生产级 LLM 客户端，支持智谱/OpenAI/Azure/Ollama/vLLM |
+| 端点智能拼接 | base URL 含 `/v4`→append `/chat/completions`；含 `/v1`→append `/chat/completions`；否则 append `/v1/chat/completions` |
+| `LlmHypothesisProposerImpl` | LLM 根据证据提议额外根因假设（advisoryOnly=true, canAffectDecision=false） |
+| `LiveScenarioController.simulate()` | 新增 `runLlm` query param |
+
+### Bug Fixes
+
+1. `LiveScenarioService` 误删 `LlmHypothesisProposer` import → 补回
+2. `HypothesisComparatorTest` 中英断言不匹配 → 中文化
+3. `LlmPromptBuilderTest` / `LlmHypothesisProposalPromptBuilderTest` 断言 → 中文化
+
+### E2E 验证
+
+```bash
+# 环境变量
+export LLM_PROVIDER=openai
+export LLM_API_KEY=<key>
+export LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+export LLM_MODEL=glm-4-flash
+
+# 启动
+java --enable-preview -jar sre-agent-server/target/sre-agent-server-0.1.0-SNAPSHOT.jar
+
+# E2E 真实 LLM 调用
+curl -s 'http://localhost:8080/api/live-scenario/simulate?runLlm=true' | python3 -m json.tool > /tmp/e2e.json
+# → 200 OK, 87KB, 65s
+# → llmProposal 含 proposals（fallback 到 llm_text_fallback）
+# → "## LLM 增强分析报告" 包含执行摘要/推理叙事/不确定性/后续步骤/局限性
+```
+
+### 测试结果
+
+```
+Tests: 1194 total, 0 failures, 0 errors
+BUILD SUCCESS
+Time: ~42s
+```
+
+### 代码统计
+
+```
+14 files changed, +581 -104 lines
+Commits: a3107f3 (Phase 4 core) → cdaecac (P1/P2 + fixes)
+```

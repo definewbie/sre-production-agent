@@ -43,9 +43,17 @@ The SRE Production Agent follows a **hexagonal architecture** pattern: the core 
 │  │       ↓                                           │    │
 │  │  MarkdownReporter + EventTraceStore               │    │
 │  │       ↓ (optional, advisory only)                 │    │
+│  │  ┌── LLM Proposal Layer ──────────────────────┐   │    │
+│  │  │  LlmHypothesisProposerImpl (real LLM)       │   │    │
+│  │  │  → MockLlmHypothesisProposer (fallback)     │   │    │
+│  │  │  (advisory-only, never mutates decision)    │   │    │
+│  │  └─────────────────────────────────────────────┘   │    │
+│  │       ↓ (optional, advisory only)                 │    │
 │  │  ┌── LLM Synthesis Layer ──────────────────────┐  │    │
 │  │  │  LlmPromptBuilder → LlmClient → LlmReport   │  │    │
 │  │  │  Synthesizer → LlmEnhancedReport             │  │    │
+│  │  │  OpenAiCompatibleLlmClient (real LLM)        │  │    │
+│  │  │  MockLlmClient (fallback)                    │  │    │
 │  │  │  (cannot change decision/scores/evidence)    │  │    │
 │  │  └──────────────────────────────────────────────┘  │    │
 │  └──────────────────────────────────────────────────┘    │
@@ -59,7 +67,7 @@ The SRE Production Agent follows a **hexagonal architecture** pattern: the core 
 ```
 sre-production-agent (parent POM)
 ├── sre-agent-core                  ← Pure Java, zero Spring
-├── sre-agent-llm                   ← Depends on core, zero Spring (LLM synthesis + LLM Hypothesis Proposer)
+├── sre-agent-llm                   ← Depends on core, zero Spring (LLM synthesis + LLM Hypothesis Proposer + OpenAI-compatible client)
 ├── sre-agent-k8s-provider          ← Depends on core, zero Spring, zero K8s client lib (fixture-based K8s evidence)
 ├── sre-agent-prometheus-provider   ← Depends on core, zero Spring (Prometheus metric evidence)
 ├── sre-agent-loki-provider         ← Depends on core, zero Spring (Loki log evidence)
@@ -67,24 +75,25 @@ sre-production-agent (parent POM)
 ├── sre-agent-trace-provider        ← Depends on core, zero Spring (Distributed trace evidence)
 ├── sre-agent-probe-executor        ← Depends on core + llm, zero Spring (Probe execution framework)
 ├── sre-agent-cli                   ← Depends on core + llm + k8s-provider + prometheus-provider + loki-provider + alertmanager-provider + trace-provider + probe-executor, uses Picocli
-├── sre-agent-server                ← Depends on core + llm + k8s-provider + prometheus-provider + probe-executor, uses Spring Boot
-└── demo-services                   ← Standalone Spring Boot microservices (order-service, payment-service, inventory-service) for end-to-end RCA validation
+├── sre-agent-server                ← Depends on core + llm + k8s-provider + prometheus-provider + probe-executor, uses Spring Boot (Phase 4: Live Scenario + real LLM integration)
+└── demo-services                   ← Standalone Spring Boot microservices (order-service, payment-service, inventory-service) for end-to-end RCA validation + synthetic traffic generation (Phase 4)
 ```
 
 ### Why Eleven Modules?
 
-|| Module | Responsibility | Key Dependency |
-|---|---|---||| `sre-agent-core` | Domain model, RCA workflow, scoring, reporting, evidence taxonomy (Step Q) | Jackson only |
-| `sre-agent-llm` | LLM-assisted synthesis (advisory-only narrative) + LLM Hypothesis Proposer (advisory-only proposals) | core + Jackson |
+| Module | Responsibility | Key Dependency |
+|---|---|---|
+| `sre-agent-core` | Domain model, RCA workflow, scoring, reporting, evidence taxonomy (Step Q) | Jackson only |
+| `sre-agent-llm` | LLM-assisted synthesis (advisory-only narrative) + LLM Hypothesis Proposer (advisory-only proposals) + `OpenAiCompatibleLlmClient` (real LLM via OpenAI-compatible APIs) | core + Jackson |
 | `sre-agent-k8s-provider` | K8s fixture evidence provider | core + Jackson |
 | `sre-agent-prometheus-provider` | Prometheus metric evidence provider (fixture + HTTP) | core + Jackson |
 | `sre-agent-loki-provider` | Loki log evidence provider (fixture + HTTP) | core + Jackson |
-| `sre-agent-alertmanager-provider` | Alertmanager alert evidence provider (fixture + HTTP) — alert lifecycle, incident mapping, severity evidence | Depends on core |
+| `sre-agent-alertmanager-provider` | Alertmanager alert evidence provider (fixture + HTTP) — alert lifecycle, incident mapping, severity evidence | core + Jackson |
 | `sre-agent-trace-provider` | Distributed trace evidence provider (fixture + HTTP) — span latency, error spans, service dependency graph | core + Jackson |
 | `sre-agent-probe-executor` | Probe execution framework — routes LLM-generated ProbeIntents to evidence providers, collects informational Evidence | core + llm + Jackson |
-| `sre-agent-cli` | Command-line interface | Picocli + core + llm + k8s-provider + prometheus-provider + loki-provider + trace-provider + probe-executor |
-|| `sre-agent-server` | REST API + Web UI + LLM endpoints | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
-|| `demo-services` | Instrumented Spring Boot microservices for end-to-end RCA validation (Step U) | Spring Boot + Micrometer |
+| `sre-agent-cli` | Command-line interface | Picocli + core + llm + k8s-provider + prometheus-provider + loki-provider + alertmanager-provider + trace-provider + probe-executor |
+| `sre-agent-server` | REST API + Web UI + LLM endpoints + Live Scenario orchestration (Phase 4) | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
+| `demo-services` | Instrumented Spring Boot microservices for end-to-end RCA validation (Step U) + synthetic traffic generation (Phase 4) | Spring Boot + Micrometer |
 
 ### Why Core Has Zero Spring Dependency
 
@@ -569,7 +578,7 @@ The architecture is designed for controlled extension:
 
 | Extension | What to Add | Where |
 |---|---|---|
-| OpenAI-compatible LLM provider | `OpenAiCompatibleClient implements LlmClient` — HTTP client calling any OpenAI-compatible API (OpenAI, Azure OpenAI, Ollama, vLLM, etc.) | `sre-agent-llm/client/` |
+| ~~OpenAI-compatible LLM provider~~ | ✅ `OpenAiCompatibleLlmClient implements LlmClient` — implemented in Phase 4 | `sre-agent-llm/client/` |
 | Custom LLM prompt strategies | Alternative `LlmPromptBuilder` implementations for different prompt formats or models | `sre-agent-llm/prompt/` |
 | New diagnostic patterns | Add to `BuiltinPatterns` or create `CustomPatternLoader` | `sre-agent-core/patterns/` |
 | Persistent store | Replace `InMemoryInvestigationStore` with JDBC/Redis | `sre-agent-server/service/` |
@@ -657,10 +666,18 @@ SRE Production Agent 采用**六边形架构**模式：核心 RCA（根因分析
 │  │       ↓                                           │    │
 │  │  MarkdownReporter + EventTraceStore               │    │
 │  │       ↓ (optional, advisory only)                 │    │
+│  │  ┌── LLM Proposal Layer ──────────────────────┐   │    │
+│  │  │  LlmHypothesisProposerImpl（真实 LLM）      │   │    │
+│  │  │  → MockLlmHypothesisProposer（降级回退）     │   │    │
+│  │  │  (仅限咨询性，不可修改决策)                  │   │    │
+│  │  └─────────────────────────────────────────────┘   │    │
+│  │       ↓ (optional, advisory only)                 │    │
 │  │  ┌── LLM Synthesis Layer ──────────────────────┐  │    │
 │  │  │  LlmPromptBuilder → LlmClient → LlmReport   │  │    │
 │  │  │  Synthesizer → LlmEnhancedReport             │  │    │
-│  │  │  (cannot change decision/scores/evidence)    │  │    │
+│  │  │  OpenAiCompatibleLlmClient（真实 LLM）       │  │    │
+│  │  │  MockLlmClient（降级回退）                   │  │    │
+│  │  │  (不可修改决策/分数/证据)                    │  │    │
 │  │  └──────────────────────────────────────────────┘  │    │
 │  └──────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────┘
@@ -673,33 +690,33 @@ SRE Production Agent 采用**六边形架构**模式：核心 RCA（根因分析
 ```
 sre-production-agent (parent POM)
 ├── sre-agent-core                  ← 纯 Java，零 Spring 依赖
-├── sre-agent-llm                   ← 依赖 core，零 Spring 依赖（LLM 综合分析 + LLM 假设提议器）
+├── sre-agent-llm                   ← 依赖 core，零 Spring 依赖（LLM 综合分析 + LLM 假设提议器 + OpenAI 兼容客户端）
 ├── sre-agent-k8s-provider          ← 依赖 core，零 Spring 依赖，零 K8s 客户端库（基于 fixture 的 K8s 证据）
 ├── sre-agent-prometheus-provider   ← 依赖 core，零 Spring 依赖（Prometheus 指标证据）
 ├── sre-agent-loki-provider         ← 依赖 core，零 Spring 依赖（Loki 日志证据）
 ├── sre-agent-alertmanager-provider ← 依赖 core，零 Spring 依赖（Alertmanager 告警证据）
 ├── sre-agent-trace-provider        ← 依赖 core，零 Spring 依赖（分布式追踪证据）
 ├── sre-agent-probe-executor        ← 依赖 core + llm，零 Spring 依赖（探测执行框架）
-├── sre-agent-cli                   ← 依赖 core + llm + k8s-provider + prometheus-provider + trace-provider + probe-executor，使用 Picocli
-├── sre-agent-server                ← 依赖 core + llm + k8s-provider + prometheus-provider + probe-executor，使用 Spring Boot
-└── demo-services                   ← 独立的 Spring Boot 微服务（order-service、payment-service、inventory-service），用于端到端 RCA 验证
+├── sre-agent-cli                   ← 依赖 core + llm + k8s-provider + prometheus-provider + loki-provider + alertmanager-provider + trace-provider + probe-executor，使用 Picocli
+├── sre-agent-server                ← 依赖 core + llm + k8s-provider + prometheus-provider + probe-executor，使用 Spring Boot（Phase 4: 实时场景 + 真实 LLM 集成）
+└── demo-services                   ← 独立的 Spring Boot 微服务（order-service、payment-service、inventory-service），用于端到端 RCA 验证 + 合成流量生成（Phase 4）
 ```
 
 ### 为什么是十一个模块？
 
-||| 模块 | 职责 | 关键依赖 |
-||---|---|---|
-|||| `sre-agent-core` | 领域模型、RCA 工作流、评分、报告、证据分类体系（Step Q） | 仅 Jackson |
-||| `sre-agent-llm` | LLM 辅助综合分析（仅限咨询性叙述） | core + Jackson |
-||| `sre-agent-k8s-provider` | K8s fixture 证据提供者 | core + Jackson |
-||| `sre-agent-prometheus-provider` | Prometheus 指标证据提供者（fixture + HTTP） | core + Jackson |
-||| `sre-agent-loki-provider` | Loki 日志证据提供者（fixture + HTTP） | core + Jackson |
-||| `sre-agent-alertmanager-provider` | Alertmanager 告警证据提供者（fixture + HTTP）— 告警生命周期、事件映射、严重性证据 | 依赖 core |
-|||| `sre-agent-trace-provider` | 分布式追踪证据提供者（fixture + HTTP）— span 延迟、错误 span、服务依赖图 | core + Jackson |
-||| `sre-agent-probe-executor` | 探测执行框架 — 将 LLM 生成的 ProbeIntent 路由到证据提供者，收集信息性证据 | core + llm + Jackson |
-|||| `sre-agent-cli` | 命令行界面 | Picocli + core + k8s-provider + prometheus-provider + trace-provider + probe-executor |
-|| `sre-agent-server` | REST API + Web UI + LLM 端点 | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
-|| `demo-services` | 仪表化的 Spring Boot 微服务，用于端到端 RCA 验证（Step U） | Spring Boot + Micrometer |
+| 模块 | 职责 | 关键依赖 |
+|---|---|---|
+| `sre-agent-core` | 领域模型、RCA 工作流、评分、报告、证据分类体系（Step Q） | 仅 Jackson |
+| `sre-agent-llm` | LLM 辅助综合分析（仅限咨询性叙述）+ LLM 假设提议器（仅限咨询性提议）+ `OpenAiCompatibleLlmClient`（真实 LLM，兼容 OpenAI API） | core + Jackson |
+| `sre-agent-k8s-provider` | K8s fixture 证据提供者 | core + Jackson |
+| `sre-agent-prometheus-provider` | Prometheus 指标证据提供者（fixture + HTTP） | core + Jackson |
+| `sre-agent-loki-provider` | Loki 日志证据提供者（fixture + HTTP） | core + Jackson |
+| `sre-agent-alertmanager-provider` | Alertmanager 告警证据提供者（fixture + HTTP）— 告警生命周期、事件映射、严重性证据 | core + Jackson |
+| `sre-agent-trace-provider` | 分布式追踪证据提供者（fixture + HTTP）— span 延迟、错误 span、服务依赖图 | core + Jackson |
+| `sre-agent-probe-executor` | 探测执行框架 — 将 LLM 生成的 ProbeIntent 路由到证据提供者，收集信息性证据 | core + llm + Jackson |
+| `sre-agent-cli` | 命令行界面 | Picocli + core + llm + k8s-provider + prometheus-provider + loki-provider + alertmanager-provider + trace-provider + probe-executor |
+| `sre-agent-server` | REST API + Web UI + LLM 端点 + 实时场景编排（Phase 4） | Spring Boot + core + llm + k8s-provider + prometheus-provider + probe-executor |
+| `demo-services` | 仪表化的 Spring Boot 微服务，用于端到端 RCA 验证（Step U）+ 合成流量生成（Phase 4） | Spring Boot + Micrometer |
 
 ### 为什么 Core 零 Spring 依赖
 
@@ -715,25 +732,27 @@ core ← llm
 core ← k8s-provider
 core ← prometheus-provider
 core ← loki-provider
+core ← alertmanager-provider
 core ← trace-provider
 core ← probe-executor
 llm ← probe-executor
+llm ← cli
+llm ← server
 k8s-provider ← cli
 k8s-provider ← server
 prometheus-provider ← cli
 prometheus-provider ← server
+alertmanager-provider ← cli
 trace-provider ← cli
 probe-executor ← cli
 probe-executor ← server
-llm  ← cli
-llm  ← server
-core ← cli (also via k8s-provider + prometheus-provider + trace-provider + probe-executor)
+core ← cli (also via llm + k8s-provider + prometheus-provider + alertmanager-provider + trace-provider + probe-executor)
 cli  ↗   ↖ server  (适配器之间无依赖)
 ```
 
 ### 演示服务拓扑（`demo-services`）
 
-Step U 引入了 `demo-services` — 一个独立的 Maven 模块，包含三个仪表化的 Spring Boot 微服务，为端到端 RCA 验证提供真实的目标拓扑。
+Step U 引入了 `demo-services` — 一个独立的 Maven 模块，包含三个仪表化的 Spring Boot 微服务，为端到端 RCA 验证提供真实的目标拓扑。Phase 4 增加了合成流量生成能力。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -742,6 +761,7 @@ Step U 引入了 `demo-services` — 一个独立的 Maven 模块，包含三个
 │  Traffic Generator ──→ order-service ──→ payment-service  │
 │                                   └──→ inventory-service │
 │         (所有服务暴露 /actuator/prometheus)                │
+│         (Phase 4: /traffic 端点用于合成流量生成)            │
 └──────────────┬───────────────────────────────────────────┘
                ↓ (Prometheus 抓取所有服务)
 ┌──────────────────────────────────────────────────────────┐
@@ -755,10 +775,11 @@ Step U 引入了 `demo-services` — 一个独立的 Maven 模块，包含三个
 - 故障注入通过 REST API 运行时控制（`POST /api/demo-services/fault/*`），无需代码变更
 - 所有服务通过 `/actuator/prometheus` 暴露 Micrometer 指标，支持实时证据收集
 - 服务拓扑明确：`order-service` 同时调用 `payment-service` 和 `inventory-service`
+- **Phase 4**：`POST /traffic` 端点支持合成流量生成，模拟真实请求负载进行端到端验证
 
 ### LLM 模块（`sre-agent-llm`）
 
-Step G 引入了 `sre-agent-llm` — 一个纯 Java 模块（零 Spring 依赖），在确定性 RCA 管道之上增加了**仅限咨询性**的 LLM 辅助综合分析。Step R 扩展了该模块，增加了 LLM 假设提议器（`ai.sreagent.llm.proposer`）。
+Step G 引入了 `sre-agent-llm` — 一个纯 Java 模块（零 Spring 依赖），在确定性 RCA 管道之上增加了**仅限咨询性**的 LLM 辅助综合分析。Step R 扩展了该模块，增加了 LLM 假设提议器（`ai.sreagent.llm.proposer`）。Phase 4 增加了 `OpenAiCompatibleLlmClient`（真实 LLM 客户端，兼容 OpenAI API）和 `LlmHypothesisProposerImpl`（基于真实 LLM 的假设提议器）。
 
 **关键架构不变量：LLM 层不能更改决策、置信度分数或证据。** 它只添加叙述性上下文（执行摘要、推理过程、不确定性说明）和咨询性假设提议来帮助值班工程师解读确定性结果。
 
@@ -768,12 +789,14 @@ Step G 引入了 `sre-agent-llm` — 一个纯 Java 模块（零 Spring 依赖�
 |---|---|
 | `LlmClient` | LLM 补全接口。单一方法：`complete(LlmRequest) → LlmResponse`。实现可插拔。 |
 | `MockLlmClient` | 确定性模拟实现。返回可预测的 RCA 辅助文本，无需网络访问。未配置真实 LLM 时作为默认值使用。 |
+| `OpenAiCompatibleLlmClient` | 真实 LLM 客户端实现（Phase 4）。通过 HTTP 调用任何 OpenAI 兼容 API（OpenAI、Azure OpenAI、Ollama、vLLM 等）。由 `LLM_PROVIDER` 环境变量激活。 |
 | `LlmPromptBuilder` | 从 `InvestigationResult` 构建 system + user 提示词。嵌入严格防护措施（系统提示词禁止覆盖决策/分数/编造证据）。 |
 | `LlmReportSynthesizer` | 编排流程：构建提示词 → 调用 `LlmClient` → 解析 markdown 段落 → 构建 `LlmEnhancedReport`。确定性字段始终来自 `InvestigationResult`，绝不来自 LLM 输出。 |
 | `LlmEnhancedReport` | 输出记录：基础决策字段（确定性）+ LLM 叙述字段（咨询性）。`advisoryOnly` 标志始终为 `true`。 |
 | `LlmRequest` / `LlmResponse` | LLM 客户端接口的值对象。 |
 | `LlmHypothesisProposer` | LLM 假设提议接口（SPI）。Step R。 |
 | `MockLlmHypothesisProposer` | 确定性模拟提议实现。Step R。 |
+| `LlmHypothesisProposerImpl` | 真实 LLM 假设提议实现（Phase 4）。使用 `LlmClient` 进行实际的 LLM 调用。 |
 | `LlmHypothesisProposalPromptBuilder` | 构建证据感知的提议提示词。Step R。 |
 | `LlmProposalTriggerPolicy` | 触发策略：仅在不确定时提议。Step R。 |
 | `ProposalGuardrail` | 强制执行仅咨询性约束。Step R。 |
@@ -782,7 +805,7 @@ Step G 引入了 `sre-agent-llm` — 一个纯 Java 模块（零 Spring 依赖�
 
 Server 模块通过 `LlmSynthesisService`（Spring `@Service`）接入 LLM：
 - 默认：使用 `MockLlmClient`（确定性，无网络，无需 API 密钥）
-- 未来：`resolveClient()` 检查 `LLM_PROVIDER` 环境变量；配置不完整时回退到 mock
+- Phase 4：`resolveClient()` 检查 `LLM_PROVIDER` 环境变量；配置为 `openai_compatible` 时使用 `OpenAiCompatibleLlmClient`；配置不完整时回退到 mock
 - 暴露 REST 端点用于 LLM 增强综合分析
 
 #### 防护措施（Guardrails）
@@ -1075,7 +1098,7 @@ EventTraceEntry {
 
 | 扩展 | 添加内容 | 位置 |
 |---|---|---|
-| OpenAI 兼容 LLM 提供者 | `OpenAiCompatibleClient implements LlmClient` — HTTP 客户端调用任意 OpenAI 兼容 API（OpenAI、Azure OpenAI、Ollama、vLLM 等） | `sre-agent-llm/client/` |
+| ~~OpenAI 兼容 LLM 提供者~~ | ✅ `OpenAiCompatibleLlmClient implements LlmClient` — Phase 4 已实现 | `sre-agent-llm/client/` |
 | 自定义 LLM 提示词策略 | 针对不同提示词格式或模型的替代 `LlmPromptBuilder` 实现 | `sre-agent-llm/prompt/` |
 | 新的诊断模式 | 添加到 `BuiltinPatterns` 或创建 `CustomPatternLoader` | `sre-agent-core/patterns/` |
 | 持久化存储 | 用 JDBC/Redis 替换 `InMemoryInvestigationStore` | `sre-agent-server/service/` |

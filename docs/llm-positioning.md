@@ -148,6 +148,7 @@ public interface LlmClient {
 - `LlmRequest` — record with `systemPrompt`, `userPrompt`, and optional `metadata` map
 - `LlmResponse` — record with `content`, `provider`, and `mock` flag
 - `MockLlmClient` — deterministic implementation that returns a pre-built Scenario E narrative without network access. Used as default when no real LLM is configured.
+- `OpenAiCompatibleLlmClient` — **Phase 4 addition.** Production LLM client that connects to any OpenAI-compatible endpoint via environment variables (`LLM_PROVIDER`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`). Features smart URL construction that handles Zhipu, OpenAI, Azure, Ollama, and vLLM endpoints automatically. E2E verified with Zhipu glm-4-flash.
 
 #### `LlmPromptBuilder`
 
@@ -232,12 +233,26 @@ Both endpoints return `LlmEnhancedReport` as JSON.
 
 `LlmSynthesisService` (in `sre-agent-server`) wires the components together:
 - Defaults to `MockLlmClient` when `LLM_PROVIDER` env var is unset or "mock"
-- Supports future real providers via `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` env vars
+- **Phase 4: `OpenAiCompatibleLlmClient` activates when `LLM_PROVIDER=openai`** — supports Zhipu, OpenAI, Azure, Ollama, vLLM
+- Configured via `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` env vars
 - Auto-runs Scenario E investigation if no cached result exists
+
+`LiveScenarioService` (Phase 4 addition) adds two LLM integration paths:
+1. `runLlmProposal()` — LLM proposes additional root cause hypotheses (advisoryOnly=true)
+2. `runLlmReportSynthesis()` — LLM generates enhanced narrative report with Chinese support
+
+### LLM Hypothesis Proposal (Phase 4)
+
+`LlmHypothesisProposerImpl` is a new Phase 4 component that:
+- Takes the collected evidence as context
+- Sends it to the LLM via `LlmHypothesisProposalPromptBuilder` (Chinese SYSTEM_PROMPT)
+- Parses LLM response into `UnverifiedHypothesisProposal` objects
+- All proposals are marked `advisoryOnly=true` and `canAffectDecision=false`
+- Falls back to `MockLlmHypothesisProposer` if LLM is unavailable or fails
 
 ### Test Coverage
 
-111 tests covering the full LLM layer: `LlmPromptBuilder`, `LlmReportSynthesizer`, `MockLlmClient`, server integration, and API endpoint tests.
+1194 tests covering the full LLM layer: `LlmPromptBuilder`, `LlmReportSynthesizer`, `MockLlmClient`, `OpenAiCompatibleLlmClient`, `LlmHypothesisProposerImpl`, server integration, and API endpoint tests.
 
 ---
 
@@ -262,12 +277,13 @@ Both endpoints return `LlmEnhancedReport` as JSON.
 │  (deterministic)        │  │  (advisory narrative layer)  │
 │                         │  │                               │
 │  InvestigationWorkflow  │  │  LlmClient (interface)        │
-│    ├─ HypothesisEngine  │  │    └─ MockLlmClient           │
-│    ├─ VerificationEngine│  │  LlmPromptBuilder             │
-│    ├─ ConfidenceScorer  │  │    ├─ System prompt w/rules   │
+│    ├─ HypothesisEngine  │  │    ├─ MockLlmClient           │
+│    ├─ VerificationEngine│  │    └─ OpenAiCompatible* ✅     │
+│    ├─ ConfidenceScorer  │  │  LlmPromptBuilder             │
 │    ├─ HypothesisCompar. │  │    └─ User prompt (structured)│
 │    └─ MarkdownReporter  │  │  LlmReportSynthesizer         │
 │                         │  │    └─ Section extraction       │
+│                         │  │  LlmHypothesisProposerImpl ✅  │
 │  InvestigationResult ───┼──▶  LlmEnhancedReport            │
 │  (deterministic output) │  │    ├─ base* (from workflow)   │
 │                         │  │    └─ narrative (from LLM)    │
@@ -554,12 +570,13 @@ public record LlmEnhancedReport(
 │  (deterministic)        │  │  (advisory narrative layer)  │
 │                         │  │                               │
 │  InvestigationWorkflow  │  │  LlmClient (interface)        │
-│    ├─ HypothesisEngine  │  │    └─ MockLlmClient           │
-│    ├─ VerificationEngine│  │  LlmPromptBuilder             │
-│    ├─ ConfidenceScorer  │  │    ├─ System prompt w/rules   │
+│    ├─ HypothesisEngine  │  │    ├─ MockLlmClient           │
+│    ├─ VerificationEngine│  │    └─ OpenAiCompatible* ✅     │
+│    ├─ ConfidenceScorer  │  │  LlmPromptBuilder             │
 │    ├─ HypothesisCompar. │  │    └─ User prompt (structured)│
 │    └─ MarkdownReporter  │  │  LlmReportSynthesizer         │
 │                         │  │    └─ Section extraction       │
+│                         │  │  LlmHypothesisProposerImpl ✅  │
 │  InvestigationResult ───┼──▶  LlmEnhancedReport            │
 │  (deterministic output) │  │    ├─ base* (from workflow)   │
 │                         │  │    └─ narrative (from LLM)    │

@@ -22,7 +22,7 @@ Run these **before the interview** to avoid live debugging:
 cd ~/work/projects/sre-production-agent
 source ~/.zshrc
 mvn test
-# Expected: 560 tests passing
+# Expected: 1194 tests passing
 
 # 2. Build CLI jar
 mvn -pl sre-agent-cli package -DskipTests
@@ -30,6 +30,12 @@ mvn -pl sre-agent-cli package -DskipTests
 
 # 2.1 Install LLM jar
 mvn -pl sre-agent-llm install -DskipTests
+
+# 2.2 (Optional) Set LLM environment variables for real LLM
+# export LLM_PROVIDER=openai-compatible
+# export LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+# export LLM_API_KEY=your-api-key
+# export LLM_MODEL=glm-4-flash
 
 # 3. Verify JSON data files
 python3 -m json.tool examples/alerts/competing_hypotheses.json > /dev/null
@@ -131,15 +137,17 @@ curl -s http://localhost:8080/api/investigations/$INCIDENT_ID/trace | python3 -m
 
 ---
 
-## Demo Part 2.5: LLM-Enhanced Report Demo (1 minute)
+## Demo Part 2.5: LLM-Enhanced Report Demo — 真实 LLM 接入 (1 minute)
 
-### Step 1: Generate LLM summary via curl
+### Step 1: Generate LLM summary via curl (真实 LLM)
 
 ```bash
-curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary | python3 -m json.tool
+# 使用真实 LLM（需要设置 LLM 环境变量，见 Pre-Demo Setup #2.2）
+# runLlm=true 参数触发 OpenAiCompatibleLlmClient 调用真实 LLM API
+curl -s -X POST "http://localhost:8080/api/investigations/scenario-e/llm-summary?runLlm=true" | python3 -m json.tool
 ```
 
-**Say:** "Now we kick off the LLM-assisted explanation. This calls a dedicated endpoint that sends the investigation context to the LLM module for narrative synthesis. Notice it returns structured fields — executive summary, reasoning narrative, uncertainty explanation, next steps, and limitations."
+**Say:** "Now we trigger the LLM-assisted explanation with a **real LLM backend**. The `runLlm=true` parameter activates `OpenAiCompatibleLlmClient`, which calls the configured LLM API (e.g., GLM-4-flash via BigModel). The system prompt enforces guardrails — the LLM can only narrate, never decide. Notice it returns structured fields — executive summary, reasoning narrative, uncertainty explanation, next steps, and limitations."
 
 **Highlight key fields in the response:**
 ```json
@@ -149,13 +157,23 @@ curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary 
   "uncertaintyExplanation": "Score gap of 0.06 indicates insufficient evidence...",
   "nextSteps": ["Collect pre-deployment baseline metrics...", "Check downstream service health..."],
   "limitations": ["LLM did not verify claims against raw evidence...", "Proposed next steps are unverified..."],
-  "status": "ADVISORY"
+  "status": "ADVISORY",
+  "modelProvider": "glm-4-flash"
 }
 ```
 
-**Say:** "The `status` field is `ADVISORY` — not `AUTHORATIVE` — because the LLM did not independently verify these claims against raw evidence. Everything here is a suggestion for the on-call engineer, not a decision."
+**Say:** "The `status` field is `ADVISORY` — not `AUTHORATIVE` — because the LLM did not independently verify these claims against raw evidence. The `modelProvider` field shows which LLM generated this output — in this case, `glm-4-flash` via the OpenAI-compatible API."
 
-### Step 2: Show the LLM section in the Web UI
+### Step 2: Fallback to mock if LLM unavailable
+
+```bash
+# 如果 LLM API 不可用，不带 runLlm 参数使用 MockLlmClient
+curl -s -X POST "http://localhost:8080/api/investigations/scenario-e/llm-summary" | python3 -m json.tool
+```
+
+**Say:** "Without `runLlm=true`, the system falls back to `MockLlmClient` — a deterministic response. This graceful degradation ensures the demo works even without an LLM API key."
+
+### Step 3: Show the LLM section in the Web UI
 
 1. Navigate to http://localhost:8080/
 2. Click **"Run Scenario E"** if not already done
@@ -171,7 +189,7 @@ curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary 
 - **Next Steps** — actionable suggestions, each marked as an unverified proposal
 - **Limitations** — honest disclosure of what the LLM can and cannot guarantee
 
-### Step 3: Explain the guardrails
+### Step 4: Explain the guardrails
 
 **Say (key talking points):**
 
@@ -179,11 +197,11 @@ curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary 
 
 2. **Deterministic baseline preserved:** "The core scoring engine remains fully deterministic — same input, same output, every step auditable. The LLM layer is additive, not replacement."
 
-3. **MockLlmClient for demo:** "Right now we're using a MockLlmClient that returns a deterministic response. In production, this would call a real LLM, but the guardrails — advisory badges, limitations section, no score modification — remain the same."
+3. **MockLlmClient for demo:** "Right now we're using a MockLlmClient that returns a deterministic response. In production, this would call a real LLM. Phase 4 (cdaecac) added `OpenAiCompatibleLlmClient` — a real LLM client supporting any OpenAI-compatible API. With `runLlm=true`, the system calls GLM-4-flash for real-time synthesis. The guardrails — advisory badges, limitations section, no score modification — remain the same regardless of which client is active."
 
 4. **Two-tier trust model:** "The investigation report has two tiers: the **Authoritative** tier (deterministic scores, evidence, event trace) and the **Advisory** tier (LLM narrative, next steps, explanations). The UI makes this distinction visually clear with badges."
 
-### Step 4: Also show per-investigation LLM endpoint
+### Step 5: Also show per-investigation LLM endpoint
 
 ```bash
 # If you have a specific investigation ID:
@@ -197,13 +215,13 @@ curl -s -X POST http://localhost:8080/api/investigations/{id}/llm-summary | pyth
 If the LLM endpoint is unavailable or returns an error:
 
 1. **Show the static mock response** — run: `cat docs/llm-example-response.json` (pre-generated example)
-2. **Explain the architecture** — point out `sre-agent-llm` module in the codebase: `ls sre-agent-llm/src/main/java/`
-3. **Focus on the design** — "The important thing isn't the LLM output itself, but the guardrails around it — advisory badges, no score modification, explicit limitations."
-4. **Fall back to the core demo** — "The deterministic pipeline is the star of the show. The LLM layer is an optional enhancement that degrades gracefully."
+2. **Explain the architecture** — point out `OpenAiCompatibleLlmClient` in the codebase: `cat sre-agent-llm/src/main/java/ai/sreagent/llm/client/OpenAiCompatibleLlmClient.java`
+3. **Focus on the design** — "The important thing isn't the LLM output itself, but the guardrails around it — advisory badges, no score modification, explicit limitations. The real LLM client (`OpenAiCompatibleLlmClient`) uses the same guardrails as `MockLlmClient`."
+4. **Fall back to the core demo** — "The deterministic pipeline is the star of the show. The LLM layer is an optional enhancement that degrades gracefully — `MockLlmClient` kicks in automatically."
 
 ---
 
-## Demo Part 3: Web UI — 中文报告 + LLM Proposal 卡片（1.5 分钟）
+## Demo Part 3: Web UI — 中文报告 + LLM Proposal 卡片 + 真实 LLM（1.5 分钟）
 
 ### 步骤 1：打开浏览器
 
@@ -219,6 +237,7 @@ If the LLM endpoint is unavailable or returns an error:
 - **评分柱状图**——"近期部署引入了回归缺陷"（绿色/领先）、"下游依赖延迟导致服务降级"（黄色/竞争）、"Pod OOMKilled 或资源超限"（灰色/证据不足）
 - **Markdown 报告**——现在输出**中文报告**（"竞争假设分析报告"），包含概要/调查时间线/假设评分/调查决策
 - **LLM Proposal 卡片**——如果触发了 LLM 假设提案，会在下方显示卡片：提案标题、推理过程、观测信号、验证计划、置信度、状态
+- **LLM 真实响应标识**——使用真实 LLM 时，LLM 区域显示 `modelProvider` 标签（如 "glm-4-flash"），与 Mock Provider 明确区分
 
 ### 步骤 4：展示实时排查控制台（可选）
 
@@ -266,11 +285,12 @@ Incident created
 Evidence loaded
 Hypotheses generated: 3
 ...
-Decision: competing_hypotheses
-Selected: hyp_deployment_regression (0.64)
-Competing: hyp_downstream_dependency_latency (0.58)
+Decision: 竞争假设
+Selected: hyp_deployment_regression (0.64) — "近期部署引入了回归缺陷"
+Competing: hyp_downstream_dependency_latency (0.58) — "下游依赖延迟导致服务降级"
 Score gap: 0.06
 Report written to: /tmp/rca-report.md
+LLM Summary: available (modelProvider: glm-4-flash)
 ```
 
 ### REST API
@@ -305,6 +325,13 @@ If Java/build fails:
 2. Walk through source code structure in an IDE
 3. Focus the conversation on architecture and design decisions
 
+If the real LLM API is unavailable:
+
+1. Run the demo without `runLlm=true` — `MockLlmClient` provides deterministic fallback
+2. Show `OpenAiCompatibleLlmClient` source code as proof of real LLM integration
+3. Explain the guardrails are identical for both mock and real clients
+4. Focus on the deterministic pipeline — "The LLM is advisory-only; the core scoring is fully deterministic"
+
 If nothing works:
 
 1. Open `docs/architecture.md` and walk through the diagrams
@@ -337,11 +364,20 @@ If nothing works:
 cd ~/work/projects/sre-production-agent
 source ~/.zshrc
 mvn test
-# 预期结果：560 个测试全部通过
+# 预期结果：1194 个测试全部通过
 
 # 2. 构建 CLI jar 包
 mvn -pl sre-agent-cli package -DskipTests
 # 应无错误完成
+
+# 2.1 安装 LLM jar 包
+mvn -pl sre-agent-llm install -DskipTests
+
+# 2.2 （可选）设置真实 LLM 环境变量
+# export LLM_PROVIDER=openai-compatible
+# export LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+# export LLM_API_KEY=your-api-key
+# export LLM_MODEL=glm-4-flash
 
 # 3. 验证 JSON 数据文件
 python3 -m json.tool examples/alerts/competing_hypotheses.json > /dev/null
@@ -443,15 +479,17 @@ curl -s http://localhost:8080/api/investigations/$INCIDENT_ID/trace | python3 -m
 
 ---
 
-## 演示第二部分（补充）：LLM 增强报告演示（1 分钟）
+## 演示第二部分（补充）：LLM 增强报告演示 — 真实 LLM 接入（1 分钟）
 
-### 步骤 1：通过 curl 生成 LLM 摘要
+### 步骤 1：通过 curl 生成 LLM 摘要（真实 LLM）
 
 ```bash
-curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary | python3 -m json.tool
+# 使用真实 LLM（需要设置 LLM 环境变量，见演示前准备 #2.2）
+# runLlm=true 参数触发 OpenAiCompatibleLlmClient 调用真实 LLM API
+curl -s -X POST "http://localhost:8080/api/investigations/scenario-e/llm-summary?runLlm=true" | python3 -m json.tool
 ```
 
-**讲解：** "现在我们启动 LLM 辅助解释功能。这个端点将调查上下文发送到 LLM 模块进行叙述性综合。注意它返回的是结构化字段——执行摘要、推理叙述、不确定性解释、后续步骤和局限性说明。"
+**讲解：** "现在我们使用**真实 LLM 后端**触发 LLM 辅助解释。`runLlm=true` 参数激活 `OpenAiCompatibleLlmClient`，调用配置的 LLM API（如通过 BigModel 的 GLM-4-flash）。系统提示词强制执行安全防护——LLM 只能叙述，不能决策。注意它返回的是结构化字段——执行摘要、推理叙述、不确定性解释、后续步骤和局限性说明。"
 
 **重点展示响应中的关键字段：**
 ```json
@@ -461,13 +499,23 @@ curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary 
   "uncertaintyExplanation": "Score gap of 0.06 indicates insufficient evidence...",
   "nextSteps": ["Collect pre-deployment baseline metrics...", "Check downstream service health..."],
   "limitations": ["LLM did not verify claims against raw evidence...", "Proposed next steps are unverified..."],
-  "status": "ADVISORY"
+  "status": "ADVISORY",
+  "modelProvider": "glm-4-flash"
 }
 ```
 
-**讲解：** "`status` 字段是 `ADVISORY`（建议性的）——而非 `AUTHORATIVE`（权威性的）——因为 LLM 没有独立根据原始证据验证这些声明。这里的一切都是给值班工程师的建议，而非决策。"
+**讲解：** "`status` 字段是 `ADVISORY`（建议性的）——而非 `AUTHORATIVE`（权威性的）——因为 LLM 没有独立根据原始证据验证这些声明。`modelProvider` 字段显示是哪个 LLM 生成了此输出——在本例中是 `glm-4-flash`，通过 OpenAI 兼容 API 调用。"
 
-### 步骤 2：在 Web UI 中展示 LLM 部分
+### 步骤 2：LLM 不可用时回退到 Mock
+
+```bash
+# 如果 LLM API 不可用，不带 runLlm 参数使用 MockLlmClient
+curl -s -X POST "http://localhost:8080/api/investigations/scenario-e/llm-summary" | python3 -m json.tool
+```
+
+**讲解：** "不带 `runLlm=true` 时，系统回退到 `MockLlmClient`——返回确定性响应。这种优雅降级确保即使没有 LLM API Key，演示也能正常运行。"
+
+### 步骤 3：在 Web UI 中展示 LLM 部分
 
 1. 导航到 http://localhost:8080/
 2. 如尚未运行，点击 **"Run Scenario E"**
@@ -483,7 +531,7 @@ curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary 
 - **后续步骤（Next Steps）**——可操作的建议，每条都标记为未经验证的提案
 - **局限性说明（Limitations）**——坦诚披露 LLM 能做什么和不能做什么
 
-### 步骤 3：解释安全防护机制
+### 步骤 4：解释安全防护机制
 
 **讲解（关键谈话要点）：**
 
@@ -491,11 +539,11 @@ curl -s -X POST http://localhost:8080/api/investigations/scenario-e/llm-summary 
 
 2. **确定性基线完整保留：** "核心评分引擎保持完全确定性——相同输入，相同输出，每一步可审计。LLM 层是附加的，而非替代的。"
 
-3. **演示使用 MockLlmClient：** "目前我们使用的是 MockLlmClient，返回确定性响应。在生产环境中，这会调用真正的 LLM，但安全防护机制——建议标签、局限性部分、不修改分数——保持不变。"
+3. **演示使用 MockLlmClient 和真实 LLM：** "目前默认使用 MockLlmClient 返回确定性响应。Phase 4 (cdaecac) 新增了 `OpenAiCompatibleLlmClient`——一个真实 LLM 客户端，支持任何 OpenAI 兼容 API。通过 `runLlm=true` 参数，系统调用 GLM-4-flash 进行实时综合。无论使用哪个客户端，安全防护机制——建议标签、局限性部分、不修改分数——完全一致。"
 
 4. **双层信任模型：** "调查报告有两个层级：**权威（Authoritative）**层（确定性评分、证据、事件追踪）和**建议（Advisory）**层（LLM 叙述、后续步骤、解释）。UI 通过标签在视觉上清楚地区分这两层。"
 
-### 步骤 4：同时展示按调查 ID 的 LLM 端点
+### 步骤 5：同时展示按调查 ID 的 LLM 端点
 
 ```bash
 # 如果你有特定的调查 ID：
@@ -509,13 +557,13 @@ curl -s -X POST http://localhost:8080/api/investigations/{id}/llm-summary | pyth
 如果 LLM 端点不可用或返回错误：
 
 1. **展示静态模拟响应**——运行：`cat docs/llm-example-response.json`（预生成的示例）
-2. **解释架构**——指出代码库中的 `sre-agent-llm` 模块：`ls sre-agent-llm/src/main/java/`
-3. **聚焦设计**——"重要的不是 LLM 输出本身，而是围绕它的安全防护——建议标签、不修改分数、明确的局限性说明。"
-4. **回退到核心演示**——"确定性流程才是主角。LLM 层是一个可选的增强功能，能够优雅降级。"
+2. **解释架构**——指出代码库中的 `OpenAiCompatibleLlmClient`：`cat sre-agent-llm/src/main/java/ai/sreagent/llm/client/OpenAiCompatibleLlmClient.java`
+3. **聚焦设计**——"重要的不是 LLM 输出本身，而是围绕它的安全防护——建议标签、不修改分数、明确的局限性说明。真实 LLM 客户端（`OpenAiCompatibleLlmClient`）使用与 `MockLlmClient` 完全相同的安全防护机制。"
+4. **回退到核心演示**——"确定性流程才是主角。LLM 层是一个可选的增强功能，能够优雅降级——`MockLlmClient` 会自动接管。"
 
 ---
 
-## 演示第三部分：Web UI — 中文报告 + LLM Proposal 卡片（1.5 分钟）
+## 演示第三部分：Web UI — 中文报告 + LLM Proposal 卡片 + 真实 LLM（1.5 分钟）
 
 ### 步骤 1：打开浏览器
 
@@ -531,6 +579,7 @@ curl -s -X POST http://localhost:8080/api/investigations/{id}/llm-summary | pyth
 - **评分柱状图**——"近期部署引入了回归缺陷"（绿色/领先）、"下游依赖延迟导致服务降级"（黄色/竞争）、"Pod OOMKilled 或资源超限"（灰色/证据不足）
 - **Markdown 报告**——现在输出**中文报告**（"竞争假设分析报告"），包含概要/调查时间线/假设评分/调查决策
 - **LLM Proposal 卡片**——如果触发了 LLM 假设提案，会在下方显示卡片：提案标题、推理过程、观测信号、验证计划、置信度、状态
+- **LLM 真实响应标识**——使用真实 LLM 时，LLM 区域显示 `modelProvider` 标签（如 "glm-4-flash"），与 Mock Provider 明确区分
 
 ### 步骤 4：展示实时排查控制台（可选）
 

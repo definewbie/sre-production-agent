@@ -4,8 +4,8 @@
 
 || Target Role | Priority Step | Reason |
 |---|---|---|
-|| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → ~~Step V~~ ✅ Done → Step W: Post-Probe RCA Re-run | Demonstrates principled LLM + evidence + probe integration ||
-|| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → ~~Step V~~ ✅ Done → Step W: Post-Probe RCA Re-run | Demonstrates full observability pipeline ||
+||| AI Agent Engineer | ~~Steps G–J~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → ~~Step V~~ ✅ Done → ~~Phase 4~~ ✅ Done → Step W: Post-Probe RCA Re-run | Demonstrates principled LLM + evidence + probe integration ||
+||| SRE / Platform Engineer | ~~Steps H–Q~~ ✅ Done → ~~Step R~~ ✅ Done → ~~Step S~~ ✅ Done → ~~Step T~~ ✅ Done → ~~Step U~~ ✅ Done → ~~Step V~~ ✅ Done → ~~Phase 4~~ ✅ Done → Step W: Post-Probe RCA Re-run | Demonstrates full observability pipeline ||
 || Engineering Manager / Architect | Polish architecture narrative | Demonstrates design trade-off reasoning |
 
 ---
@@ -553,6 +553,45 @@ RCA workflow: Evidence → Hypothesis → Verification → Confidence → Decisi
 
 ---
 
+## Phase 4 — 中文化全链路 + 真实 LLM 接入 + E2E 验证 ✅ COMPLETED
+
+**Status:** Completed. Full RCA output chain localized to Chinese, LLM Proposal UI cards, and real LLM (OpenAI-compatible API) end-to-end validation.
+
+**What was built:**
+
+### P1 — 中文化全链路
+
+| 组件 | 改动 | 说明 |
+|------|------|------|
+| `HypothesisEngine` | 假设 title / candidateCause 中文 | deployment_regression → "近期部署引入了回归缺陷" 等 4 个模板 |
+| `MarkdownReporter` | 全中文报告输出 | 标题："竞争假设分析报告"，段落：概要/调查时间线/假设评分/调查决策 |
+| `index.html` | decision_type 中文映射 | `likely_root_cause` → "高置信根因" 等 5 种映射 |
+| `index.html` | LLM Proposal 卡片 | 显示 AI 提案的 title/reasoning/signals/verificationPlan/confidence/status |
+| `index.html` | Report 渲染增强 | markdown→HTML 转换（标题/加粗/列表/表格） |
+| 6 个测试文件 | 断言同步更新 | 所有断言从英文改中文 |
+
+### P2 — 真实 LLM 接入 + E2E 验证
+
+| 组件 | 改动 | 说明 |
+|------|------|------|
+| `OpenAiCompatibleLlmClient` | 新增实现类 | 支持 OpenAI / DeepSeek / OpenRouter 等兼容 API（`LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL`） |
+| `LiveScenarioController` | `?runLlm=true` 参数 | `GET /simulate?runLlm=true` 或 `POST /run { runLlmProposal: true }` 触发真实 LLM |
+| `LiveScenarioService` | LLM proposal 集成 | 根据 `runLlm` 标志选择 `MockLlmHypothesisProposer` 或 `OpenAiCompatibleLlmClient` |
+| Bug fixes | 3 个修复 | LiveScenarioResult JSON 序列化、中文 hypothesis 映射、API 字段对齐 |
+
+**中文映射表：**
+
+- 假设：`deployment_regression`→"近期部署引入了回归缺陷"、`downstream_dependency`→"下游依赖延迟导致服务降级"、`pod_oom`→"Pod OOMKilled 或资源超限"、`pod_crash_loop`→"容器崩溃循环导致服务不可用"
+- 决策：`LIKELY_ROOT_CAUSE`→"高置信根因"、`PROBABLE_ROOT_CAUSE`→"可能根因"、`COMPETING_HYPOTHESES`→"竞争假设"、`UNCERTAIN`→"不确定-需更多证据"、`INSUFFICIENT_DATA`→"数据不足"
+
+**Why this matters:**
+- Demonstrates full-stack localization for non-English-speaking SRE teams
+- Proves LLM integration works end-to-end with real API calls, not just mock clients
+- Validates that the advisory-only guardrail architecture holds with real LLM responses
+- **1194 tests, 0 failures.**
+
+---
+
 ## Step T: Local Observability Stack ✅ COMPLETED
 
 **Status:** Completed. Observability status service with health checking, local stack management scripts, and Live Lab Status UI.
@@ -629,8 +668,8 @@ These are not committed — listed for discussion only:
 
 | 目标岗位 | 优先步骤 | 原因 |
 |---|---|---|
-|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → ~~Step V~~ ✅ 已完成 → Step W: 探测后 RCA 重跑 | 展示了规范的 LLM + 证据 + 探测集成能力 ||
-|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → ~~Step V~~ ✅ 已完成 → Step W: 探测后 RCA 重跑 | 展示了完整的可观测性流水线 ||
+|| AI Agent 工程师 | ~~Steps G–J~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → ~~Step V~~ ✅ 已完成 → ~~Phase 4~~ ✅ 已完成 → Step W: 探测后 RCA 重跑 | 展示了规范的 LLM + 证据 + 探测集成能力 ||
+|| SRE / 平台工程师 | ~~Steps H–Q~~ ✅ 已完成 → ~~Step R~~ ✅ 已完成 → ~~Step S~~ ✅ 已完成 → ~~Step T~~ ✅ 已完成 → ~~Step U~~ ✅ 已完成 → ~~Step V~~ ✅ 已完成 → ~~Phase 4~~ ✅ 已完成 → Step W: 探测后 RCA 重跑 | 展示了完整的可观测性流水线 ||
 || 工程经理 / 架构师 | 完善架构叙事 | 展示了设计权衡推理能力 |
 
 ---
@@ -922,6 +961,45 @@ ScoredHypothesis (pod_crash_loop, score=0.95, likely_root_cause)
 - Step U：仪表化演示服务（order-service、payment-service、recommend-service）
 - Step V：使用真实可观测性数据的复杂实时 RCA
 - Step W：探测后 RCA 重新运行策略（允许受控证据注入重新调查）
+
+---
+
+## Phase 4 — 中文化全链路 + 真实 LLM 接入 + E2E 验证 ✅ 已完成
+
+**状态：** 已完成。整个 RCA 输出链路从英文转为中文，新增 LLM Proposal UI 卡片展示，并接入真实 LLM（OpenAI-compatible API）完成端到端验证。
+
+**已构建内容：**
+
+### P1 — 中文化全链路
+
+| 组件 | 改动 | 说明 |
+|------|------|------|
+| `HypothesisEngine` | 假设 title / candidateCause 中文 | deployment_regression → "近期部署引入了回归缺陷" 等 4 个模板 |
+| `MarkdownReporter` | 全中文报告输出 | 标题："竞争假设分析报告"，段落：概要/调查时间线/假设评分/调查决策 |
+| `index.html` | decision_type 中文映射 | `likely_root_cause` → "高置信根因" 等 5 种映射 |
+| `index.html` | LLM Proposal 卡片 | 显示 AI 提案的 title/reasoning/signals/verificationPlan/confidence/status |
+| `index.html` | Report 渲染增强 | markdown→HTML 转换（标题/加粗/列表/表格） |
+| 6 个测试文件 | 断言同步更新 | 所有断言从英文改中文 |
+
+### P2 — 真实 LLM 接入 + E2E 验证
+
+| 组件 | 改动 | 说明 |
+|------|------|------|
+| `OpenAiCompatibleLlmClient` | 新增实现类 | 支持 OpenAI / DeepSeek / OpenRouter 等兼容 API（`LLM_BASE_URL` + `LLM_API_KEY` + `LLM_MODEL`） |
+| `LiveScenarioController` | `?runLlm=true` 参数 | `GET /simulate?runLlm=true` 或 `POST /run { runLlmProposal: true }` 触发真实 LLM |
+| `LiveScenarioService` | LLM proposal 集成 | 根据 `runLlm` 标志选择 `MockLlmHypothesisProposer` 或 `OpenAiCompatibleLlmClient` |
+| Bug fixes | 3 个修复 | LiveScenarioResult JSON 序列化、中文 hypothesis 映射、API 字段对齐 |
+
+**中文映射表：**
+
+- 假设：`deployment_regression`→"近期部署引入了回归缺陷"、`downstream_dependency`→"下游依赖延迟导致服务降级"、`pod_oom`→"Pod OOMKilled 或资源超限"、`pod_crash_loop`→"容器崩溃循环导致服务不可用"
+- 决策：`LIKELY_ROOT_CAUSE`→"高置信根因"、`PROBABLE_ROOT_CAUSE`→"可能根因"、`COMPETING_HYPOTHESES`→"竞争假设"、`UNCERTAIN`→"不确定-需更多证据"、`INSUFFICIENT_DATA`→"数据不足"
+
+**重要性：**
+- 展示了面向非英语 SRE 团队的全栈本地化能力
+- 证明 LLM 集成可通过真实 API 调用端到端工作，不仅限于 mock 客户端
+- 验证了仅咨询性防护架构在真实 LLM 响应下依然有效
+- **1194 个测试，0 失败。**
 
 ---
 

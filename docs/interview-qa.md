@@ -135,25 +135,38 @@ The core workflow doesn't change — `InvestigationWorkflow.run()` already accep
 
 ## Q10: When would you add LLM?
 
-After the deterministic workflow is validated against real incidents.
+**Already done.** Phase 4 (commit `cdaecac`) integrates a real LLM via `OpenAiCompatibleLlmClient`.
 
-The sequence:
-1. First, connect real evidence providers (Prometheus, Loki, K8s) — Step H/I
-2. Validate that the scoring and decision logic produces correct results on real incidents
-3. Then add LLM for report synthesis — Step G
+The original sequence was:
+1. First, connect real evidence providers (Prometheus, Loki, K8s) — Step H/I ✅
+2. Validate that the scoring and decision logic produces correct results on real incidents ✅
+3. Then add LLM for report synthesis + hypothesis proposal — Step G / Phase 4 ✅
 
 The reason for this order: **you need to trust the structured output before you let an LLM narrate it.** If the scoring is wrong, a well-written LLM report just makes wrong conclusions sound more convincing.
+
+The LLM is configured via environment variables: `LLM_PROVIDER=openai`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`. It's been E2E validated with Zhipu glm-4-flash (65s, 87KB Chinese report).
 
 ---
 
 ## Q11: What would the LLM be allowed to do?
 
-- Synthesize the structured `InvestigationResult` into a human-readable narrative
+The LLM now handles two roles, both strictly advisory:
+
+1. **Hypothesis Proposal** (`LlmHypothesisProposerImpl`) — Given the evidence context, the LLM proposes additional root cause hypotheses that the deterministic `DiagnosticPattern` engine may not cover. These proposals are marked `advisoryOnly=true` and `canAffectDecision=false`.
+
+2. **Report Synthesis** (`LlmReportSynthesizer`) — Synthesizes the structured `InvestigationResult` into a human-readable narrative with:
+   - Executive summary
+   - Reasoning narrative
+   - Uncertainty assessment
+   - Next steps
+   - Limitations
+
+Additional capabilities:
 - Suggest remediation actions based on the decision and next probes
 - Summarize contradictions in plain language
 - Translate technical findings for non-technical stakeholders
 
-The LLM's input contract would be the `InvestigationResult` record — it contains everything the LLM needs to write a report, and nothing it shouldn't modify.
+The LLM's input contract is the `InvestigationResult` record — it contains everything the LLM needs, and nothing it shouldn't modify. The `OpenAiCompatibleLlmClient` supports any OpenAI-compatible endpoint (Zhipu, OpenAI, Ollama, vLLM) via environment variables.
 
 ---
 
@@ -313,12 +326,23 @@ Swapping in a real provider is a single Spring `@Profile` or configuration switc
 
 ## Q22: How would you swap in a real OpenAI-compatible LLM?
 
-Create a new class implementing `LlmClient` — for example `OpenAiLlmClient` — that calls the OpenAI Chat Completions API (or any compatible endpoint like Azure OpenAI, Ollama, or vLLM). Inject it via Spring's `@ConditionalOnProperty` or `@Profile` so that:
+**Already implemented.** `OpenAiCompatibleLlmClient` is the real implementation, activated via environment variables:
 
-- `MockLlmClient` activates when `llm.provider=mock` (default).
-- `OpenAiLlmClient` activates when `llm.provider=openai`.
+```bash
+export LLM_PROVIDER=openai
+export LLM_API_KEY=your-api-key
+export LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4  # Zhipu
+export LLM_MODEL=glm-4-flash
+```
 
-The interface contract is simple: `String complete(String systemPrompt, String userPrompt)`. The new implementation handles HTTP calls, retry logic, and API key management. `LlmReportSynthesizer` and `LlmPromptBuilder` remain unchanged — they only depend on the `LlmClient` interface.
+The client features smart endpoint URL construction:
+- If base URL ends with `/chat/completions` → use directly
+- If base URL contains `/v4` or `/v3` → append `/chat/completions` (Zhipu-style)
+- Otherwise → append `/v1/chat/completions` (standard OpenAI-style)
+
+This makes it compatible with Zhipu, OpenAI, Azure OpenAI, Ollama, and vLLM without code changes. The `MockLlmClient` activates when `LLM_PROVIDER` is unset or set to `mock`, ensuring all 1194 tests remain deterministic.
+
+**E2E verified:** Zhipu glm-4-flash returns 87KB Chinese LLM-enhanced report in ~65s via `GET /api/live-scenario/simulate?runLlm=true`.
 
 ---
 
@@ -460,6 +484,41 @@ The connection works in three steps:
 This is the critical bridge: Step T provided the observability stack (Prometheus, Grafana), and Step U provides the target services that generate observable telemetry. Together they enable end-to-end RCA validation with real metrics, not just static JSON fixtures.
 
 ---
+
+## Q34: How does the real LLM integration work?
+
+Phase 4 added `OpenAiCompatibleLlmClient` — a production-ready LLM client that connects to any OpenAI-compatible endpoint via environment variables (`LLM_PROVIDER`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`). It features smart URL construction that handles Zhipu, OpenAI, Azure, Ollama, and vLLM endpoint differences automatically.
+
+The integration has two paths:
+1. **LLM Proposal** (`LlmHypothesisProposerImpl`) — The LLM proposes additional root cause hypotheses based on collected evidence. These proposals are marked `advisoryOnly=true` and `canAffectDecision=false` — they cannot influence the deterministic decision.
+2. **Report Synthesis** (`LlmReportSynthesizer`) — The LLM generates a structured narrative report (executive summary, reasoning, uncertainty, next steps, limitations) from the deterministic `InvestigationResult`.
+
+If the LLM is unavailable or fails, both paths fall back to `MockLlmClient` behavior automatically.
+
+---
+
+## Q35: What happens when the LLM is unavailable?
+
+The system is designed to be fully functional without LLM:
+
+1. **Auto-fallback.** If `LLM_PROVIDER` is unset, or if the real LLM client throws an exception, `LlmHypothesisProposerImpl` catches the failure and returns an empty proposal list. The investigation proceeds with only deterministic hypotheses.
+2. **MockLlmClient for tests.** All 1194 tests use `MockLlmClient` — zero external API dependencies, fully deterministic and repeatable.
+3. **Graceful degradation.** The API response includes an `llmProposal` field that's either populated or null. The UI shows "LLM unavailable" rather than crashing.
+
+The key design principle: **the deterministic engine always works, LLM is a bonus.**
+
+---
+
+## Q36: How do you validate that LLM output doesn't corrupt the investigation?
+
+Three guardrails, enforced at different levels:
+
+1. **Compile-time.** `canAffectDecision` is a `boolean` field on `UnverifiedHypothesisProposal` — it's always `false` for LLM proposals, and there's no code path that can set it to `true` for advisory hypotheses.
+2. **Runtime.** The `HypothesisComparator` ignores `advisoryOnly=true` proposals when computing the final `InvestigationDecision`. Only deterministic hypotheses influence the decision.
+3. **Structural.** `LlmEnhancedReport` strictly separates `base*` fields (deterministic engine output) from LLM fields (advisory content). The API consumer can always ignore LLM fields entirely.
+
+---
+
 ## 中文版
 
 ## Q1: 这和一个日志聊天机器人有什么区别？
@@ -597,25 +656,38 @@ Core 工作流无需修改——`InvestigationWorkflow.run()` 已接受 `List<Ev
 
 ## Q10: 什么时候加入 LLM？
 
-在确定性工作流经过真实事件验证之后。
+**已经完成。** Phase 4（commit `cdaecac`）通过 `OpenAiCompatibleLlmClient` 接入了真实 LLM。
 
-顺序如下：
-1. 首先，对接真实证据 provider（Prometheus、Loki、K8s）——Step H/I
-2. 验证评分和决策逻辑在真实事件上产生正确结果
-3. 然后加入 LLM 做报告综合——Step G
+原来的顺序是：
+1. 首先，对接真实证据 provider（Prometheus、Loki、K8s）——Step H/I ✅
+2. 验证评分和决策逻辑在真实事件上产生正确结果 ✅
+3. 然后加入 LLM 做报告综合 + 假设提议——Step G / Phase 4 ✅
 
 这个顺序的原因：**你必须先信任结构化输出，然后才能让 LLM 去叙述它。** 如果评分是错的，写得再好的 LLM 报告只会让错误的结论听起来更有说服力。
+
+LLM 通过环境变量配置：`LLM_PROVIDER=openai`、`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。已通过智谱 glm-4-flash E2E 验证（65s 返回 87KB 中文报告）。
 
 ---
 
 ## Q11: LLM 被允许做什么？
 
-- 将结构化的 `InvestigationResult` 综合为人类可读的叙述
+LLM 现在承担两个角色，都严格限定为 advisory：
+
+1. **假设提议**（`LlmHypothesisProposerImpl`）——根据收集的证据上下文，LLM 提议额外的根因假设，弥补确定性 `DiagnosticPattern` 引擎可能未覆盖的情况。这些提议标记为 `advisoryOnly=true`、`canAffectDecision=false`。
+
+2. **报告综合**（`LlmReportSynthesizer`）——将结构化的 `InvestigationResult` 综合为人类可读的叙述报告，包含：
+   - 执行摘要
+   - 推理叙事
+   - 不确定性评估
+   - 后续步骤
+   - 局限性说明
+
+额外能力：
 - 根据决策和 next probes 建议修复操作
 - 用通俗语言总结矛盾项
 - 为非技术利益相关者翻译技术发现
 
-LLM 的输入约定是 `InvestigationResult` record——它包含 LLM 撰写报告所需的一切，且不包含它不应该修改的内容。
+LLM 的输入约定是 `InvestigationResult` record——它包含 LLM 所需的一切，且不包含它不应该修改的内容。`OpenAiCompatibleLlmClient` 通过环境变量支持任何 OpenAI 兼容端点（智谱、OpenAI、Ollama、vLLM）。
 
 ---
 
@@ -775,12 +847,23 @@ LLM 仅作为顾问角色，因为确定性管道已经产生经过验证、可�
 
 ## Q22: 如何切换到真实的 OpenAI 兼容 LLM？
 
-创建一个实现 `LlmClient` 的新类——例如 `OpenAiLlmClient`——调用 OpenAI Chat Completions API（或任何兼容端点，如 Azure OpenAI、Ollama 或 vLLM）。通过 Spring 的 `@ConditionalOnProperty` 或 `@Profile` 注入，使得：
+**已经实现。** `OpenAiCompatibleLlmClient` 是真实实现，通过环境变量激活：
 
-- `llm.provider=mock`（默认）时激活 `MockLlmClient`。
-- `llm.provider=openai` 时激活 `OpenAiLlmClient`。
+```bash
+export LLM_PROVIDER=openai
+export LLM_API_KEY=your-api-key
+export LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4  # 智谱
+export LLM_MODEL=glm-4-flash
+```
 
-接口约定很简单：`String complete(String systemPrompt, String userPrompt)`。新实现处理 HTTP 调用、重试逻辑和 API key 管理。`LlmReportSynthesizer` 和 `LlmPromptBuilder` 保持不变——它们只依赖 `LlmClient` 接口。
+客户端具有智能端点 URL 构建：
+- 如果 base URL 以 `/chat/completions` 结尾 → 直接使用
+- 如果 base URL 包含 `/v4` 或 `/v3` → 拼接 `/chat/completions`（智谱风格）
+- 否则 → 拼接 `/v1/chat/completions`（标准 OpenAI 风格）
+
+兼容智谱、OpenAI、Azure OpenAI、Ollama 和 vLLM，无需代码修改。`MockLlmClient` 在 `LLM_PROVIDER` 未设置或设为 `mock` 时激活，确保全部 1194 个测试保持确定性。
+
+**E2E 验证通过：** 智谱 glm-4-flash 通过 `GET /api/live-scenario/simulate?runLlm=true` 返回 87KB 中文 LLM 增强报告，耗时 ~65s。
 
 ---
 
@@ -920,3 +1003,37 @@ Live Lab Status 页面（通过页面头部的 "Lab Status" 按钮切换）显�
 3. **RCA 管道。** 真实的指标证据进入标准的 `InvestigationWorkflow`：收集 → 对照诊断模式评分 → 比较 → 做出决策。agent 不知道也不关心指标来自演示服务还是生产服务——`EvidenceProvider` 接口抽象了来源。
 
 这是关键的桥梁：Step T 提供了可观测性栈（Prometheus、Grafana），Step U 提供了生成可观测遥测数据的目标服务。两者结合实现了使用真实指标（而非静态 JSON fixture）的端到端 RCA 验证。
+
+---
+
+## Q34：真实 LLM 集成是如何工作的？
+
+Phase 4 新增了 `OpenAiCompatibleLlmClient`——一个生产级 LLM 客户端，通过环境变量（`LLM_PROVIDER`、`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`）连接任何 OpenAI 兼容端点。它具有智能 URL 构建，自动处理智谱、OpenAI、Azure、Ollama 和 vLLM 的端点差异。
+
+集成有两个路径：
+1. **LLM 假设提议**（`LlmHypothesisProposerImpl`）——LLM 根据收集的证据提议额外的根因假设。这些提议标记为 `advisoryOnly=true`、`canAffectDecision=false`——它们不能影响确定性决策。
+2. **报告综合**（`LlmReportSynthesizer`）——LLM 从确定性 `InvestigationResult` 生成结构化叙述报告（执行摘要、推理叙事、不确定性、后续步骤、局限性）。
+
+如果 LLM 不可用或失败，两个路径自动降级为 `MockLlmClient` 行为。
+
+---
+
+## Q35：LLM 不可用时怎么办？
+
+系统设计为无 LLM 也完全可用：
+
+1. **自动降级。** 如果 `LLM_PROVIDER` 未设置，或真实 LLM 客户端抛出异常，`LlmHypothesisProposerImpl` 捕获失败并返回空提议列表。调查仅使用确定性假设继续。
+2. **测试用 MockLlmClient。** 全部 1194 个测试使用 `MockLlmClient`——零外部 API 依赖，完全确定且可重复。
+3. **优雅降级。** API 响应包含 `llmProposal` 字段，要么有值要么为 null。UI 显示"LLM 不可用"而非崩溃。
+
+核心设计原则：**确定性引擎始终工作，LLM 是锦上添花。**
+
+---
+
+## Q36：如何验证 LLM 输出不会污染调查？
+
+三层防护栏，在不同层面执行：
+
+1. **编译时。** `canAffectDecision` 是 `UnverifiedHypothesisProposal` 上的 `boolean` 字段——对 LLM 提议始终为 `false`，没有代码路径可以将其设为 `true`。
+2. **运行时。** `HypothesisComparator` 在计算最终 `InvestigationDecision` 时忽略 `advisoryOnly=true` 的提议。只有确定性假设影响决策。
+3. **结构性。** `LlmEnhancedReport` 严格分离 `base*` 字段（确定性引擎输出）和 LLM 字段（advisory 内容）。API 消费者始终可以完全忽略 LLM 字段。
