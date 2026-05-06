@@ -8,6 +8,8 @@
 
 新增 sre-agent-llm 模块实现 advisory-only LLM 合成层：LlmPromptBuilder 构建带 guardrails 的提示词，LlmReportSynthesizer 将确定性 RCA 结果交由 LLM 生成可读摘要，LlmEnhancedReport 严格分离 base（确定性）与 LLM（ advisory）字段。Phase 4 新增 OpenAiCompatibleLlmClient 接入真实 LLM（已通过智谱 glm-4-flash E2E 验证），同时 LlmHypothesisProposerImpl 允许 LLM 提议额外根因假设（advisoryOnly=true，不影响确定性决策）。MockLlmClient 保证 1194 个测试全部可重复、无外部依赖。
 
+V.2-UI-4.1 重写 Kubernetes 证据语义分类：KubernetesEvidenceMapper 从通用 k8s_event 改为按 reason 精确分类（k8s_event_unhealthy/failed_scheduling/killing/normal），container_crash_loop_backoff 仅在真实 CrashLoopBackOff 状态触发，健康 pod 输出 k8s_runtime_healthy/pod_ready 反例信号。VerificationEngine 新增 IGNORED_TYPES 静态过滤。Live E2E 验证：latency 场景下游依赖延迟从 0.17 升至 0.50 排第一，pod_crash_loop 从 0.25 降至 0.09 排最后。
+
 ---
 
 ## 中文详细版
@@ -46,6 +48,8 @@ LLM 集成（sre-agent-llm 模块）：
 Built a verification-first AI SRE RCA Agent (Java 21 + Spring Boot + Maven multi-module: 15 modules) that generates, verifies, and scores competing root cause hypotheses from alert-driven evidence, outputting auditable Markdown reports and Event Traces. Core workflow has zero framework dependency and runs via CLI, REST API, Live Scenario, and Web UI. 1194 tests, BUILD SUCCESS.
 
 Added sre-agent-llm module providing advisory-only LLM synthesis. Phase 4 added OpenAiCompatibleLlmClient (E2E verified with Zhipu glm-4-flash) and LlmHypothesisProposerImpl for LLM-proposed root cause hypotheses (advisoryOnly=true). LlmEnhancedReport cleanly separates base (deterministic) vs LLM (advisory) fields. MockLlmClient enables 1194 fully deterministic, no-network tests. LLM is strictly forbidden from altering investigation decisions.
+
+V.2-UI-4.1: Rewrote Kubernetes evidence semantic typing — replaced generic k8s_event with reason-based classification (k8s_event_unhealthy/failed_scheduling/killing/normal), crash_loop triggers only on real CrashLoopBackOff status, healthy pods emit k8s_runtime_healthy/pod_ready counter signals. Added IGNORED_TYPES filter in VerificationEngine. Live E2E verified on Kind cluster: downstream_dependency_latency rose from 0.17 to 0.50 (rank #1), pod_crash_loop dropped from 0.25 to 0.09 (rank last).
 
 ---
 
@@ -108,6 +112,7 @@ Designed and implemented a verification-first SRE Root Cause Analysis Agent for 
 - Built Java 21 Maven multi-module architecture (15 modules) with zero-framework core and CLI/REST/Live Scenario/Web UI adapters
 - Implemented deterministic confidence scoring with 5-level decision policy and full Event Trace auditability
 - Added sre-agent-llm advisory-only LLM layer: OpenAiCompatibleLlmClient (E2E verified), LlmHypothesisProposerImpl — LLM proposes hypotheses but cannot alter decisions (advisoryOnly=true)
+- Fixed Kubernetes evidence false positives via semantic typing: precise event classification + counter signals for healthy pods → correct hypothesis ranking in live E2E validation
 
 ### SRE / 平台方向
 
@@ -115,6 +120,7 @@ Designed and implemented a verification-first SRE Root Cause Analysis Agent for 
 - 构建 Java 21 Maven 多模块架构（15 模块），核心零框架依赖，CLI/REST/Live Scenario/Web UI 作为适配层
 - 实现确定性置信度评分，5 级决策策略，完整 Event Trace 审计链
 - 新增 sre-agent-llm advisory-only LLM 层：OpenAiCompatibleLlmClient（已 E2E 验证）、LlmHypothesisProposerImpl——LLM 提议假设但不影响决策（advisoryOnly=true）
+- 通过语义分类修复 Kubernetes 证据误报：精确事件分类 + 健康 pod 反例信号 → Live E2E 验证中假设排序正确
 
 ### For AI / Agent Role
 

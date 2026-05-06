@@ -221,6 +221,54 @@ If the LLM endpoint is unavailable or returns an error:
 
 ---
 
+## Demo Part 2.6: Live E2E — Latency Scenario with Real K8s Evidence (1 minute)
+
+> **Prerequisite:** Kind cluster running with demo services deployed, observability stack active (see `scripts/observability/`).
+
+### Step 1: Inject latency fault
+
+```bash
+curl -s -X POST http://localhost:8080/api/demo-services/fault/payment-latency
+```
+
+**Say:** "I inject a 1500ms latency fault into payment-service. Prometheus will start scraping elevated p99 values."
+
+Wait ~30 seconds for Prometheus to scrape.
+
+### Step 2: Run live RCA
+
+```bash
+curl -s -X POST "http://localhost:8080/api/live-scenario/run?scenarioId=latency" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+rca = d.get('baseRca', d)
+scores = rca.get('hypothesisScores', {})
+for h, s in sorted(scores.items(), key=lambda x: -x[1]):
+    print(f'  {s:.2f}  {h}')
+"
+```
+
+**Say:** "The agent collected real-time evidence from Prometheus, Loki, and Kubernetes. Look at the ranking:
+
+  0.50  downstream_dependency_latency   ← correct root cause
+  0.19  pod_oom_killed
+  0.12  deployment_regression
+  0.09  pod_crash_loop                  ← correctly ranked last
+
+`downstream_dependency_latency` ranks #1 at 0.50. `pod_crash_loop` is last at 0.09. This is the correct result.
+
+Before the semantic typing fix, `pod_crash_loop` incorrectly ranked #1 because Kubernetes evidence was generically typed. The fix: events are now classified by reason, crash loop only fires on real CrashLoopBackOff, and healthy pods produce counter signals. No scoring algorithm changes were needed — just better evidence precision."
+
+### Step 3: Clear fault
+
+```bash
+curl -s -X POST http://localhost:8080/api/demo-services/fault/clear
+```
+
+**Key talking point:** "This demonstrates a critical SRE principle: **evidence quality determines RCA quality.** The fix didn't touch any scoring constants — it only improved how Kubernetes evidence is classified."
+
+---
+
 ## Demo Part 3: Web UI — 中文报告 + LLM Proposal 卡片 + 真实 LLM（1.5 分钟）
 
 ### 步骤 1：打开浏览器
@@ -560,6 +608,54 @@ curl -s -X POST http://localhost:8080/api/investigations/{id}/llm-summary | pyth
 2. **解释架构**——指出代码库中的 `OpenAiCompatibleLlmClient`：`cat sre-agent-llm/src/main/java/ai/sreagent/llm/client/OpenAiCompatibleLlmClient.java`
 3. **聚焦设计**——"重要的不是 LLM 输出本身，而是围绕它的安全防护——建议标签、不修改分数、明确的局限性说明。真实 LLM 客户端（`OpenAiCompatibleLlmClient`）使用与 `MockLlmClient` 完全相同的安全防护机制。"
 4. **回退到核心演示**——"确定性流程才是主角。LLM 层是一个可选的增强功能，能够优雅降级——`MockLlmClient` 会自动接管。"
+
+---
+
+## 演示第二部分（补充 2）：Live E2E — 延迟场景与真实 K8s 证据（1 分钟）
+
+> **前置条件：** Kind 集群已运行并部署 demo services，可观测性栈已激活（见 `scripts/observability/`）。
+
+### 步骤 1：注入延迟故障
+
+```bash
+curl -s -X POST http://localhost:8080/api/demo-services/fault/payment-latency
+```
+
+**讲解：** "我向 payment-service 注入 1500ms 延迟故障。Prometheus 将开始采集到升高的 p99 值。"
+
+等待约 30 秒，让 Prometheus 完成采集。
+
+### 步骤 2：运行实时 RCA
+
+```bash
+curl -s -X POST "http://localhost:8080/api/live-scenario/run?scenarioId=latency" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+rca = d.get('baseRca', d)
+scores = rca.get('hypothesisScores', {})
+for h, s in sorted(scores.items(), key=lambda x: -x[1]):
+    print(f'  {s:.2f}  {h}')
+"
+```
+
+**讲解：** "Agent 从 Prometheus、Loki 和 Kubernetes 收集了实时证据。看排名：
+
+  0.50  downstream_dependency_latency   ← 正确根因
+  0.19  pod_oom_killed
+  0.12  deployment_regression
+  0.09  pod_crash_loop                  ← 正确排在最后
+
+`downstream_dependency_latency` 以 0.50 排名第一。`pod_crash_loop` 以 0.09 排在最后。这是正确的结果。
+
+在语义分类修复之前，`pod_crash_loop` 错误地排名第一，因为 Kubernetes 证据是通用类型。修复后：事件按 reason 分类，crash loop 仅在真实 CrashLoopBackOff 状态触发，健康 pod 产生反例信号。无需修改任何评分算法——只是提高了证据精度。"
+
+### 步骤 3：清除故障
+
+```bash
+curl -s -X POST http://localhost:8080/api/demo-services/fault/clear
+```
+
+**关键要点：** "这演示了一个关键 SRE 原则：**证据质量决定 RCA 质量。** 修复没有触碰任何评分常量——只是改进了 Kubernetes 证据的分类方式。"
 
 ---
 

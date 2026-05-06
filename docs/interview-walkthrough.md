@@ -7,7 +7,8 @@
 0:30–2:30   Architecture explanation (2 minutes)
 2:30–5:30   Demo: Scenario E (3 minutes)
 5:30–8:30   Deep dive: Verification / Confidence / Comparison (3 minutes)
-8:30–9:30   LLM positioning (1 minute)
+8:30–9:00   LLM positioning (30 seconds)
+9:00–9:30   Live E2E demo — latency scenario (30 seconds)
 9:30–10:00  Roadmap and close (30 seconds)
 ```
 
@@ -108,13 +109,27 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
 
 ---
 
-## 8:30–9:30: LLM Positioning (1 minute)
+## 8:30–9:00: LLM Positioning (30 seconds)
 
 > "The LLM integration is now live in Phase 4. I added `OpenAiCompatibleLlmClient` — verified end-to-end with Zhipu glm-4-flash. The LLM does two things: propose additional root cause hypotheses, and synthesize narrative reports.
 >
 > But here's the key — all LLM proposals are marked `advisoryOnly=true` and `canAffectDecision=false`. The LLM cannot decide root cause, modify scores, invent evidence, or override the `InvestigationDecision`. When the LLM is unavailable, the system falls back to `MockLlmClient` and the deterministic workflow still works perfectly.
 >
 > The architecture enforces the right boundary: the LLM consumes the investigation output. It never feeds data back into the deterministic workflow."
+
+---
+
+## 9:00–9:30: Live E2E Demo — Latency Scenario (30 seconds)
+
+> "One more thing. This is a live end-to-end verification on a real Kind cluster.
+>
+> I inject a latency fault into payment-service. The agent collects real-time evidence from Prometheus, Loki, and Kubernetes — not fixtures. Then it runs the full RCA pipeline.
+>
+> The result: `downstream_dependency_latency` ranks #1 at 0.50. `pod_crash_loop` ranks last at 0.09. This is the correct ranking.
+>
+> It wasn't always this way. Initially, `pod_crash_loop` ranked first because Kubernetes evidence was generically typed — every event was `k8s_event`, and any pod with restarts triggered crash loop evidence. I fixed this with semantic typing: events are now classified by reason, crash loop only fires on actual CrashLoopBackOff status, and healthy pods produce counter signals.
+>
+> This demonstrates a key principle: **evidence quality determines RCA quality.** The fix didn't touch the scoring algorithm — it only improved evidence precision."
 
 ---
 
@@ -141,7 +156,8 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
 0:30–2:30   架构讲解（2 分钟）
 2:30–5:30   演示：场景 E（3 分钟）
 5:30–8:30   深入解析：验证 / 置信度 / 对比（3 分钟）
-8:30–9:30   LLM 定位（1 分钟）
+8:30–9:00   LLM 定位（30 秒）
+9:00–9:30   Live E2E 演示 — 延迟场景（30 秒）
 9:30–10:00  路线图与总结（30 秒）
 ```
 
@@ -242,13 +258,27 @@ java -jar sre-agent-cli/target/sre-agent-cli-0.1.0-SNAPSHOT.jar \
 
 ---
 
-## 8:30–9:30：LLM 定位（1 分钟）
+## 8:30–9:00：LLM 定位（30 秒）
 
 > "LLM 集成已经在 Phase 4 完成。我添加了 `OpenAiCompatibleLlmClient`——用智谱 glm-4-flash 端到端验证过了。LLM 做两件事：提议额外的根因假设，以及合成叙述报告。
 >
 > 但关键是——所有 LLM 提议都标记为 `advisoryOnly=true`、`canAffectDecision=false`。LLM 不能决定根因、修改评分、捏造证据或覆盖 `InvestigationDecision`。LLM 不可用时，系统降级到 `MockLlmClient`，确定性工作流照常运行。
 >
 > 架构已经划定了正确的边界：LLM 消费调查结果，它不参与调查过程。"
+
+---
+
+## 9:00–9:30：Live E2E 演示 — 延迟场景（30 秒）
+
+> "最后一件事。这是一个在真实 Kind 集群上的端到端实时验证。
+>
+> 我向 payment-service 注入延迟故障。Agent 从 Prometheus、Loki 和 Kubernetes 收集实时证据——不是模拟数据。然后运行完整的 RCA 流水线。
+>
+> 结果：`downstream_dependency_latency` 排名第一，得分 0.50。`pod_crash_loop` 排名最后，得分 0.09。这是正确的排序。
+>
+> 但并非一开始就这样。最初 `pod_crash_loop` 排第一，因为 Kubernetes 证据的类型太泛——每个事件都是 `k8s_event`，任何有重启的 Pod 都会触发崩溃循环证据。我通过语义类型化修复了这个问题：事件现在按原因分类，崩溃循环只在真正的 CrashLoopBackOff 状态下触发，健康的 Pod 会产生反向信号。
+>
+> 这说明了一个关键原则：**证据质量决定 RCA 质量。** 修复没有触及评分算法——只是提高了证据的精确度。"
 
 ---
 

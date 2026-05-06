@@ -519,6 +519,29 @@ Three guardrails, enforced at different levels:
 
 ---
 
+## Q37: How do you prevent false positives from Kubernetes evidence?
+
+False positives in RCA ranking often come from imprecise evidence typing. In V.2-UI-4.1, I encountered a real case: `pod_crash_loop` ranked #1 (score 0.25) in a **latency scenario** where it should have ranked last.
+
+The root causes were:
+1. **Generic event mapping.** All K8s events were mapped to a single `k8s_event` type, losing semantic signal.
+2. **Loose crash loop detection.** `container_crash_loop_backoff` triggered on any pod with restartCount > 0, not just actual CrashLoopBackOff status.
+3. **Missing counter signals.** Healthy pods produced no counter-balancing evidence.
+
+The fix was a three-layer approach:
+
+1. **Semantic event mapping.** `KubernetesEvidenceMapper.mapEventsToSemanticEvidence()` now classifies events by reason — `k8s_event_unhealthy`, `k8s_event_failed_scheduling`, `k8s_event_killing`, `k8s_event_normal` — instead of generic `k8s_event`.
+
+2. **Precise anomaly detection.** `container_crash_loop_backoff` only fires when `pod.status.reason == "CrashLoopBackOff"`. `pod_not_ready` requires actual readiness failure, not just non-zero restart count.
+
+3. **Counter evidence for healthy pods.** `k8s_runtime_healthy` and `pod_ready` provide counter-balancing signals. `VerificationEngine` filters non-diagnostic types (NONE, k8s_no_signal, k8s_runtime_healthy, restart_count_observed) from scoring.
+
+**Live E2E result:** After the fix, `downstream_dependency_latency` ranked #1 (0.50) and `pod_crash_loop` dropped to #4 (0.09) in the latency scenario. The fix was verified against a real Kind cluster with live Prometheus/Loki/K8s data.
+
+This demonstrates a key SRE principle: **evidence quality determines RCA quality.** No amount of scoring algorithm sophistication can compensate for imprecise evidence classification.
+
+---
+
 ## 中文版
 
 ## Q1: 这和一个日志聊天机器人有什么区别？
@@ -1037,3 +1060,26 @@ Phase 4 新增了 `OpenAiCompatibleLlmClient`——一个生产级 LLM 客户端
 1. **编译时。** `canAffectDecision` 是 `UnverifiedHypothesisProposal` 上的 `boolean` 字段——对 LLM 提议始终为 `false`，没有代码路径可以将其设为 `true`。
 2. **运行时。** `HypothesisComparator` 在计算最终 `InvestigationDecision` 时忽略 `advisoryOnly=true` 的提议。只有确定性假设影响决策。
 3. **结构性。** `LlmEnhancedReport` 严格分离 `base*` 字段（确定性引擎输出）和 LLM 字段（advisory 内容）。API 消费者始终可以完全忽略 LLM 字段。
+
+---
+
+## Q37：如何防止 Kubernetes 证据的误报？
+
+RCA 排名中的误报通常来自不精确的证据分类。在 V.2-UI-4.1 中，我遇到了一个真实案例：`pod_crash_loop` 在一个**延迟场景**中排到第一（分数 0.25），但它应该排到最后。
+
+根因有三个：
+1. **通用事件映射。** 所有 K8s 事件被映射为单一的 `k8s_event` 类型，丢失了语义信号。
+2. **宽松的崩溃循环检测。** `container_crash_loop_backoff` 在任何 restartCount > 0 的 pod 上都会触发，而不只是真正的 CrashLoopBackOff 状态。
+3. **缺少反例信号。** 健康的 pod 不产生对抗性证据。
+
+修复是三层方案：
+
+1. **语义事件映射。** `KubernetesEvidenceMapper.mapEventsToSemanticEvidence()` 现在按 reason 分类事件——`k8s_event_unhealthy`、`k8s_event_failed_scheduling`、`k8s_event_killing`、`k8s_event_normal`——而非通用的 `k8s_event`。
+
+2. **精确异常检测。** `container_crash_loop_backoff` 只在 `pod.status.reason == "CrashLoopBackOff"` 时触发。`pod_not_ready` 需要真实的就绪检查失败，不只是非零重启次数。
+
+3. **健康 pod 的反例证据。** `k8s_runtime_healthy` 和 `pod_ready` 提供对抗性信号。`VerificationEngine` 过滤掉非诊断类型（NONE、k8s_no_signal、k8s_runtime_healthy、restart_count_observed）不参与评分。
+
+**Live E2E 结果：** 修复后，`downstream_dependency_latency` 排到第一（0.50），`pod_crash_loop` 降到第四（0.09）。修复在真实的 Kind 集群上用实时 Prometheus/Loki/K8s 数据验证过。
+
+这展示了一个关键 SRE 原则：**证据质量决定 RCA 质量。** 评分算法再精妙，也无法弥补不精确的证据分类。
