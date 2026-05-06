@@ -789,3 +789,220 @@ export async function getServiceHealthSummary(): Promise<{ data: ServiceHealthSu
     error: null,
   }
 }
+
+/* ── Evidence Drill-down View Model (V.2-UI-5) ── */
+
+export type EvidenceStrength = 'strong' | 'moderate' | 'weak' | 'unknown'
+
+export type EvidenceSource = 'prometheus' | 'loki' | 'tracing' | 'kubernetes' | 'alertmanager' | 'unknown'
+
+export interface EvidenceItemView {
+  id: string
+  source: EvidenceSource
+  evidenceType: string
+  content: string
+  strength: EvidenceStrength
+  service?: string
+  entity?: string
+  timestamp?: string
+  attributes?: Record<string, unknown>
+  isNoSignal: boolean
+  isMetadata: boolean
+  isEffective: boolean
+}
+
+export type SourceStatus = 'available' | 'empty' | 'unavailable' | 'unknown'
+
+export interface SourceSummaryView {
+  source: EvidenceSource
+  displayName: string
+  status: SourceStatus
+  totalEvidence: number
+  effectiveEvidence: number
+  noSignalEvidence: number
+  topSignals: string[]
+  message?: string
+  error?: string
+}
+
+export interface EvidenceDrilldownView {
+  source: 'real' | 'mock' | 'mixed'
+  runId?: string
+  status?: string
+  collectedAt?: string
+  totalEvidence: number
+  effectiveEvidence: number
+  sourceSummaries: SourceSummaryView[]
+  topEvidence: EvidenceItemView[]
+  rawEvidence: EvidenceItemView[]
+}
+
+const NO_SIGNAL_TYPES = new Set([
+  'none', 'k8s_no_signal', 'metric_no_signal', 'log_no_signal',
+  'trace_no_signal', 'alert_no_signal', 'no_signal',
+])
+
+const METADATA_TYPES = new Set([
+  'deployment_metadata', 'pod_metadata', 'replicaset_metadata',
+  'k8s_workload_metadata', 'metadata',
+])
+
+const EFFECTIVE_TYPES = new Set([
+  'metric_latency_p95_spike', 'metric_error_rate_spike', 'metric_restart_rate_increased',
+  'metric_downstream_latency_spike', 'metric_memory_usage_high', 'metric_cpu_usage_high',
+  'log_downstream_timeout', 'log_timeout_error', 'log_exception', 'log_exception_spike', 'log_http_5xx',
+  'trace_downstream_span_slow', 'trace_child_span_dominates_latency', 'trace_error_span',
+  'trace_root_span_slow', 'trace_timeout_span',
+  'container_crash_loop_backoff', 'pod_restart_count_increased', 'pod_not_ready', 'container_oom_killed',
+  'alert_firing', 'alert_severity_high',
+])
+
+function normalizeEvidenceSource(raw: string): EvidenceSource {
+  const lower = (raw || '').toLowerCase()
+  if (lower === 'jaeger' || lower === 'tracing') return 'tracing'
+  if (lower === 'prometheus') return 'prometheus'
+  if (lower === 'loki') return 'loki'
+  if (lower === 'kubernetes' || lower === 'k8s') return 'kubernetes'
+  if (lower === 'alertmanager') return 'alertmanager'
+  return 'unknown'
+}
+
+const SOURCE_DISPLAY: Record<EvidenceSource, string> = {
+  prometheus: 'Prometheus',
+  loki: 'Loki',
+  tracing: 'Jaeger / Tracing',
+  kubernetes: 'Kubernetes',
+  alertmanager: 'Alertmanager',
+  unknown: '\u672a\u77e5',
+}
+
+function normalizeStrength(raw: unknown): EvidenceStrength {
+  if (typeof raw === 'string') {
+    const s = raw.toLowerCase()
+    if (s === 'strong') return 'strong'
+    if (s === 'moderate') return 'moderate'
+    if (s === 'weak') return 'weak'
+  }
+  if (typeof raw === 'number') {
+    if (raw >= 0.6) return 'strong'
+    if (raw >= 0.3) return 'moderate'
+    if (raw > 0) return 'weak'
+    return 'unknown'
+  }
+  return 'unknown'
+}
+
+function mapEvidenceItem(raw: Record<string, unknown>): EvidenceItemView {
+  const evidenceType = String(raw.evidenceType ?? raw.evidence_type ?? '')
+  const source = normalizeEvidenceSource(String(raw.source ?? ''))
+  const isNoSignal = NO_SIGNAL_TYPES.has(evidenceType) || evidenceType.endsWith('_no_signal')
+  const isMetadata = METADATA_TYPES.has(evidenceType)
+  const isEffective = EFFECTIVE_TYPES.has(evidenceType)
+
+  return {
+    id: String(raw.id || ''),
+    source,
+    evidenceType,
+    content: String(raw.content || ''),
+    strength: normalizeStrength(raw.strength ?? raw.strong),
+    service: raw.service ? String(raw.service) : undefined,
+    entity: raw.entity ? String(raw.entity) : undefined,
+    timestamp: raw.timestamp ? String(raw.timestamp) : undefined,
+    attributes: (raw.attributes || {}) as Record<string, unknown>,
+    isNoSignal,
+    isMetadata,
+    isEffective,
+  }
+}
+
+export function mapEvidenceDrilldownView(raw: Record<string, unknown>): EvidenceDrilldownView {
+  const er = (raw.evidenceReport || raw.evidence_report) as Record<string, unknown> | undefined
+  const allRaw = (er?.allEvidence || er?.all_evidence || []) as Record<string, unknown>[]
+  const rawEvidence = allRaw.map(mapEvidenceItem)
+
+  const srcReports = (er?.sources || {}) as Record<string, Record<string, unknown>>
+  const knownSources: EvidenceSource[] = ['prometheus', 'loki', 'tracing', 'kubernetes', 'alertmanager']
+
+  const sourceSummaries: SourceSummaryView[] = knownSources.map(src => {
+    const report = Object.values(srcReports).find(r =>
+      normalizeEvidenceSource(String(r.sourceName ?? '')) === src
+    )
+
+    const totalEvidence = report ? Number(report.evidenceCount ?? report.evidence_count ?? 0) : 0
+    const available = report ? Boolean(report.available) : false
+    const error = report?.error ? String(report.error) : undefined
+    const evidenceTypes = (report?.evidenceTypes || report?.evidence_types || []) as string[]
+
+    const srcItems = rawEvidence.filter(e => e.source === src)
+    const effectiveCount = srcItems.filter(e => e.isEffective).length
+    const noSignalCount = srcItems.filter(e => e.isNoSignal).length
+
+    let status: SourceStatus = 'unknown'
+    if (error) {
+      status = 'unavailable'
+    } else if (available && totalEvidence > 0) {
+      status = 'available'
+    } else if (available && totalEvidence === 0) {
+      status = 'empty'
+    }
+
+    let message: string | undefined
+    if (src === 'kubernetes' && available && totalEvidence === 0) {
+      message = '\u8be5\u6765\u6e90\u53ef\u7528\uff0c\u4f46\u672c\u6b21\u672a\u53d1\u73b0 Pod / Runtime \u5f02\u5e38\u4fe1\u53f7\u3002'
+    }
+
+    return {
+      source: src,
+      displayName: SOURCE_DISPLAY[src],
+      status,
+      totalEvidence,
+      effectiveEvidence: effectiveCount,
+      noSignalEvidence: noSignalCount,
+      topSignals: evidenceTypes.slice(0, 5),
+      message,
+      error,
+    }
+  })
+
+  const effective = rawEvidence
+    .filter(e => e.isEffective && !e.isNoSignal)
+    .sort((a, b) => {
+      const so = (s: EvidenceStrength) => s === 'strong' ? 0 : s === 'moderate' ? 1 : 2
+      return so(a.strength) - so(b.strength)
+    })
+
+  const topEvidence: EvidenceItemView[] = []
+  const srcCount: Record<string, number> = {}
+  for (const e of effective) {
+    if (topEvidence.length >= 10) break
+    const cnt = srcCount[e.source] || 0
+    if (cnt >= 4) continue
+    srcCount[e.source] = cnt + 1
+    topEvidence.push(e)
+  }
+
+  const effectiveTotal = rawEvidence.filter(e => e.isEffective).length
+
+  return {
+    source: 'real',
+    runId: String(raw.scenarioId ?? raw.scenario_id ?? ''),
+    status: String(raw.status || ''),
+    collectedAt: raw.evidenceWindowEnd ? String(raw.evidenceWindowEnd) : undefined,
+    totalEvidence: rawEvidence.length,
+    effectiveEvidence: effectiveTotal,
+    sourceSummaries,
+    topEvidence,
+    rawEvidence,
+  }
+}
+
+export async function getEvidenceDrilldownView(): Promise<{ data: EvidenceDrilldownView | null; error: string | null }> {
+  const result = await request<Record<string, unknown>>('/api/live-scenario/latest')
+  if (result.error) return { data: null, error: result.error }
+  if (!result.data) return { data: null, error: null }
+  const view = mapEvidenceDrilldownView(result.data)
+  if (view.totalEvidence === 0 && !view.runId) {
+    return { data: null, error: null }
+  }
+  return { data: view, error: null }
+}
