@@ -305,18 +305,18 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
               <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 400 }}>Live</span>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 0', gap: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', gap: 0, flexWrap: 'nowrap' }}>
             {svcs.map((svc, i) => {
               const isAbnormal = svc.status === 'down' || svc.status === 'degraded'
               const detailText = isAbnormal
                 ? (svc.faultEnabled ? 'fault: ' + svc.faultType : (svc.errorRate || 'unreachable'))
                 : (svc.p95Latency || '正常')
               return (
-                <span key={svc.name}>
+                <span key={svc.name} style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
                   {/* Node */}
                   <div
                     className={'topo-node ' + topoNodeClass[svc.status]}
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: 'pointer', minWidth: 150 }}
                     onClick={() => onServiceClick(svc.name)}
                   >
                     <div style={{ fontWeight: 700, fontSize: 15 }}>{svc.name}</div>
@@ -332,10 +332,10 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
                     const edge = summary.topology[i]
                     const edgeColor = edge ? topoEdgeColor[edge.status] : '#98a2b3'
                     return (
-                      <div style={{ padding: '0 12px' }}>
-                        <svg width="60" height="20">
-                          <line x1="0" y1="10" x2="48" y2="10" stroke={edgeColor} strokeWidth="2" />
-                          <polygon points="48,5 58,10 48,15" fill={edgeColor} />
+                      <div style={{ padding: '0 20px', flexShrink: 0 }}>
+                        <svg width="80" height="20" viewBox="0 0 80 20">
+                          <line x1="0" y1="10" x2="66" y2="10" stroke={edgeColor} strokeWidth="2" />
+                          <polygon points="66,5 78,10 66,15" fill={edgeColor} />
                         </svg>
                       </div>
                     )
