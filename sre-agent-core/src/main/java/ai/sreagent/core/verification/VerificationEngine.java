@@ -16,6 +16,11 @@ import java.util.stream.Collectors;
  */
 public class VerificationEngine {
 
+    /** Low-signal / non-diagnostic types that must never influence supporting or counter scoring. */
+    private static final Set<String> IGNORED_TYPES = Set.of(
+            "NONE", "k8s_no_signal", "k8s_runtime_healthy", "restart_count_observed"
+    );
+
     /**
      * Verify a single hypothesis against available evidence.
      * Requires the DiagnosticPattern that spawned the hypothesis.
@@ -27,14 +32,17 @@ public class VerificationEngine {
     ) {
         Set<String> evidenceTypes = evidence.stream()
                 .map(Evidence::evidenceType)
+                .filter(t -> !IGNORED_TYPES.contains(t))
                 .collect(Collectors.toSet());
 
         List<String> supportingIds = evidence.stream()
+                .filter(e -> !IGNORED_TYPES.contains(e.evidenceType()))
                 .filter(e -> pattern.supportingEvidenceTypes().contains(e.evidenceType()))
                 .map(Evidence::id)
                 .toList();
 
         List<String> counterIds = evidence.stream()
+                .filter(e -> !IGNORED_TYPES.contains(e.evidenceType()))
                 .filter(e -> pattern.counterEvidenceTypes().contains(e.evidenceType()))
                 .map(Evidence::id)
                 .toList();
@@ -132,8 +140,11 @@ public class VerificationEngine {
                             "payment-service 5xx did not increase, so downstream failure is not fully confirmed."
                     );
                 }
-                if (evidenceTypes.contains("deploy_event_near_alert_window")
-                        || evidenceTypes.contains("metric_error_rate_spike")) {
+                // NOTE: metric_error_rate_spike was previously a contradiction trigger here,
+                // but it's also a supporting type for downstream_latency — error rate spikes
+                // are expected during latency events. Only an explicit deploy event near the
+                // alert window should trigger the deployment competing explanation.
+                if (evidenceTypes.contains("deploy_event_near_alert_window")) {
                     contradictions.add(
                             "A recent deployment is temporally correlated with the alert, so deployment regression remains a competing explanation."
                     );
@@ -153,15 +164,17 @@ public class VerificationEngine {
                 }
             }
             case "pod_crash_loop" -> {
-                boolean hasCrashEvidence = evidenceTypes.stream()
-                        .anyMatch(t -> t.contains("crash"));
+                boolean hasCrashLoopBackoff = evidenceTypes.contains("container_crash_loop_backoff");
                 boolean hasRestartEvidence = evidenceTypes.stream()
-                        .anyMatch(t -> t.contains("restart") && !t.contains("_no_signal"));
+                        .anyMatch(t -> t.equals("pod_restart_count_increased"));
                 boolean hasNotReady = evidenceTypes.stream()
-                        .anyMatch(t -> t.contains("not_ready"));
-                if (!hasCrashEvidence && !hasRestartEvidence && !hasNotReady) {
+                        .anyMatch(t -> t.equals("pod_not_ready"));
+                // If we have restart/not_ready but NO actual CrashLoopBackOff state,
+                // the pod is restarting for a different reason (e.g. latency-induced probe failure).
+                // This should not strongly support crash_loop.
+                if (!hasCrashLoopBackoff) {
                     contradictions.add(
-                            "No crash loop, restart, or pod-not-ready evidence was found."
+                            "No CrashLoopBackOff state detected. Pod restarts may be caused by probe failures or other non-crash issues."
                     );
                 }
             }

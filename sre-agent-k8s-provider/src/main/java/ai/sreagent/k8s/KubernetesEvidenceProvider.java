@@ -102,10 +102,10 @@ public class KubernetesEvidenceProvider {
             evidence.add(mapper.mapDeploymentToMetadataEvidence(deployment, incident.id()));
         }
 
-        // 3. Collect Events as additional context
+        // 3. Collect Events with semantic typing (not generic k8s_event)
         String eventsJson = reader.listResources("events", ns, labels);
         List<KubernetesJsonParser.ParsedEvent> events = parser.parseEvents(eventsJson);
-        evidence.addAll(mapper.mapEventsToEvidence(events, incident.id()));
+        evidence.addAll(mapper.mapEventsToSemanticEvidence(events, incident.id()));
 
         return evidence;
     }

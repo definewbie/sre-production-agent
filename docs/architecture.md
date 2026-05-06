@@ -412,6 +412,21 @@ rawScore = pattern.baseScore
 score = clamp(rawScore, 0.0, 1.0)
 ```
 
+### Evidence Filtering (V.2-UI-4.1)
+
+Before classification, the VerificationEngine filters out non-diagnostic evidence types
+that carry no root-cause signal:
+
+```java
+private static final Set<String> IGNORED_TYPES = Set.of(
+    "NONE", "k8s_no_signal", "k8s_runtime_healthy", "restart_count_observed"
+);
+```
+
+These types are preserved in the evidence stream (for audit and UI display) but never
+influence supporting or counter scoring. This prevents healthy-pod counter signals from
+inflating or deflating hypothesis scores.
+
 **This is not machine learning.** Weights are manually assigned based on SRE diagnostic experience. The value is that every score is traceable to specific evidence and weights — you can explain *why* a hypothesis scored 0.64 instead of 0.80.
 
 ### Decision Policy
@@ -423,6 +438,19 @@ score = clamp(rawScore, 0.0, 1.0)
 | `competing_hypotheses` | top1 ≥ 0.50, top2 ≥ 0.50, gap < 0.10 |
 | `uncertain_requires_more` | top1 ≥ 0.40 |
 | `insufficient_evidence` | top1 < 0.40 |
+
+### Contradiction Rule Tightening (V.2-UI-4.1)
+
+Two contradiction rules were refined to eliminate false contradictions:
+
+- **`downstream_dependency_latency`** — no longer contradicts `metric_error_rate_spike`.
+  The error-rate spike is actually a *downstream supporting* signal, not a contradiction.
+  The previous rule conflated upstream error-rate observation with downstream latency,
+  causing incorrect score penalties.
+- **`pod_crash_loop`** — now checks for the precise evidence type
+  `container_crash_loop_backoff` instead of keyword matching on `restart`/`not_ready`.
+  This eliminates false contradiction matches against unrelated evidence that merely
+  contained those keywords.
 
 ---
 

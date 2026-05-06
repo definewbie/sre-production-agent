@@ -76,8 +76,8 @@ class KubernetesEvidenceMapperSemanticTest {
         }
 
         @Test
-        @DisplayName("should not produce restart evidence when restartCount < 2")
-        void shouldNotProduceRestartEvidenceForLowRestartCount() {
+        @DisplayName("should not produce restart_count_increased when restartCount < 2")
+        void shouldNotProduceRestartCountIncreasedForLowRestartCount() {
             KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
                 "recommend-service-abc123", "demo", "Running",
                 "recommend-service", 1,
@@ -90,6 +90,22 @@ class KubernetesEvidenceMapperSemanticTest {
                     .anyMatch(e -> "pod_restart_count_increased".equals(e.evidenceType())))
                     .isFalse();
         }
+
+        @Test
+        @DisplayName("should produce restart_count_observed when restartCount == 1")
+        void shouldProduceRestartCountObservedForSingleRestart() {
+            KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
+                "recommend-service-abc123", "demo", "Running",
+                "recommend-service", 1,
+                "", "Error", 1
+            );
+
+            List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-003b");
+
+            assertThat(evidence.stream()
+                    .anyMatch(e -> "restart_count_observed".equals(e.evidenceType())))
+                    .isTrue();
+        }
     }
 
     // ─── Test 3: Not Ready → pod_not_ready ───
@@ -101,7 +117,6 @@ class KubernetesEvidenceMapperSemanticTest {
         @Test
         @DisplayName("should map not-ready pod to pod_not_ready evidence")
         void shouldMapNotReadyPodToPodNotReadyEvidence() {
-            // Pending pod = not running = not ready
             KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
                 "recommend-service-abc123", "demo", "Pending",
                 "recommend-service", 0,
@@ -119,17 +134,64 @@ class KubernetesEvidenceMapperSemanticTest {
             assertThat(notReadyEv.strength()).isGreaterThanOrEqualTo(0.70);
             assertThat(notReadyEv.attributes()).containsEntry("ready", false);
         }
+
+        @Test
+        @DisplayName("should NOT produce pod_not_ready when pod is Running with no waiting reason but restartCount > 0")
+        void shouldNotProducePodNotReadyForRunningPodWithRestarts() {
+            // Latency scenario: pod Running, no waiting, but has restarts from probe failures
+            KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
+                "order-service-abc123", "demo", "Running",
+                "order-service", 14,
+                "", "Completed", 0
+            );
+
+            List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-004b");
+
+            assertThat(evidence.stream()
+                    .anyMatch(e -> "pod_not_ready".equals(e.evidenceType())))
+                    .isFalse();
+        }
     }
 
-    // ─── Test 4: Healthy pod → no failure evidence ───
+    // ─── Test 4: OOM → container_oom_killed ───
 
     @Nested
-    @DisplayName("Healthy pod produces no failure evidence")
+    @DisplayName("OOM semantic mapping")
+    class OomMapping {
+
+        @Test
+        @DisplayName("should map OOMKilled pod to container_oom_killed evidence")
+        void shouldMapOomKilledToContainerOomEvidence() {
+            KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
+                "recommend-service-abc123", "demo", "Running",
+                "recommend-service", 3,
+                "", "OOMKilled", 137
+            );
+
+            List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-oom-1");
+
+            Evidence oomEv = evidence.stream()
+                    .filter(e -> "container_oom_killed".equals(e.evidenceType()))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("Expected container_oom_killed evidence"));
+
+            assertThat(oomEv.source()).isEqualTo("kubernetes");
+            assertThat(oomEv.strength()).isGreaterThanOrEqualTo(0.90);
+            assertThat(oomEv.attributes()).containsEntry("terminated_reason", "OOMKilled");
+            assertThat(oomEv.attributes()).containsEntry("exit_code", 137);
+            assertThat(oomEv.content()).contains("OOMKilled");
+        }
+    }
+
+    // ─── Test 5: Healthy pod → counter evidence ───
+
+    @Nested
+    @DisplayName("Healthy pod produces counter evidence")
     class HealthyPodMapping {
 
         @Test
-        @DisplayName("should not produce failure evidence for healthy running pod")
-        void shouldNotProduceFailureEvidenceForHealthyPod() {
+        @DisplayName("should produce k8s_runtime_healthy evidence for healthy running pod")
+        void shouldProduceRuntimeHealthyForHealthyPod() {
             KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
                 "recommend-service-abc123", "demo", "Running",
                 "recommend-service", 0,
@@ -138,11 +200,59 @@ class KubernetesEvidenceMapperSemanticTest {
 
             List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-005");
 
-            assertThat(evidence).isEmpty();
+            assertThat(evidence).hasSize(1);
+            assertThat(evidence.get(0).evidenceType()).isEqualTo("k8s_runtime_healthy");
+            assertThat(evidence.get(0).source()).isEqualTo("kubernetes");
+            assertThat(evidence.get(0).strength()).isGreaterThanOrEqualTo(0.70);
+        }
+
+        @Test
+        @DisplayName("healthy pod evidence should NOT contain fault types")
+        void shouldNotProduceFaultTypesForHealthyPod() {
+            KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
+                "recommend-service-abc123", "demo", "Running",
+                "recommend-service", 0,
+                "", "", 0
+            );
+
+            List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-005b");
+
+            List<String> faultTypes = List.of(
+                "container_crash_loop_backoff", "pod_restart_count_increased",
+                "pod_not_ready", "container_oom_killed"
+            );
+            for (Evidence e : evidence) {
+                assertThat(faultTypes).doesNotContain(e.evidenceType());
+            }
         }
     }
 
-    // ─── Test 5: Multiple signals → multiple evidence items ───
+    // ─── Test 6: k8s_no_signal for unclassified state ───
+
+    @Nested
+    @DisplayName("No signal for unclassified pod state")
+    class NoSignalMapping {
+
+        @Test
+        @DisplayName("should produce k8s_no_signal for pod with restarts but no classified anomaly")
+        void shouldProduceNoSignalForRestartedButNonAnomalousPod() {
+            // Pod Running, restartCount=0, no waiting, no terminated error → healthy
+            // This test verifies that k8s_runtime_healthy is emitted for clean pods
+            KubernetesJsonParser.ParsedPod pod = new KubernetesJsonParser.ParsedPod(
+                "recommend-service-abc123", "demo", "Running",
+                "recommend-service", 0,
+                "", "", 0
+            );
+
+            List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-nosig-1");
+
+            assertThat(evidence.stream()
+                    .anyMatch(e -> "k8s_runtime_healthy".equals(e.evidenceType())))
+                    .isTrue();
+        }
+    }
+
+    // ─── Test 7: Multiple signals → multiple evidence items ───
 
     @Nested
     @DisplayName("Multiple signals from one pod")
@@ -151,7 +261,6 @@ class KubernetesEvidenceMapperSemanticTest {
         @Test
         @DisplayName("should produce multiple semantic evidence items from one CrashLoopBackOff pod")
         void shouldProduceMultipleSemanticEvidenceItemsFromOnePod() {
-            // This is the key live-path scenario: one pod produces 3 semantic evidence items
             KubernetesJsonParser.ParsedPod pod = crashLoopPod(3, 1);
 
             List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-006");
@@ -167,7 +276,7 @@ class KubernetesEvidenceMapperSemanticTest {
         }
     }
 
-    // ─── Test 6: Deployment metadata mapping ───
+    // ─── Test 8: Deployment metadata mapping ───
 
     @Nested
     @DisplayName("Deployment metadata semantic mapping")
@@ -204,6 +313,142 @@ class KubernetesEvidenceMapperSemanticTest {
             assertThat(evidence.evidenceType()).isEqualTo("deployment_metadata");
             assertThat(evidence.content()).doesNotContain("DEGRADED");
             assertThat(evidence.attributes()).containsEntry("ready_replicas", 3);
+        }
+    }
+
+    // ─── Test 9: Event semantic typing ───
+
+    @Nested
+    @DisplayName("Event semantic typing")
+    class EventSemanticMapping {
+
+        @Test
+        @DisplayName("should map Unhealthy event to pod_not_ready type")
+        void shouldMapUnhealthyEventToPodNotReady() {
+            List<KubernetesJsonParser.ParsedEvent> events = List.of(
+                new KubernetesJsonParser.ParsedEvent("evt-1", "Unhealthy",
+                    "Readiness probe failed", "Warning",
+                    "order-service-abc123", "2026-01-01T00:00:00Z", 5)
+            );
+
+            List<Evidence> evidence = mapper.mapEventsToSemanticEvidence(events, "inc-evt-1");
+
+            assertThat(evidence).hasSize(1);
+            assertThat(evidence.get(0).evidenceType()).isEqualTo("pod_not_ready");
+        }
+
+        @Test
+        @DisplayName("should map OOMKilling event to container_oom_killed type")
+        void shouldMapOomKillingEventToOomKilled() {
+            List<KubernetesJsonParser.ParsedEvent> events = List.of(
+                new KubernetesJsonParser.ParsedEvent("evt-2", "OOMKilling",
+                    "Container was killed by OOM", "Warning",
+                    "recommend-service-abc123", "2026-01-01T00:00:00Z", 1)
+            );
+
+            List<Evidence> evidence = mapper.mapEventsToSemanticEvidence(events, "inc-evt-2");
+
+            assertThat(evidence).hasSize(1);
+            assertThat(evidence.get(0).evidenceType()).isEqualTo("container_oom_killed");
+        }
+
+        @Test
+        @DisplayName("should map normal lifecycle events (Pulled/Started) to k8s_no_signal")
+        void shouldMapNormalEventsToNoSignal() {
+            List<KubernetesJsonParser.ParsedEvent> events = List.of(
+                new KubernetesJsonParser.ParsedEvent("e1", "Pulled",
+                    "Container image pulled", "Normal",
+                    "order-service-abc123", "2026-01-01T00:00:00Z", 1),
+                new KubernetesJsonParser.ParsedEvent("e2", "Started",
+                    "Container started", "Normal",
+                    "order-service-abc123", "2026-01-01T00:00:00Z", 1),
+                new KubernetesJsonParser.ParsedEvent("e3", "Created",
+                    "Container created", "Normal",
+                    "order-service-abc123", "2026-01-01T00:00:00Z", 1)
+            );
+
+            List<Evidence> evidence = mapper.mapEventsToSemanticEvidence(events, "inc-evt-3");
+
+            assertThat(evidence).hasSize(3);
+            assertThat(evidence).allMatch(e -> "k8s_no_signal".equals(e.evidenceType()));
+        }
+
+        @Test
+        @DisplayName("should map unclassified events to k8s_no_signal, NOT k8s_event")
+        void shouldMapUnclassifiedEventsToNoSignal() {
+            List<KubernetesJsonParser.ParsedEvent> events = List.of(
+                new KubernetesJsonParser.ParsedEvent("evt-u", "SomeUnknownReason",
+                    "Something happened", "Normal",
+                    "order-service-abc123", "2026-01-01T00:00:00Z", 1)
+            );
+
+            List<Evidence> evidence = mapper.mapEventsToSemanticEvidence(events, "inc-evt-4");
+
+            assertThat(evidence).hasSize(1);
+            assertThat(evidence.get(0).evidenceType()).isEqualTo("k8s_no_signal");
+            // Must NOT be the generic k8s_event type
+            assertThat(evidence.get(0).evidenceType()).isNotEqualTo("k8s_event");
+        }
+    }
+
+    // ─── Test 10: No evidenceType=NONE invariant ───
+
+    @Nested
+    @DisplayName("No NONE evidence type invariant")
+    class NoNoneInvariant {
+
+        @Test
+        @DisplayName("semantic mapping should never produce evidenceType=NONE")
+        void shouldNeverProduceNoneEvidenceType() {
+            // Test various pod states
+            List<KubernetesJsonParser.ParsedPod> pods = List.of(
+                crashLoopPod(5, 1),
+                healthyPod(),
+                new KubernetesJsonParser.ParsedPod(
+                    "pod-1", "demo", "Pending",
+                    "svc", 0, "", "", 0),
+                new KubernetesJsonParser.ParsedPod(
+                    "pod-2", "demo", "Running",
+                    "svc", 14, "", "Completed", 0),
+                new KubernetesJsonParser.ParsedPod(
+                    "pod-3", "demo", "Running",
+                    "svc", 3, "", "OOMKilled", 137)
+            );
+
+            for (KubernetesJsonParser.ParsedPod pod : pods) {
+                List<Evidence> evidence = mapper.mapPodToSemanticEvidence(pod, "inc-none-check");
+                for (Evidence e : evidence) {
+                    assertThat(e.evidenceType())
+                        .describedAs("Pod %s produced evidenceType=NONE", pod.name())
+                        .isNotEqualTo("NONE");
+                    assertThat(e.evidenceType())
+                        .describedAs("Pod %s produced empty evidenceType", pod.name())
+                        .isNotEmpty();
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("semantic event mapping should never produce evidenceType=NONE or k8s_event")
+        void shouldNeverProduceNoneOrGenericEventType() {
+            List<KubernetesJsonParser.ParsedEvent> events = List.of(
+                new KubernetesJsonParser.ParsedEvent("e1", "Unhealthy",
+                    "msg", "Warning", "pod-1", "2026-01-01T00:00:00Z", 1),
+                new KubernetesJsonParser.ParsedEvent("e2", "Pulled",
+                    "msg", "Normal", "pod-2", "2026-01-01T00:00:00Z", 1),
+                new KubernetesJsonParser.ParsedEvent("e3", "UnknownReason",
+                    "msg", "Normal", "pod-3", "2026-01-01T00:00:00Z", 1)
+            );
+
+            List<Evidence> evidence = mapper.mapEventsToSemanticEvidence(events, "inc-none-evt");
+            for (Evidence e : evidence) {
+                assertThat(e.evidenceType())
+                    .describedAs("Event produced evidenceType=NONE")
+                    .isNotEqualTo("NONE");
+                assertThat(e.evidenceType())
+                    .describedAs("Event produced generic k8s_event type")
+                    .isNotEqualTo("k8s_event");
+            }
         }
     }
 
@@ -248,6 +493,14 @@ class KubernetesEvidenceMapperSemanticTest {
             "recommend-service-abc123", "demo", "Running",
             "recommend-service", restartCount,
             "CrashLoopBackOff", "Error", exitCode
+        );
+    }
+
+    private static KubernetesJsonParser.ParsedPod healthyPod() {
+        return new KubernetesJsonParser.ParsedPod(
+            "recommend-service-abc123", "demo", "Running",
+            "recommend-service", 0,
+            "", "", 0
         );
     }
 }

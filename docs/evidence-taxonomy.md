@@ -88,6 +88,11 @@ public record NormalizedEvidence(
 | SLOW_SPAN | Trace span |
 | ERROR_SPAN | Trace span |
 | NO_SIGNAL | Any provider (empty result) |
+| RUNTIME_HEALTHY | K8s pod container Running/Completed state |
+| POD_READY | K8s pod ready condition True |
+| SCHEDULING_FAILURE | K8s FailedScheduling event |
+| POD_TERMINATION | K8s Killing event |
+| NORMAL_EVENT | K8s Normal events (non-warning) |
 
 ### EvidenceSeverity
 
@@ -119,6 +124,15 @@ trace_downstream_span_slow    → TRACE / DOWNSTREAM_LATENCY / CAUSE_CANDIDATE
 alert_firing                  → ALERT / ALERT_FIRING / SYMPTOM
 trace_dependency_path         → TRACE / DEPENDENCY_PATH / TOPOLOGY_CONTEXT
 deployment_metadata           → KUBERNETES / DEPLOYMENT_METADATA / CONTEXT
+k8s_runtime_healthy           → KUBERNETES / RUNTIME_HEALTHY / COUNTER_SIGNAL
+container_oom_killed          → KUBERNETES / OOM / CAUSE_CANDIDATE
+pod_ready                     → KUBERNETES / POD_READY / COUNTER_SIGNAL
+restart_count_observed        → KUBERNETES / RESTART / CONTEXT
+k8s_no_signal                 → KUBERNETES / NO_SIGNAL / NO_SIGNAL
+k8s_event_unhealthy           → KUBERNETES / CRASH_LOOP / CAUSE_CANDIDATE
+k8s_event_failed_scheduling   → KUBERNETES / SCHEDULING_FAILURE / CAUSE_CANDIDATE
+k8s_event_killing             → KUBERNETES / POD_TERMINATION / SYMPTOM
+k8s_event_normal              → KUBERNETES / NORMAL_EVENT / CONTEXT
 ```
 
 Key insight: **multiple providers can produce the same signal**.
@@ -219,3 +233,45 @@ causal roles:
   - SYMPTOM
 output: examples/evidence/k8s_crashloop_normalized.json
 ```
+
+## V.2-UI-4.1: Semantic Typing Enhancement
+
+### Problem
+
+Previously, Kubernetes evidence used generic types like `k8s_event` for all events and
+`pod_not_ready` for any pod with restartCount > 0. This caused false positives in RCA:
+- `pod_crash_loop` incorrectly ranked #1 in latency scenarios
+- Healthy pods with non-zero restart counts triggered failure evidence
+- K8s events were not semantically classified
+
+### Solution
+
+1. **Semantic event mapping**: Events now produce typed evidence (k8s_event_unhealthy, k8s_event_failed_scheduling, k8s_event_killing, k8s_event_normal) instead of generic `k8s_event`
+2. **Precise crash loop detection**: `container_crash_loop_backoff` only fires when pod status.reason == "CrashLoopBackOff", not just on presence of restart count
+3. **Counter evidence for healthy pods**: `k8s_runtime_healthy` and `pod_ready` provide counter-balancing signals
+4. **VerificationEngine IGNORED_TYPES**: NONE, k8s_no_signal, k8s_runtime_healthy, restart_count_observed are excluded from supporting/counter scoring
+
+### New Evidence Types
+
+| Type | Signal | Role | When Produced |
+|------|--------|------|---------------|
+| `k8s_runtime_healthy` | RUNTIME_HEALTHY | COUNTER_SIGNAL | Pod containers in Running/Completed state |
+| `container_oom_killed` | OOM | CAUSE_CANDIDATE | Container lastState.reason == OOMKilled |
+| `pod_ready` | POD_READY | COUNTER_SIGNAL | Pod has ready condition True |
+| `restart_count_observed` | RESTART | CONTEXT | Non-zero restart count observed (neutral observation) |
+| `k8s_no_signal` | NO_SIGNAL | NO_SIGNAL | No anomalies detected in K8s data |
+| `k8s_event_unhealthy` | CRASH_LOOP | CAUSE_CANDIDATE | K8s event with reason containing Unhealthy |
+| `k8s_event_failed_scheduling` | SCHEDULING_FAILURE | CAUSE_CANDIDATE | K8s event with reason FailedScheduling |
+| `k8s_event_killing` | POD_TERMINATION | SYMPTOM | K8s event with reason Killing |
+| `k8s_event_normal` | NORMAL_EVENT | CONTEXT | K8s event with type Normal (non-warning) |
+
+### Verification Impact
+
+VerificationEngine now filters out non-diagnostic types before evidence classification:
+```java
+private static final Set<String> IGNORED_TYPES = Set.of(
+    "NONE", "k8s_no_signal", "k8s_runtime_healthy", "restart_count_observed"
+);
+```
+
+These types are preserved in the evidence stream (for audit/display) but never influence supporting or counter scoring.

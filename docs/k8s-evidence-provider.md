@@ -98,10 +98,32 @@ CLI or a single environment variable in deployment manifests.
 
 | K8s Source | Evidence Type | Description |
 |------------|---------------|-------------|
-| Pod container status | `container_crash_loop_backoff` | Container in CrashLoopBackOff state |
+| Pod container status | `container_crash_loop_backoff` | Container in CrashLoopBackOff state (pod status.reason == "CrashLoopBackOff") |
+| Pod container status | `container_oom_killed` | Container terminated by OOMKilled |
 | Pod restart count | `pod_restart_count_increased` | High restart count detected |
-| Pod readiness | `pod_not_ready` | Pod not passing readiness check |
+| Pod readiness | `pod_not_ready` | Pod not passing readiness check (only when conditions indicate not ready, not just restartCount > 0) |
+| Pod readiness | `pod_ready` | Pod has ready condition True (counter signal) |
+| Pod container status | `k8s_runtime_healthy` | All containers in Running/Completed state (counter signal) |
+| Pod restart count | `restart_count_observed` | Non-zero restart count observed (neutral observation, not scored) |
 | Deployment spec | `deployment_metadata` | Deployment replica/image metadata |
+| Events (Warning) | `k8s_event_unhealthy` | K8s event with reason containing Unhealthy |
+| Events (Warning) | `k8s_event_failed_scheduling` | K8s event with reason FailedScheduling |
+| Events (Warning) | `k8s_event_killing` | K8s event with reason Killing |
+| Events (Normal) | `k8s_event_normal` | K8s event with type Normal (informational) |
+| No anomalies | `k8s_no_signal` | No anomalies detected in K8s data |
+
+### Semantic Typing (V.2-UI-4.1)
+
+Previously, all K8s events were mapped to a generic `k8s_event` type. This has been replaced
+with **semantic event mapping** via `KubernetesEvidenceMapper.mapEventsToSemanticEvidence()`:
+
+- Warning events are classified by reason (Unhealthy, FailedScheduling, Killing)
+- Normal events produce `k8s_event_normal` (informational context)
+- `pod_not_ready` now requires actual readiness failure, not just restartCount > 0
+- `container_crash_loop_backoff` only fires on explicit CrashLoopBackOff status
+- Healthy pods produce counter signals (`k8s_runtime_healthy`, `pod_ready`)
+
+This prevents false positives in scenarios where pods are healthy but have non-zero restart counts.
 
 ## CLI Usage
 
@@ -173,3 +195,4 @@ See `k8s/rbac/sre-agent-reader.yaml` for the full manifest.
 3. **Evidence mapper decouples K8s schema from domain model**: Evidence objects are K8s-agnostic
 4. **kubectl reader as local adapter**: Not a production path; exists for demo credibility
 5. **Fixture reader always available**: Tests never depend on cluster availability
+6. **Semantic typing over generic mapping**: Events and pod status are classified into precise evidence types that reflect the actual anomaly signal, preventing false positives in RCA ranking
