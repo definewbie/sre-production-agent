@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Activity, Brain, FileSearch, FlaskConical, Monitor, Settings, ChevronLeft, ChevronRight } from 'lucide-react'
+import { getTopBarEnvStatus, type TopBarEnvStatus } from '../api/client'
 
 export interface PageInfo { id: string; label: string }
 
@@ -25,10 +26,24 @@ const DEFAULT_WIDTH = 160
 export function Sidebar({ pages, currentPage, onNavigate }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [width, setWidth] = useState(DEFAULT_WIDTH)
+  const [envStatus, setEnvStatus] = useState<TopBarEnvStatus | null>(null)
   const dragging = useRef(false)
   const startX = useRef(0)
   const startWidth = useRef(0)
 
+  // ── 环境摘要轮询 ──
+  const fetchEnv = useCallback(async () => {
+    const s = await getTopBarEnvStatus()
+    setEnvStatus(s)
+  }, [])
+
+  useEffect(() => {
+    fetchEnv()
+    const id = setInterval(fetchEnv, 30000) // 30s 轮询
+    return () => clearInterval(id)
+  }, [fetchEnv])
+
+  // ── 拖拽逻辑 ──
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     dragging.current = true
@@ -76,6 +91,10 @@ export function Sidebar({ pages, currentPage, onNavigate }: Props) {
 
   const effectiveWidth = collapsed ? MIN_WIDTH : width
 
+  // ── 环境摘要渲染 ──
+  const envOk = envStatus?.allOk
+  const envErr = envStatus?.error
+
   return (
     <>
       <div
@@ -112,15 +131,40 @@ export function Sidebar({ pages, currentPage, onNavigate }: Props) {
           {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </div>
 
-        {/* Footer */}
+        {/* Footer — 环境摘要 */}
         {!collapsed && (
           <div className="sidebar-footer">
             <div className="label">环境</div>
             <div className="env-name">
               local-kind-demo
-              <span className="status-dot green" />
+              <span className={'status-dot ' + (envOk ? 'green' : (envErr ? 'red' : 'orange'))} />
             </div>
-            <div className="env-time">2025-05-20 14:30:25</div>
+            {envStatus && !envErr ? (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--sidebar-muted)' }}>
+                <div>Prometheus: {envStatus.prometheus ? 'OK' : 'Failed'}</div>
+                <div>Loki: {envStatus.loki ? 'OK' : 'Failed'}</div>
+                <div>Jaeger: {envStatus.jaeger ? 'OK' : 'Failed'}</div>
+                <div>Demo: {envStatus.demoServices ? 'OK' : 'Failed'}</div>
+                <div>API: {envStatus.api ? 'OK' : 'Failed'}</div>
+              </div>
+            ) : envErr ? (
+              <div style={{ marginTop: 6, fontSize: 11, color: '#fda29b' }}>
+                环境异常 — {envErr.slice(0, 40)}
+              </div>
+            ) : (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--sidebar-muted)' }}>
+                正在检测...
+              </div>
+            )}
+            <div className="env-time" style={{ marginTop: 6 }}>
+              {new Date().toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            </div>
+          </div>
+        )}
+        {/* collapsed 时只显示小圆点 */}
+        {collapsed && envStatus && (
+          <div style={{ textAlign: 'center', padding: '4px 0' }}>
+            <span className={'status-dot ' + (envOk ? 'green' : 'red')} />
           </div>
         )}
 
@@ -129,7 +173,7 @@ export function Sidebar({ pages, currentPage, onNavigate }: Props) {
       </div>
 
       {/* Pass width to main-content via CSS variable */}
-      <style>{`.main-content { margin-left: ${effectiveWidth}px !important; }`}</style>
+      <style>{'.main-content { margin-left: ' + effectiveWidth + 'px !important; }'}</style>
     </>
   )
 }
