@@ -451,7 +451,35 @@ Connected RCA analysis to real `LiveScenarioService` API. Semantic typing for Ku
 
 Per-hypothesis evidence breakdown with raw data inspection. Shows supporting/counter/missing evidence classification with source attribution (Prometheus, Loki, Jaeger, K8s, Alertmanager).
 
-### V.2-UI-6: Alert-Driven Incident Intake (Current)
+### V.2-UI-6.1: Alert Relevance Filtering & RCA Eligibility Guard
+
+Intelligent alert classification separates business service alerts from platform/infrastructure noise. The Service Health Overview now shows **only service-scoped alerts**, and the RCA trigger enforces an eligibility guard.
+
+**Architecture:**
+```
+Alertmanager (all alerts)
+  ↓ AlertRelevanceClassifier
+  ├─ SERVICE_ALERT    → show in UI + RCA eligible
+  ├─ PLATFORM_ALERT   → hidden + RCA blocked (400)
+  ├─ WATCHDOG_ALERT   → hidden + RCA blocked (400)
+  ├─ UNSUPPORTED_ALERT→ hidden + RCA blocked (400)
+  └─ IGNORED_ALERT    → hidden + RCA blocked (400)
+```
+
+**API changes (breaking):**
+- `GET /api/incidents/alerts` → returns `AlertsResponse` (was flat `AlertView[]`)
+  ```json
+  { "alerts": [...], "summary": { "totalAlerts": 10, "serviceAlerts": 0, "platformAlerts": 9, ... }, "timestamp": "..." }
+  ```
+- `POST /api/incidents/from-alert` → returns HTTP 400 for non-SERVICE_ALERT triggers
+
+**Live validation:** 10 alerts → 9 PLATFORM + 1 WATCHDOG, 0 SERVICE. Watchdog RCA trigger → HTTP 400 ✅
+
+**Tests:** 55 backend + 8 E2E = 63 tests, all passing.
+
+---
+
+### V.2-UI-6: Alert-Driven Incident Intake
 
 Closes the loop from **Alertmanager alert → IncidentTask → RCA analysis** without manual intervention. The first production-like end-to-end path in the SRE Agent.
 
@@ -962,6 +990,7 @@ See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 ||||| **V.2-UI-3** | **服务健康总览**：KPI 卡片 + 服务表格 + 拓扑图 + 故障注入 | ✅ 已完成 |
 ||||| **V.2-UI-4** | **RCA 分析页**：真实 live scenario API 接入 + 语义化类型 | ✅ 已完成 |
 ||||| **V.2-UI-5** | **证据明细页**：RCA 证据 drilldown + 原始数据展示 | ✅ 已完成 |
+||||| **V.2-UI-6.1** | **Alert Relevance Filtering**：分类过滤平台/Watchdog 告警 + RCA Eligibility Guard | ✅ 已完成 |
 ||||| **V.2-UI-6** | **告警驱动 Incident Intake**：Alertmanager → IncidentTask → RCA 闭环 | ✅ 已完成 |
 ||||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |
 
@@ -1558,5 +1587,6 @@ sre-production-agent/
 ||||| **V.2-UI-3** | **服务健康总览**：KPI 卡片 + 服务表格 + 拓扑图 + 故障注入 | ✅ 已完成 |
 ||||| **V.2-UI-4** | **RCA 分析页**：真实 live scenario API 接入 + 语义化类型 | ✅ 已完成 |
 ||||| **V.2-UI-5** | **证据明细页**：RCA 证据 drilldown + 原始数据展示 | ✅ 已完成 |
+||||| **V.2-UI-6.1** | **Alert Relevance Filtering**：分类过滤平台/Watchdog 告警 + RCA Eligibility Guard | ✅ 已完成 |
 ||||| **V.2-UI-6** | **告警驱动 Incident Intake**：Alertmanager → IncidentTask → RCA 闭环 | ✅ 已完成 |
 ||||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |

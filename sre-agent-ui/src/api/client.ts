@@ -1009,6 +1009,8 @@ export async function getEvidenceDrilldownView(): Promise<{ data: EvidenceDrilld
 
 /* ── Incident / Alert-driven API (V.2-UI-6) ── */
 
+export type AlertRelevance = 'SERVICE_ALERT' | 'PLATFORM_ALERT' | 'WATCHDOG_ALERT' | 'UNSUPPORTED_ALERT' | 'IGNORED_ALERT'
+
 export interface AlertView {
   fingerprint: string
   alertName: string
@@ -1019,6 +1021,31 @@ export interface AlertView {
   startedAt: string
   summary: string
   labels: Record<string, string>
+  /** V.2-UI-6.1: relevance classification */
+  relevance: AlertRelevance
+  /** Whether this alert can trigger RCA */
+  rcaEligible: boolean
+  /** If not RCA-eligible, the reason */
+  ineligibleReason?: string
+  classifiedAt?: string
+  source?: string
+}
+
+export interface AlertSummary {
+  totalAlerts: number
+  serviceAlerts: number
+  platformAlerts: number
+  watchdogAlerts: number
+  unsupportedAlerts: number
+  ignoredAlerts: number
+  rcaEligibleAlerts: number
+}
+
+export interface AlertsResponse {
+  alerts: AlertView[]
+  summary: AlertSummary
+  source: string
+  checkedAt: string
 }
 
 export interface IncidentRcaResultView {
@@ -1035,9 +1062,9 @@ export interface IncidentRcaResultView {
   errorMessage?: string
 }
 
-/** Fetch current firing alerts from Alertmanager (Trigger Role). */
-export async function getFiringAlerts(): Promise<{ data: AlertView[] | null; error: string | null }> {
-  return request<AlertView[]>('/api/incidents/alerts')
+/** Fetch classified firing alerts with summary (V.2-UI-6.1). */
+export async function getFiringAlerts(): Promise<{ data: AlertsResponse | null; error: string | null }> {
+  return request<AlertsResponse>('/api/incidents/alerts')
 }
 
 /** List all incidents (alert-driven RCA results). */

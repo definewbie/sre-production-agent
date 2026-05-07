@@ -31,13 +31,15 @@ public class IncidentController {
     }
 
     /**
-     * List current firing alerts from Alertmanager.
-     * Returns compact alert views for the UI incident intake panel.
+     * List current firing alerts from Alertmanager with relevance classification.
+     * Returns classified alerts with summary statistics.
+     *
+     * V.2-UI-6.1: Only service-scoped alerts are rcaEligible.
      */
     @GetMapping("/alerts")
-    public ResponseEntity<List<AlertView>> listFiringAlerts() {
-        List<AlertView> alerts = incidentService.fetchFiringAlerts();
-        return ResponseEntity.ok(alerts);
+    public ResponseEntity<AlertsResponse> listFiringAlerts() {
+        AlertsResponse response = incidentService.fetchClassifiedAlerts();
+        return ResponseEntity.ok(response);
     }
 
     /**

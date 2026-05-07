@@ -1,5 +1,39 @@
 # Changelog
 
+## [V.2-UI-6.1] - 2026-05-07 — Alert Relevance Filtering & RCA Eligibility Guard
+
+### Summary
+
+Adds intelligent alert classification to separate business service alerts from platform/infrastructure noise. The Service Health Overview now shows only service-scoped alerts, and the RCA trigger endpoint enforces an eligibility guard that rejects non-business alerts with HTTP 400.
+
+### Backend
+
+- **AlertRelevanceClassifier** — classifies alerts into 5 categories: SERVICE_ALERT, PLATFORM_ALERT, WATCHDOG_ALERT, UNSUPPORTED_ALERT, IGNORED_ALERT
+- **ClassifiedAlert** — classification result DTO with `relevance`, `rcaEligible`, `ineligibleReason`
+- **AlertsResponse** — new API response wrapper with `alerts[]` + `summary{}` (counts per category)
+- **AlertView** — extended with `relevance`, `rcaEligible`, `ineligibleReason` fields (14-param record)
+- **IncidentService** — injects AlertRelevanceClassifier, adds RCA eligibility guard at triggerRcaFromAlert entry
+- **IncidentController** — returns AlertsResponse (breaking change from flat array); returns HTTP 400 for ineligible RCA triggers
+
+### Frontend
+
+- **ServiceHealthOverview** — KPI shows service alert count only; subtitle shows "共 N 条（已过滤 M 条平台/基础设施告警）"; alert list filtered to SERVICE_ALERT only
+- **API client** — `getFiringAlerts()` returns `ApiResponse<AlertsResponse>`; new types: AlertRelevance, AlertSummary, AlertsResponse
+
+### Tests
+
+- **55 backend tests** — AlertRelevanceClassifierTest (28), AlertViewTest (9), AlertsResponseTest (4), IncidentControllerTest (14)
+- **8 Playwright E2E tests** — alert-relevance-filtering.spec.ts
+- All **63 tests passing** (0 failures)
+
+### Live Validation
+
+- Tested against live kind cluster: 10 alerts → 9 PLATFORM + 1 WATCHDOG, 0 SERVICE
+- RCA trigger on Watchdog → HTTP 400 ✅
+- Frontend shows "活跃告警: 0" with filter summary ✅
+
+---
+
 ## [V.2-UI-6] - 2026-05-07 — Alert-Driven Incident Intake
 
 ### Summary

@@ -7,6 +7,9 @@ import ai.sreagent.alertmanager.mapper.AlertmanagerEvidenceMapper;
 import ai.sreagent.alertmanager.mapper.AlertmanagerIncidentMapper;
 import ai.sreagent.alertmanager.parser.AlertmanagerAlert;
 import ai.sreagent.alertmanager.parser.AlertmanagerResponseParser;
+import ai.sreagent.alertmanager.relevance.AlertRelevance;
+import ai.sreagent.alertmanager.relevance.AlertRelevanceClassifier;
+import ai.sreagent.alertmanager.relevance.AlertRelevanceClassifier.ClassifiedAlert;
 import ai.sreagent.core.domain.Evidence;
 import ai.sreagent.core.domain.IncidentTask;
 import ai.sreagent.core.workflow.InvestigationResult;
@@ -25,12 +28,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Service for alert-driven incident intake and RCA.
  *
- * Two roles clearly separated:
- * - Trigger Role: Alertmanager alert → IncidentTask → RCA entry point
- * - Evidence Source Role: Alertmanager alerts → Evidence (one of many sources)
- *
- * Production-like path: GET /api/incidents/alerts → pick alert → POST /api/incidents/from-alert → RCA
- * Lab/Demo path: uses LiveScenarioService's POST /api/live-scenario/run (unchanged)
+ * V.2-UI-6.1: Alert Relevance Filtering & RCA Eligibility Guard.
+ * All alerts are classified before being exposed to UI or triggering RCA.
  */
 @Service
 public class IncidentService {
@@ -41,6 +40,7 @@ public class IncidentService {
     private final AlertmanagerResponseParser parser;
     private final AlertmanagerIncidentMapper incidentMapper;
     private final AlertmanagerEvidenceMapper evidenceMapper;
+    private final AlertRelevanceClassifier relevanceClassifier;
     private final InvestigationWorkflow workflow;
     private final String prometheusUrl;
     private final String lokiUrl;
@@ -56,6 +56,7 @@ public class IncidentService {
         this.parser = new AlertmanagerResponseParser();
         this.incidentMapper = new AlertmanagerIncidentMapper();
         this.evidenceMapper = new AlertmanagerEvidenceMapper();
+        this.relevanceClassifier = new AlertRelevanceClassifier();
         this.workflow = new InvestigationWorkflow();
         this.prometheusUrl = env.getProperty(
                 "sre-agent.observability.prometheus-url", "http://localhost:9090");
@@ -70,15 +71,27 @@ public class IncidentService {
     // ── Alert Polling (Trigger Role) ──────────────────────────────
 
     /**
-     * Fetch current firing alerts from Alertmanager.
-     * Used by UI to display active alerts for incident intake.
+     * Fetch current firing alerts from Alertmanager with relevance classification.
+     * Returns classified alerts with summary.
+     */
+    public AlertsResponse fetchClassifiedAlerts() {
+        List<AlertmanagerAlert> rawAlerts = fetchParsedAlerts(true);
+        List<AlertView> classified = rawAlerts.stream()
+                .filter(AlertmanagerAlert::isFiring)
+                .map(alert -> {
+                    ClassifiedAlert ca = relevanceClassifier.classify(alert);
+                    return AlertView.from(alert, ca.relevance(), ca.rcaEligible(), ca.ineligibleReason());
+                })
+                .toList();
+        return AlertsResponse.of(classified);
+    }
+
+    /**
+     * Legacy method — returns only firing alerts without classification.
+     * Kept for backward compatibility.
      */
     public List<AlertView> fetchFiringAlerts() {
-        List<AlertmanagerAlert> alerts = fetchParsedAlerts(true);
-        return alerts.stream()
-                .filter(AlertmanagerAlert::isFiring)
-                .map(AlertView::from)
-                .toList();
+        return fetchClassifiedAlerts().alerts();
     }
 
     // ── Alert-Driven RCA ──────────────────────────────────────────
@@ -86,13 +99,17 @@ public class IncidentService {
     /**
      * Trigger RCA from a specific alert identified by fingerprint or alertName+service.
      *
+     * V.2-UI-6.1: Includes RCA eligibility guard.
+     * Only SERVICE_ALERT (rcaEligible=true) can trigger RCA.
+     *
      * Flow:
      * 1. Find target alert from Alertmanager firing alerts
-     * 2. Map to IncidentTask (Trigger Role)
-     * 3. Collect evidence from all live sources (Prometheus, Loki, Jaeger, K8s)
-     * 4. Collect Alertmanager evidence (Evidence Source Role)
-     * 5. Merge all evidence
-     * 6. Run InvestigationWorkflow.runFromMemory()
+     * 2. Check RCA eligibility (relevance classification)
+     * 3. Map to IncidentTask (Trigger Role)
+     * 4. Collect evidence from all live sources
+     * 5. Collect Alertmanager evidence (Evidence Source Role)
+     * 6. Merge all evidence
+     * 7. Run InvestigationWorkflow.runFromMemory()
      */
     public IncidentRcaResultView triggerRcaFromAlert(IncidentRcaTriggerRequest request) {
         long startTime = System.currentTimeMillis();
@@ -109,10 +126,22 @@ public class IncidentService {
         }
 
         AlertmanagerAlert alert = target.get();
-        log.info("Triggering alert-driven RCA: alertName={}, service={}, fingerprint={}",
-                alert.alertName(), alert.service(), alert.fingerprint());
 
-        // 2. Map to IncidentTask
+        // 2. RCA Eligibility Guard
+        ClassifiedAlert classification = relevanceClassifier.classify(alert);
+        if (!classification.rcaEligible()) {
+            String id = "inc-alert-" + System.currentTimeMillis();
+            log.warn("RCA eligibility blocked: alertName={}, relevance={}, reason={}",
+                    alert.alertName(), classification.relevance(), classification.ineligibleReason());
+            return IncidentRcaResultView.failed(id, alert.alertName(),
+                    alert.service(),
+                    "该告警不可触发 RCA：" + classification.ineligibleReason());
+        }
+
+        log.info("Triggering alert-driven RCA: alertName={}, service={}, fingerprint={}, relevance={}",
+                alert.alertName(), alert.service(), alert.fingerprint(), classification.relevance());
+
+        // 3. Map to IncidentTask
         IncidentTask incidentTask = incidentMapper.map(alert);
         String incidentId = incidentTask.id();
 
@@ -122,7 +151,7 @@ public class IncidentService {
         incidentStore.put(incidentId, new IncidentRecord(incidentTask, alert, runningView, null, null));
 
         try {
-            // 3. Collect evidence from all live sources
+            // 4. Collect evidence from all live sources
             String service = incidentTask.service();
             String namespace = incidentTask.namespace();
             Duration lookback = Duration.ofMinutes(5);
@@ -133,7 +162,7 @@ public class IncidentService {
 
             List<Evidence> allEvidence = new ArrayList<>(liveReport.allEvidence());
 
-            // 4. Collect Alertmanager evidence (Evidence Source Role)
+            // 5. Collect Alertmanager evidence (Evidence Source Role)
             List<Evidence> alertEvidence = evidenceMapper.map(
                     List.of(alert), incidentId, service, namespace);
             allEvidence.addAll(alertEvidence);
@@ -141,12 +170,12 @@ public class IncidentService {
             log.info("Evidence collected: {} from live sources, {} from alertmanager, total={}",
                     liveReport.totalEvidenceCount(), alertEvidence.size(), allEvidence.size());
 
-            // 5. Run RCA
+            // 6. Run RCA
             InvestigationResult rcaResult = workflow.runFromMemory(incidentTask, allEvidence);
 
             long durationMs = System.currentTimeMillis() - startTime;
 
-            // 6. Build result view
+            // 7. Build result view
             IncidentRcaResultView resultView = IncidentRcaResultView.completed(rcaResult, durationMs);
             incidentStore.put(incidentId, new IncidentRecord(incidentTask, alert, resultView, rcaResult, liveReport));
 
@@ -179,10 +208,6 @@ public class IncidentService {
                 .map(InvestigationResult::markdownReport);
     }
 
-    /**
-     * Get the full RCA data for an incident in a LiveScenarioResult-compatible format.
-     * This allows the frontend to reuse mapLiveScenarioToRcaView for both paths.
-     */
     public Optional<Map<String, Object>> getIncidentRca(String incidentId) {
         IncidentRecord record = incidentStore.get(incidentId);
         if (record == null || record.rcaResult == null) return Optional.empty();
@@ -196,10 +221,7 @@ public class IncidentService {
         result.put("incidentId", rca.incidentId());
         result.put("durationMs", record.resultView.durationMs());
 
-        // Nest InvestigationResult as baseRca (same structure as LiveScenarioResult)
         result.put("baseRca", rca);
-
-        // Evidence report (from stored live report)
         result.put("evidenceReport", record.evidenceReport != null ? record.evidenceReport : 
                 LiveEvidenceReport.empty());
 

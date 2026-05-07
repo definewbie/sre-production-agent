@@ -7,6 +7,8 @@ import {
   ServiceHealthView,
   ServiceHealthStatus,
   type AlertView,
+  type AlertsResponse,
+  type AlertSummary,
 } from '../api/client'
 import { ChevronDown, RefreshCw, Zap } from 'lucide-react'
 
@@ -75,8 +77,12 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [alerts, setAlerts] = useState<AlertView[]>([])
+  const [alertSummary, setAlertSummary] = useState<AlertSummary | null>(null)
   const [alertsLoading, setAlertsLoading] = useState(true)
   const [triggeringAlert, setTriggeringAlert] = useState<string | null>(null)
+
+  // Only show SERVICE_ALERT on the health overview page (V.2-UI-6.1)
+  const serviceAlerts = alerts.filter(a => a.relevance === 'SERVICE_ALERT')
 
   const loadData = useCallback(async () => {
     setRefreshing(true)
@@ -97,9 +103,11 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
     setAlertsLoading(true)
     const result = await getFiringAlerts()
     if (result.data) {
-      setAlerts(result.data)
+      setAlerts(result.data.alerts)
+      setAlertSummary(result.data.summary)
     } else {
       setAlerts([])
+      setAlertSummary(null)
     }
     setAlertsLoading(false)
   }, [])
@@ -208,7 +216,12 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
             活跃告警
             {alertsLoading && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6, fontWeight: 400 }}>加载中...</span>}
           </div>
-          <div className="kpi-value orange">{alerts.length}</div>
+          <div className="kpi-value orange">{serviceAlerts.length}</div>
+          {alertSummary && alertSummary.totalAlerts > serviceAlerts.length && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              共 {alertSummary.totalAlerts} 条（已过滤 {alertSummary.totalAlerts - serviceAlerts.length} 条平台/基础设施告警）
+            </div>
+          )}
         </div>
         <div className="kpi-card" style={{ minWidth: 200 }}>
           <div className="kpi-label">
@@ -364,11 +377,16 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
           </div>
         </div>
 
-        {/* Recent Alerts — Real Alertmanager alerts with RCA trigger */}
+        {/* Recent Alerts — Real Alertmanager alerts (SERVICE_ALERT only, V.2-UI-6.1) */}
         <div className="card" style={{ flex: '1' }}>
           <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            活跃告警
+            业务告警
             <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 400 }}>Live</span>
+            {alertSummary && alertSummary.totalAlerts > serviceAlerts.length && (
+              <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400, marginLeft: 4 }}>
+                (已过滤 {alertSummary.platformAlerts + alertSummary.watchdogAlerts + alertSummary.unsupportedAlerts} 条非业务告警)
+              </span>
+            )}
             <button
               className="btn btn-ghost btn-sm"
               style={{ marginLeft: 'auto', fontSize: 12 }}
@@ -379,17 +397,17 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
             </button>
           </div>
           <div>
-            {alertsLoading && alerts.length === 0 && (
+            {alertsLoading && serviceAlerts.length === 0 && (
               <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
                 正在从 Alertmanager 加载告警...
               </div>
             )}
-            {!alertsLoading && alerts.length === 0 && (
+            {!alertsLoading && serviceAlerts.length === 0 && (
               <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                当前无活跃告警（Alertmanager 无 firing alerts）
+                当前无业务告警（Alertmanager 无相关 firing alerts）
               </div>
             )}
-            {alerts.map((a, i) => (
+            {serviceAlerts.map((a, i) => (
               <div key={a.fingerprint || i} style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -414,26 +432,28 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
                 <div style={{ fontSize: 13, color: 'var(--muted)', paddingLeft: 20 }}>
                   {a.summary || (a.service ? '服务: ' + a.service : '')}
                 </div>
-                <div style={{ paddingLeft: 20 }}>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    style={{ fontSize: 12, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 4 }}
-                    disabled={triggeringAlert !== null}
-                    onClick={async () => {
-                      setTriggeringAlert(a.fingerprint)
-                      const result = await triggerIncidentRca({ fingerprint: a.fingerprint })
-                      setTriggeringAlert(null)
-                      if (result.data && result.data.incidentId) {
-                        if (onRcaTriggered) onRcaTriggered(result.data.incidentId)
-                      } else {
-                        alert('RCA 触发失败: ' + (result.error || '未知错误'))
-                      }
-                    }}
-                  >
-                    <Zap size={12} />
-                    {triggeringAlert === a.fingerprint ? '分析中...' : '触发 RCA 分析'}
-                  </button>
-                </div>
+                {a.rcaEligible && (
+                  <div style={{ paddingLeft: 20 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ fontSize: 12, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 4 }}
+                      disabled={triggeringAlert !== null}
+                      onClick={async () => {
+                        setTriggeringAlert(a.fingerprint)
+                        const result = await triggerIncidentRca({ fingerprint: a.fingerprint })
+                        setTriggeringAlert(null)
+                        if (result.data && result.data.incidentId) {
+                          if (onRcaTriggered) onRcaTriggered(result.data.incidentId)
+                        } else {
+                          alert('RCA 触发失败: ' + (result.error || '未知错误'))
+                        }
+                      }}
+                    >
+                      <Zap size={12} />
+                      {triggeringAlert === a.fingerprint ? '分析中...' : '触发 RCA 分析'}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -441,7 +461,7 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
       </div>
 
       <div className="footer-note">
-        * 服务状态（reachable / fault）来自真实 API · 错误率 / 延迟 / 流量 / 饱和度 / 重启为 Mock Estimated · 告警来自 Alertmanager Live
+        * 服务状态（reachable / fault）来自真实 API · 错误率 / 延迟 / 流量 / 饱和度 / 重启为 Mock Estimated · 业务告警来自 Alertmanager Live（已过滤平台/基础设施告警）
       </div>
     </div>
   )
