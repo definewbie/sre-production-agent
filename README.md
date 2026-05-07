@@ -431,6 +431,62 @@ Multi-signal evidence → RCA → Decision
 
 ---
 
+## V.2-UI — React Investigation Console
+
+V.2-UI is a complete rewrite of the investigation console from a single-page HTML file to a modular React + TypeScript + Vite application. It introduces a professional sidebar navigation, real API integration, and per-page focused functionality.
+
+### V.2-UI-2: React Rewrite + Environment Status
+
+Replaced `index.html` with `sre-agent-ui/` React app. Environment Status page connects to `/api/observability/status` with sidebar environment summary badges.
+
+### V.2-UI-3: Service Health Overview
+
+KPI cards (service count, unhealthy, alerts, affected users), service table with health metrics, interactive topology graph with D3 force layout, Chaos fault injection controls.
+
+### V.2-UI-4: RCA Analysis Page (Real API)
+
+Connected RCA analysis to real `LiveScenarioService` API. Semantic typing for Kubernetes evidence (PodStatus → DEGRADED/CRASHING/TERMINATED). Full hypothesis → verification → confidence → decision display.
+
+### V.2-UI-5: Evidence Drilldown Page
+
+Per-hypothesis evidence breakdown with raw data inspection. Shows supporting/counter/missing evidence classification with source attribution (Prometheus, Loki, Jaeger, K8s, Alertmanager).
+
+### V.2-UI-6: Alert-Driven Incident Intake (Current)
+
+Closes the loop from **Alertmanager alert → IncidentTask → RCA analysis** without manual intervention. The first production-like end-to-end path in the SRE Agent.
+
+**Architecture:**
+```
+Alertmanager (firing alerts)
+  ↓ GET /api/alertmanager/alerts?filter=...
+IncidentController
+  ↓ pollFiringAlerts() → List<AlertView>
+  ↓ triggerRcaFromAlert(fingerprint)
+IncidentService
+  ↓ AlertmanagerIncidentMapper.toIncidentTask()
+  ↓ LiveEvidenceCollector (5 providers)
+  ↓ InvestigationWorkflow.runFromMemory()
+IncidentRcaResultView → UI
+```
+
+**REST API (new in V.2-UI-6):**
+- `GET /api/incidents/alerts` — poll firing alerts from Alertmanager
+- `POST /api/incidents/from-alert` — trigger RCA from alert fingerprint
+- `GET /api/incidents/{id}` — get incident record
+- `GET /api/incidents/{id}/rca` — get incident RCA result
+- `GET /api/incidents/{id}/report` — get incident markdown report
+
+**Key design:**
+- `AlertIncidentMapper` filters by severity (critical/warning) and excludes ignored types (`NONE`, `k8s_no_signal`, `k8s_runtime_healthy`, `restart_count_observed`)
+- `IncidentRecord` is an in-memory aggregate (incidentTask + alert + rcaResult + evidenceReport)
+- "触发 RCA 分析" button on each alert card → POST → auto-navigate to RCA analysis page
+
+**Tests:** 34 backend tests (IncidentController, DTOs) + 5 Playwright E2E tests, all passing.
+
+**39 new tests** (599 backend + 5 E2E frontend)
+
+---
+
 ## Phase 4 — 中文化全链路 + 真实 LLM 接入 + E2E 验证
 
 Phase 4 将整个 RCA 输出链路从英文转为中文，新增 LLM Proposal UI 卡片展示，并接入真实 LLM（OpenAI-compatible API）完成端到端验证。
@@ -901,8 +957,13 @@ See [docs/future-roadmap.md](docs/future-roadmap.md) for the full plan.
 ||| U | Instrumented Demo Services — fault injection + real metrics/logs/traces | ✅ Done |
 ||| V | Complex Live RCA Scenarios + 中文 Investigation Console | ✅ Done |
 ||| **Phase 4 P1** | **中文化全链路** (Hypothesis/Report/Decision type) + LLM Proposal UI 卡片 | ✅ Done |
-||| **Phase 4 P2** | **真实 LLM 接入** (OpenAiCompatibleLlmClient) + E2E 验证 + 3 bug fixes | ✅ Done |
-||| W | Post-Probe RCA Re-run Policy | 🔲 Upcoming |
+||||| **Phase 4 P2** | **真实 LLM 接入**（OpenAiCompatibleLlmClient）+ E2E 验证 + 3 个 bug 修复 | ✅ 已完成 |
+||||| **V.2-UI-2** | **React 重写**：env status 真实 API + sidebar 环境摘要 + E2E | ✅ 已完成 |
+||||| **V.2-UI-3** | **服务健康总览**：KPI 卡片 + 服务表格 + 拓扑图 + 故障注入 | ✅ 已完成 |
+||||| **V.2-UI-4** | **RCA 分析页**：真实 live scenario API 接入 + 语义化类型 | ✅ 已完成 |
+||||| **V.2-UI-5** | **证据明细页**：RCA 证据 drilldown + 原始数据展示 | ✅ 已完成 |
+||||| **V.2-UI-6** | **告警驱动 Incident Intake**：Alertmanager → IncidentTask → RCA 闭环 | ✅ 已完成 |
+||||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |
 
 ---
 
@@ -1492,5 +1553,10 @@ sre-production-agent/
 |||| U | 示例微服务（故障注入 + 真实指标/日志/链路追踪） | ✅ 已完成 |
 |||| V | 复杂实时 RCA 场景 + 中文排查控制台 | ✅ 已完成 |
 |||| **Phase 4 P1** | **中文化全链路**（假设/报告/决策类型）+ LLM Proposal UI 卡片 | ✅ 已完成 |
-|||| **Phase 4 P2** | **真实 LLM 接入**（OpenAiCompatibleLlmClient）+ E2E 验证 + 3 个 bug 修复 | ✅ 已完成 |
-|||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |
+||||| **Phase 4 P2** | **真实 LLM 接入**（OpenAiCompatibleLlmClient）+ E2E 验证 + 3 个 bug 修复 | ✅ 已完成 |
+||||| **V.2-UI-2** | **React 重写**：env status 真实 API + sidebar 环境摘要 + E2E | ✅ 已完成 |
+||||| **V.2-UI-3** | **服务健康总览**：KPI 卡片 + 服务表格 + 拓扑图 + 故障注入 | ✅ 已完成 |
+||||| **V.2-UI-4** | **RCA 分析页**：真实 live scenario API 接入 + 语义化类型 | ✅ 已完成 |
+||||| **V.2-UI-5** | **证据明细页**：RCA 证据 drilldown + 原始数据展示 | ✅ 已完成 |
+||||| **V.2-UI-6** | **告警驱动 Incident Intake**：Alertmanager → IncidentTask → RCA 闭环 | ✅ 已完成 |
+||||| W | 探测后 RCA 重新运行策略 | 🔲 待开始 |
