@@ -3,6 +3,7 @@ import {
   getLatestLiveScenario,
   runLiveScenarioForRca,
   simulateLiveScenario,
+  getIncidentRcaAnalysis,
   getDecisionLabel,
   type RcaAnalysisView,
   type HypothesisView,
@@ -168,27 +169,48 @@ function IncidentContextCard({ incident }: { incident: IncidentContext }) {
 
 /* ── Main Component ── */
 
-export default function RcaAnalysisPanel() {
+interface RcaAnalysisPanelProps {
+  /** If provided, load RCA from alert-driven incident instead of Lab scenario. */
+  alertIncidentId?: string | null
+}
+
+export default function RcaAnalysisPanel({ alertIncidentId }: RcaAnalysisPanelProps) {
   const [data, setData] = useState<RcaAnalysisView | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  const [sourceLabel, setSourceLabel] = useState<string>('Lab/Demo')
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      // 1) Try to get latest result
+      // Priority 1: Alert-driven incident RCA
+      if (alertIncidentId) {
+        setSourceLabel('Alert-driven')
+        const incidentResult = await getIncidentRcaAnalysis(alertIncidentId)
+        if (incidentResult.error) {
+          setError(incidentResult.error)
+          return
+        }
+        if (incidentResult.data) {
+          setData(incidentResult.data)
+          return
+        }
+      }
+      // Priority 2: Try to get latest Lab result
       const latest = await getLatestLiveScenario()
       if (latest.error) {
         setError(latest.error)
         return
       }
       if (latest.data) {
+        setSourceLabel('Lab/Demo')
         setData(latest.data)
         return
       }
-      // 2) No existing result → run simulation
+      // Priority 3: No existing result → run simulation
+      setSourceLabel('Lab/Demo')
       const sim = await simulateLiveScenario(true)
       if (sim.error) {
         setError(sim.error)
@@ -200,7 +222,7 @@ export default function RcaAnalysisPanel() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [alertIncidentId])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -302,7 +324,10 @@ export default function RcaAnalysisPanel() {
     <div>
       {/* Breadcrumb */}
       <div className="breadcrumb" style={{ marginBottom: 4 }}>
-        RCA 分析 ＞ 分析结果
+        RCA 分析 ＞ {sourceLabel === 'Alert-driven' ? '告警驱动分析' : '分析结果'}
+        {alertIncidentId && <span style={{ fontSize: 11, color: 'var(--blue)', marginLeft: 8 }}>
+          Incident: {alertIncidentId.slice(0, 16)}...
+        </span>}
       </div>
 
       {/* Page Header */}

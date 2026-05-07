@@ -1,0 +1,61 @@
+# PrometheusRules for demo services.
+# These rules generate alerts that feed into the alert-driven incident intake path.
+# Deploy: kubectl apply -f k8s/observability/demo-alerts.yaml
+#
+# Prerequisites:
+# - Prometheus with ServiceMonitor for demo-services (see k8s/demo-services/servicemonitors.yaml)
+# - Alertmanager configured and running
+# - Demo services deployed in 'demo' namespace
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: demo-service-alerts
+  namespace: demo
+  labels:
+    scenario: demo-services
+    role: alert-rules
+spec:
+  groups:
+    - name: demo-service-latency
+      rules:
+        - alert: HighLatencyP95
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_server_requests_seconds_bucket{namespace="demo",scenario="demo-services"}[5m]))
+              by (le, service, uri)
+            ) > 2.0
+          for: 1m
+          labels:
+            severity: warning
+            namespace: demo
+            team: platform
+          annotations:
+            summary: "P95 latency exceeds 2s for {{ $labels.service }}"
+            description: >
+              Service {{ $labels.service }} in namespace demo has P95 latency
+              of {{ $value | printf "%.2f" }}s (threshold: 2s).
+              This may indicate downstream dependency issues or resource saturation.
+
+    - name: demo-service-errors
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(http_server_requests_seconds_count{namespace="demo",scenario="demo-services",status=~"5.."}[5m]))
+              by (service)
+            /
+              sum(rate(http_server_requests_seconds_count{namespace="demo",scenario="demo-services"}[5m]))
+              by (service)
+            ) > 0.1
+          for: 1m
+          labels:
+            severity: critical
+            namespace: demo
+            team: platform
+          annotations:
+            summary: "Error rate exceeds 10% for {{ $labels.service }}"
+            description: >
+              Service {{ $labels.service }} in namespace demo has error rate
+              of {{ $value | printf "%.1f%%" }} (threshold: 10%).
+              Check downstream dependencies and recent deployments.

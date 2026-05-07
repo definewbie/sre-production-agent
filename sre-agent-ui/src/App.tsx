@@ -22,20 +22,26 @@ const pages: { id: PageId; label: string }[] = [
 export default function App() {
   const [currentPage, setCurrentPage] = useState<PageId>('health')
   const [incidentService, setIncidentService] = useState<string | null>(null)
+  const [alertIncidentId, setAlertIncidentId] = useState<string | null>(null)
 
   const navigateToIncident = (serviceName: string) => {
     setIncidentService(serviceName)
     setCurrentPage('incident')
   }
 
+  const handleRcaTriggered = (incidentId: string) => {
+    setAlertIncidentId(incidentId)
+    setCurrentPage('rca')
+  }
+
   const renderPage = () => {
     switch (currentPage) {
       case 'health':
-        return <ServiceHealthOverview onServiceClick={navigateToIncident} />
+        return <ServiceHealthOverview onServiceClick={navigateToIncident} onRcaTriggered={handleRcaTriggered} />
       case 'incident':
         return <IncidentDetailPanel serviceName={incidentService} onBack={() => setCurrentPage('health')} onRca={() => setCurrentPage('rca')} />
       case 'rca':
-        return <RcaAnalysisPanel />
+        return <RcaAnalysisPanel alertIncidentId={alertIncidentId} />
       case 'evidence':
         return <EvidenceDrilldownPanel />
       case 'chaos':
@@ -45,7 +51,7 @@ export default function App() {
       case 'settings':
         return <SettingsPanel />
       default:
-        return <ServiceHealthOverview onServiceClick={navigateToIncident} />
+        return <ServiceHealthOverview onServiceClick={navigateToIncident} onRcaTriggered={handleRcaTriggered} />
     }
   }
 

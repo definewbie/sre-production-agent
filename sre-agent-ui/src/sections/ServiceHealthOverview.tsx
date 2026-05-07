@@ -1,15 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   getServiceHealthSummary,
+  getFiringAlerts,
+  triggerIncidentRca,
   ServiceHealthSummary,
   ServiceHealthView,
   ServiceHealthStatus,
+  type AlertView,
 } from '../api/client'
-import { ChevronDown, RefreshCw } from 'lucide-react'
-import { alerts } from '../data/mockData'
+import { ChevronDown, RefreshCw, Zap } from 'lucide-react'
 
 interface Props {
   onServiceClick: (name: string) => void
+  onRcaTriggered?: (incidentId: string) => void
 }
 
 // Mini sparkline SVG component
@@ -66,11 +69,14 @@ function formatTime(iso: string): string {
   }
 }
 
-export default function ServiceHealthOverview({ onServiceClick }: Props) {
+export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }: Props) {
   const [summary, setSummary] = useState<ServiceHealthSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [alerts, setAlerts] = useState<AlertView[]>([])
+  const [alertsLoading, setAlertsLoading] = useState(true)
+  const [triggeringAlert, setTriggeringAlert] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     setRefreshing(true)
@@ -87,9 +93,21 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
     setLoading(false)
   }, [])
 
+  const loadAlerts = useCallback(async () => {
+    setAlertsLoading(true)
+    const result = await getFiringAlerts()
+    if (result.data) {
+      setAlerts(result.data)
+    } else {
+      setAlerts([])
+    }
+    setAlertsLoading(false)
+  }, [])
+
   useEffect(() => {
     loadData()
-  }, [loadData])
+    loadAlerts()
+  }, [loadData, loadAlerts])
 
   // Loading
   if (loading) {
@@ -187,10 +205,10 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
         </div>
         <div className="kpi-card">
           <div className="kpi-label">
-            告警数
-            <span style={{ fontSize: 11, color: 'var(--orange)', marginLeft: 6, fontWeight: 400 }}>Mock</span>
+            活跃告警
+            {alertsLoading && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6, fontWeight: 400 }}>加载中...</span>}
           </div>
-          <div className="kpi-value orange">{summary.alerts}</div>
+          <div className="kpi-value orange">{alerts.length}</div>
         </div>
         <div className="kpi-card" style={{ minWidth: 200 }}>
           <div className="kpi-label">
@@ -346,47 +364,84 @@ export default function ServiceHealthOverview({ onServiceClick }: Props) {
           </div>
         </div>
 
-        {/* Recent Alerts */}
+        {/* Recent Alerts — Real Alertmanager alerts with RCA trigger */}
         <div className="card" style={{ flex: '1' }}>
           <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            最近告警
-            <span style={{ fontSize: 11, color: 'var(--orange)', fontWeight: 400 }}>Mock Alerts</span>
+            活跃告警
+            <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 400 }}>Live</span>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginLeft: 'auto', fontSize: 12 }}
+              onClick={loadAlerts}
+              disabled={alertsLoading}
+            >
+              <RefreshCw size={12} className={alertsLoading ? 'spin' : ''} />
+            </button>
           </div>
           <div>
+            {alertsLoading && alerts.length === 0 && (
+              <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+                正在从 Alertmanager 加载告警...
+              </div>
+            )}
+            {!alertsLoading && alerts.length === 0 && (
+              <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+                当前无活跃告警（Alertmanager 无 firing alerts）
+              </div>
+            )}
             {alerts.map((a, i) => (
-              <div key={i} style={{
+              <div key={a.fingerprint || i} style={{
                 display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '16px 0',
+                flexDirection: 'column',
+                gap: 8,
+                padding: '14px 0',
                 borderTop: i > 0 ? '1px solid var(--line)' : 'none',
               }}>
-                <span className="status-dot" style={{
-                  background: a.level === 'P1' ? 'var(--red)' : 'var(--orange)',
-                  flexShrink: 0,
-                  width: 10,
-                  height: 10,
-                }} />
-                <span style={{ flex: 1, fontSize: 14, color: 'var(--text)' }}>
-                  {a.service} {a.message}
-                </span>
-                <span className={'badge ' + (a.level === 'P1' ? 'badge-red' : 'badge-orange')}>
-                  {a.level}
-                </span>
-                <span style={{ fontSize: 13, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{a.time}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className="status-dot" style={{
+                    background: a.severity === 'critical' ? 'var(--red)' : 'var(--orange)',
+                    flexShrink: 0,
+                    width: 10,
+                    height: 10,
+                  }} />
+                  <span style={{ flex: 1, fontSize: 14, color: 'var(--text)', fontWeight: 600 }}>
+                    {a.alertName}
+                  </span>
+                  <span className={'badge ' + (a.severity === 'critical' ? 'badge-red' : 'badge-orange')}>
+                    {a.severity === 'critical' ? '严重' : a.severity === 'warning' ? '警告' : a.severity}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--muted)', paddingLeft: 20 }}>
+                  {a.summary || (a.service ? '服务: ' + a.service : '')}
+                </div>
+                <div style={{ paddingLeft: 20 }}>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    style={{ fontSize: 12, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 4 }}
+                    disabled={triggeringAlert !== null}
+                    onClick={async () => {
+                      setTriggeringAlert(a.fingerprint)
+                      const result = await triggerIncidentRca({ fingerprint: a.fingerprint })
+                      setTriggeringAlert(null)
+                      if (result.data && result.data.incidentId) {
+                        if (onRcaTriggered) onRcaTriggered(result.data.incidentId)
+                      } else {
+                        alert('RCA 触发失败: ' + (result.error || '未知错误'))
+                      }
+                    }}
+                  >
+                    <Zap size={12} />
+                    {triggeringAlert === a.fingerprint ? '分析中...' : '触发 RCA 分析'}
+                  </button>
+                </div>
               </div>
             ))}
-            <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--blue)', cursor: 'pointer' }}>
-                查看全部告警 →
-              </span>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="footer-note">
-        * 服务状态（reachable / fault）来自真实 API · 错误率 / 延迟 / 流量 / 饱和度 / 重启为 Mock Estimated · 告警为 Mock Alerts
+        * 服务状态（reachable / fault）来自真实 API · 错误率 / 延迟 / 流量 / 饱和度 / 重启为 Mock Estimated · 告警来自 Alertmanager Live
       </div>
     </div>
   )

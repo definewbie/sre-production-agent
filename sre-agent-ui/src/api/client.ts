@@ -1006,3 +1006,66 @@ export async function getEvidenceDrilldownView(): Promise<{ data: EvidenceDrilld
   }
   return { data: view, error: null }
 }
+
+/* ── Incident / Alert-driven API (V.2-UI-6) ── */
+
+export interface AlertView {
+  fingerprint: string
+  alertName: string
+  service: string
+  namespace: string
+  severity: string
+  status: string
+  startedAt: string
+  summary: string
+  labels: Record<string, string>
+}
+
+export interface IncidentRcaResultView {
+  incidentId: string
+  alertName: string
+  service: string
+  severity: string
+  status: string  // "running" | "completed" | "failed"
+  decisionType?: string
+  confidenceScore?: number
+  topHypothesisName?: string
+  hypothesisCount?: number
+  durationMs?: number
+  errorMessage?: string
+}
+
+/** Fetch current firing alerts from Alertmanager (Trigger Role). */
+export async function getFiringAlerts(): Promise<{ data: AlertView[] | null; error: string | null }> {
+  return request<AlertView[]>('/api/incidents/alerts')
+}
+
+/** List all incidents (alert-driven RCA results). */
+export async function getIncidents(): Promise<{ data: IncidentRcaResultView[] | null; error: string | null }> {
+  return request<IncidentRcaResultView[]>('/api/incidents')
+}
+
+/** Get a single incident result. */
+export async function getIncident(incidentId: string): Promise<{ data: IncidentRcaResultView | null; error: string | null }> {
+  return request<IncidentRcaResultView>('/api/incidents/' + encodeURIComponent(incidentId))
+}
+
+/** Trigger RCA from a specific alert. */
+export async function triggerIncidentRca(payload: {
+  fingerprint?: string
+  alertName?: string
+  service?: string
+}): Promise<{ data: IncidentRcaResultView | null; error: string | null }> {
+  return request<IncidentRcaResultView>('/api/incidents/from-alert', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Get the full RCA analysis view for an incident (LiveScenarioResult-compatible). */
+export async function getIncidentRcaAnalysis(incidentId: string): Promise<{ data: RcaAnalysisView | null; error: string | null }> {
+  const result = await request<Record<string, unknown>>('/api/incidents/' + encodeURIComponent(incidentId) + '/rca')
+  if (result.error) return { data: null, error: result.error }
+  if (!result.data) return { data: null, error: null }
+  return { data: mapLiveScenarioToRcaView(result.data), error: null }
+}
