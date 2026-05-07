@@ -199,17 +199,14 @@ export default function RcaAnalysisPanel({ alertIncidentId }: RcaAnalysisPanelPr
         }
       }
       // Priority 2: Try to get latest Lab result
+      // If 404 (no prior run), fall through to simulation instead of erroring out
       const latest = await getLatestLiveScenario()
-      if (latest.error) {
-        setError(latest.error)
-        return
-      }
       if (latest.data) {
         setSourceLabel('Lab/Demo')
         setData(latest.data)
         return
       }
-      // Priority 3: No existing result → run simulation
+      // Priority 3: No existing result (or 404) → run simulation
       setSourceLabel('Lab/Demo')
       const sim = await simulateLiveScenario(true)
       if (sim.error) {

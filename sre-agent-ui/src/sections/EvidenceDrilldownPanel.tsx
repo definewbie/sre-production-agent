@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   getEvidenceDrilldownView,
+  simulateLiveScenario,
   EvidenceDrilldownView,
   EvidenceItemView,
   SourceSummaryView,
@@ -197,7 +198,15 @@ export default function EvidenceDrilldownPanel() {
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const result = await getEvidenceDrilldownView()
+    // First try to get evidence from latest run
+    let result = await getEvidenceDrilldownView()
+    // If no prior run (404), run a simulation first then retry
+    if (result.error && result.error.includes('404')) {
+      const sim = await simulateLiveScenario(false)
+      if (!sim.error) {
+        result = await getEvidenceDrilldownView()
+      }
+    }
     if (result.error) {
       setError(result.error)
       setData(null)

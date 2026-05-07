@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { incidentSummary } from '../data/mockData'
-import { services } from '../data/mockData'
+import { services as mockServices } from '../data/mockData'
+import { getServiceHealthSummary, type ServiceHealthView } from '../api/client'
 
 type TabId = 'metrics' | 'callchain' | 'resources' | 'timeline'
 
@@ -44,9 +45,50 @@ const tabs: { id: TabId; label: string }[] = [
 export default function IncidentDetailPanel({ serviceName, onBack, onRca }: Props) {
   const svc = serviceName || incidentSummary.service
   const [activeTab, setActiveTab] = useState<TabId>('metrics')
+  const [realServices, setRealServices] = useState<ServiceHealthView[]>([])
+  const [loading, setLoading] = useState(true)
+  const [dataSource, setDataSource] = useState<'real' | 'mock'>('mock')
 
-  const svcData = services.find(s => s.name === svc)
-  const currentSvc = svcData || services[0]
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    getServiceHealthSummary().then(res => {
+      if (cancelled) return
+      if (res.data && res.data.services.length > 0) {
+        setRealServices(res.data.services)
+        setDataSource('real')
+      }
+      setLoading(false)
+    }).catch(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  // 优先用真实 API 数据，fallback 到 mock
+  const allServices = realServices.length > 0 ? realServices : mockServices.map(m => ({
+    name: m.name,
+    status: (m.status === 'abnormal' ? 'degraded' : 'healthy') as ServiceHealthView['status'],
+    reachable: true,
+    url: '',
+    health: '',
+    errorRate: m.errorRate,
+    errorRateTrend: m.errorRateTrend,
+    errorRateDirection: m.errorRateDirection as 'up' | 'down' | undefined,
+    p95Latency: m.p95Latency,
+    p95Trend: m.p95Trend,
+    p95Direction: m.p95Direction as 'up' | 'down' | undefined,
+    rps: m.rps,
+    saturation: m.saturation,
+    restarts: m.restarts,
+    faultEnabled: false,
+    faultType: 'normal',
+    message: '',
+    source: 'mock' as const,
+  }))
+
+  const svcData = allServices.find(s => s.name === svc)
+  const currentSvc = svcData || allServices[0]
 
   return (
     <div>
@@ -70,7 +112,15 @@ export default function IncidentDetailPanel({ serviceName, onBack, onRca }: Prop
             {svc} 异常详情
           </h1>
           <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
-            异常检测时间：{incidentSummary.detectedAt}{'    '}持续时间：{incidentSummary.duration}{'    '}状态：{incidentSummary.status}
+            <span>状态：{currentSvc.status === 'healthy' ? '正常' : currentSvc.status === 'degraded' ? '异常（降级）' : currentSvc.status === 'down' ? '不可达' : '未知'}</span>
+            <span style={{ margin: '0 12px' }}>|</span>
+            <span>可达：{currentSvc.reachable ? '是' : '否'}</span>
+            {currentSvc.faultEnabled && <>
+              <span style={{ margin: '0 12px' }}>|</span>
+              <span style={{ color: 'var(--red)' }}>故障注入：{currentSvc.faultType}</span>
+            </>}
+            <span style={{ margin: '0 12px' }}>|</span>
+            <span>数据来源：{dataSource === 'real' ? '✅ 实时 API' : '⚠️ Mock 数据'}</span>
           </div>
         </div>
         <button className="btn btn-primary" onClick={onRca}>
@@ -80,17 +130,25 @@ export default function IncidentDetailPanel({ serviceName, onBack, onRca }: Prop
 
       {/* Anomaly Summary Banner */}
       <div style={{
-        background: '#fff1f3',
-        border: '1px solid var(--badge-red-border)',
+        background: currentSvc.status === 'healthy' ? '#f0fdf4' : '#fff1f3',
+        border: '1px solid ' + (currentSvc.status === 'healthy' ? 'var(--badge-green-border, #b7eb8f)' : 'var(--badge-red-border)'),
         borderRadius: 8,
         padding: '16px 20px',
         marginBottom: 20,
       }}>
         <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
-          当前异常：{incidentSummary.summary}
+          {currentSvc.status === 'healthy'
+            ? '当前状态正常'
+            : '当前异常：' + [
+                currentSvc.errorRate && currentSvc.errorRate !== '0%' ? '错误率 ' + currentSvc.errorRate : '',
+                currentSvc.p95Latency ? 'P95延迟 ' + currentSvc.p95Latency : '',
+                currentSvc.faultEnabled ? '故障注入 ' + currentSvc.faultType : '',
+                currentSvc.message || '',
+              ].filter(Boolean).join('、')
+          }
         </div>
         <div style={{ color: 'var(--text)' }}>
-          影响链路：{incidentSummary.impactChain}
+          {'服务 ' + currentSvc.name + ' — ' + (currentSvc.reachable ? '可达' : '不可达') + '，健康检查：' + (currentSvc.health || '无数据')}
         </div>
       </div>
 
@@ -126,37 +184,51 @@ export default function IncidentDetailPanel({ serviceName, onBack, onRca }: Prop
       {/* Tab Content */}
       {activeTab === 'metrics' && (
         <>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+              加载服务指标中...
+            </div>
+          ) : (
+          <>
           {/* 4 Metric Cards */}
           <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
             <div className="card" style={{ flex: 1, padding: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--title)' }}>错误率 (5m)</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
-                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.errorRate}</span>
-                <span style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>↑{currentSvc.errorRateTrend}</span>
+                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.errorRate || 'N/A'}</span>
+                {currentSvc.errorRateTrend && (
+                  <span style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>
+                    {currentSvc.errorRateDirection === 'up' ? '↑' : '↓'}{currentSvc.errorRateTrend}
+                  </span>
+                )}
               </div>
-              <MetricSparkline color="#f04438" data={[2.0, 2.5, 2.2, 3.0, 3.8, 4.2, 4.7]} />
+              <MetricSparkline color="#f04438" data={[2.0, 2.5, 2.2, 3.0, 3.8, 4.2, parseFloat((currentSvc.errorRate || '0').replace('%', '')) || 4.7]} />
             </div>
             <div className="card" style={{ flex: 1, padding: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--title)' }}>P95 延迟 (5m)</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 8 }}>
-                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.p95Latency}</span>
-                <span style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>↑{currentSvc.p95Trend}</span>
+                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.p95Latency || 'N/A'}</span>
+                {currentSvc.p95Trend && (
+                  <span style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600 }}>
+                    {currentSvc.p95Direction === 'up' ? '↑' : '↓'}{currentSvc.p95Trend}
+                  </span>
+                )}
               </div>
-              <MetricSparkline color="#f04438" data={[0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 1.85]} />
+              <MetricSparkline color="#f04438" data={[0.5, 0.6, 0.8, 1.0, 1.2, 1.5, parseFloat((currentSvc.p95Latency || '0').replace('s', '')) || 1.85]} />
             </div>
             <div className="card" style={{ flex: 1, padding: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--title)' }}>流量 (rps)</div>
               <div style={{ marginTop: 8 }}>
-                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.rps}</span>
+                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.rps != null ? currentSvc.rps : 'N/A'}</span>
               </div>
-              <MetricSparkline color="#2e90fa" data={[1.8, 2.0, 1.9, 2.1, 2.3, 2.0, 2.1]} />
+              <MetricSparkline color="#2e90fa" data={[1.8, 2.0, 1.9, 2.1, 2.3, 2.0, currentSvc.rps || 2.1]} />
             </div>
             <div className="card" style={{ flex: 1, padding: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--title)' }}>饱和度</div>
               <div style={{ marginTop: 8 }}>
-                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.saturation}%</span>
+                <span style={{ fontSize: 32, fontWeight: 700 }}>{currentSvc.saturation != null ? currentSvc.saturation + '%' : 'N/A'}</span>
               </div>
-              <MetricSparkline color="#12b76a" data={[30, 35, 38, 40, 42, 44, 45]} />
+              <MetricSparkline color="#12b76a" data={[30, 35, 38, 40, 42, 44, currentSvc.saturation || 45]} />
             </div>
           </div>
 
@@ -200,6 +272,7 @@ export default function IncidentDetailPanel({ serviceName, onBack, onRca }: Prop
               </table>
             </div>
           </div>
+          </>)}
         </>
       )}
 
@@ -322,7 +395,10 @@ export default function IncidentDetailPanel({ serviceName, onBack, onRca }: Prop
         </div>
       )}
 
-      <div className="footer-note">* 所有数据为模拟数据，API 接入后将替换</div>
+      <div className="footer-note">
+        * 指标数据来源：{dataSource === 'real' ? '实时 API' : 'Mock 数据（API 不可用时）'}；
+        调用链路 / 资源状态 / 事件时间线暂为模拟数据
+      </div>
     </div>
   )
 }
