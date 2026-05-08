@@ -622,6 +622,26 @@ export async function simulateLiveScenario(runLlm?: boolean): Promise<{ data: Rc
 
 export type ServiceHealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown'
 
+/** 单服务 Prometheus 指标视图（来自 GET /api/metrics/services） */
+export interface ServiceMetricsView {
+  errorRate: string
+  errorRateTrend: string
+  errorRateDirection: 'up' | 'down'
+  p95Latency: string
+  p95Trend: string
+  p95Direction: 'up' | 'down'
+  rps: number
+  saturation: number
+  restarts: number
+}
+
+export interface ServicesMetricsResponse {
+  source: 'real' | 'unavailable'
+  /** key = service name，如 "order-service" */
+  services: Record<string, ServiceMetricsView>
+  checkedAt: string
+}
+
 export interface ServiceHealthView {
   name: string
   status: ServiceHealthStatus
@@ -691,25 +711,6 @@ function mapDemoService(s: DemoServiceStatus): ServiceHealthView {
   }
 }
 
-/** 为服务补充 mock 指标（errorRate, p95Latency 等） */
-function enrichWithMockMetrics(svc: ServiceHealthView, mockLookup: Record<string, ServiceHealthView>): ServiceHealthView {
-  const m = mockLookup[svc.name]
-  if (!m) return { ...svc, source: svc.source }
-  return {
-    ...svc,
-    errorRate: m.errorRate,
-    errorRateTrend: m.errorRateTrend,
-    errorRateDirection: m.errorRateDirection,
-    p95Latency: m.p95Latency,
-    p95Trend: m.p95Trend,
-    p95Direction: m.p95Direction,
-    rps: m.rps,
-    saturation: m.saturation,
-    restarts: m.restarts,
-    source: 'mixed',
-  }
-}
-
 /** 解析 topology 字符串 "order-service → payment-service → inventory-service" */
 function parseTopology(topoStr: string, services: ServiceHealthView[]): ServiceHealthSummary['topology'] {
   const parts = topoStr.split(/\s*→\s*/)
@@ -729,10 +730,28 @@ function parseTopology(topoStr: string, services: ServiceHealthView[]): ServiceH
 }
 
 /**
+ * getServicesMetrics()
+ * 
+ * 从 GET /api/metrics/services 获取 Prometheus 实时指标。
+ * 返回 null 表示 Prometheus 不可用，调用方应降级到 mock。
+ */
+async function getServicesMetrics(): Promise<ServicesMetricsResponse | null> {
+  try {
+    const res = await fetch('/api/metrics/services')
+    if (!res.ok) return null
+    const json = await res.json()
+    if (json.source === 'unavailable' || !json.services) return null
+    return json as ServicesMetricsResponse
+  } catch {
+    return null
+  }
+}
+
+/**
  * getServiceHealthSummary()
  * 
  * 从 /api/demo-services/status 获取真实服务列表和可达性。
- * 指标（errorRate, p95Latency, rps, saturation, restarts）暂无真实 API → 用 mock 补齐。
+ * 指标从 Prometheus 实时获取（GET /api/metrics/services），不可用时降级到 mock。
  * 告警和影响用户数暂用 mock。
  * 每个字段都标记来源（real / mock / mixed）。
  */
@@ -745,9 +764,23 @@ export async function getServiceHealthSummary(): Promise<{ data: ServiceHealthSu
 
   const rawServices = demo.data.services.map(mapDemoService)
 
-  // Mock 指标补充（errorRate, p95, rps, saturation, restarts）
-  const mockMetrics: Record<string, ServiceHealthView> = {}
-  // 动态 import 避免循环依赖，直接内联 mock 指标
+  // 尝试从 Prometheus 获取真实指标
+  const realMetrics = await getServicesMetrics()
+
+  let metricsSource: 'real' | 'mock' | 'mixed' = 'mixed'
+  let checkedAt: string
+
+  if (realMetrics) {
+    // Prometheus 可用 → 使用真实指标
+    metricsSource = 'real'
+    checkedAt = realMetrics.checkedAt
+  } else {
+    // Prometheus 不可用 → 降级为 mock 指标
+    metricsSource = 'mixed'
+    checkedAt = new Date().toISOString()
+  }
+
+  // Mock 降级默认值
   const mockDefaults: Record<string, Partial<ServiceHealthView>> = {
     'order-service': { errorRate: '4.7%', errorRateTrend: '350%', errorRateDirection: 'up', p95Latency: '1.85s', p95Trend: '280%', p95Direction: 'up', rps: 2.1, saturation: 45, restarts: 0 },
     'payment-service': { errorRate: '0.2%', errorRateTrend: '20%', errorRateDirection: 'up', p95Latency: '2.42s', p95Trend: '480%', p95Direction: 'up', rps: 2.0, saturation: 38, restarts: 0 },
@@ -755,6 +788,24 @@ export async function getServiceHealthSummary(): Promise<{ data: ServiceHealthSu
   }
 
   const services = rawServices.map(svc => {
+    if (realMetrics && realMetrics.services[svc.name]) {
+      // 真实指标 + 真实可达性 → source = real
+      const m = realMetrics.services[svc.name]
+      return {
+        ...svc,
+        errorRate: m.errorRate,
+        errorRateTrend: m.errorRateTrend,
+        errorRateDirection: m.errorRateDirection,
+        p95Latency: m.p95Latency,
+        p95Trend: m.p95Trend,
+        p95Direction: m.p95Direction,
+        rps: m.rps,
+        saturation: m.saturation,
+        restarts: m.restarts,
+        source: 'real' as const,
+      }
+    }
+    // 降级到 mock
     const mock = mockDefaults[svc.name]
     if (!mock) return svc
     return {
@@ -772,8 +823,8 @@ export async function getServiceHealthSummary(): Promise<{ data: ServiceHealthSu
 
   return {
     data: {
-      checkedAt: new Date().toISOString(),
-      source: 'mixed',
+      checkedAt,
+      source: metricsSource,
       totalServices: services.length,
       healthyServices: healthyCount,
       degradedServices: degradedCount,
@@ -1007,6 +1058,34 @@ export async function getEvidenceDrilldownView(): Promise<{ data: EvidenceDrilld
   return { data: view, error: null }
 }
 
+/** Get evidence drilldown for a specific RCA Run by scenarioId. */
+export async function getEvidenceDrilldownForRun(runId: string): Promise<{ data: EvidenceDrilldownView | null; error: string | null }> {
+  const result = await request<Record<string, unknown>>('/api/live-scenario/' + encodeURIComponent(runId))
+  if (result.error) return { data: null, error: result.error }
+  if (!result.data) return { data: null, error: null }
+  const view = mapEvidenceDrilldownView(result.data)
+  if (view.totalEvidence === 0 && !view.runId) {
+    return { data: null, error: null }
+  }
+  return { data: view, error: null }
+}
+
+/* ── RCA Run Status (V.2-UI-6.2) ── */
+
+export type RcaRunStatus = 'NOT_STARTED' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'NO_EVIDENCE_FOUND' | 'FAILED'
+
+/** Map backend status strings to RcaRunStatus */
+export function normalizeRcaRunStatus(raw?: string): RcaRunStatus {
+  if (!raw) return 'NOT_STARTED'
+  const s = raw.toUpperCase().replace(/-/g, '_')
+  if (s === 'COMPLETED') return 'COMPLETED'
+  if (s === 'NO_EVIDENCE_FOUND') return 'NO_EVIDENCE_FOUND'
+  if (s === 'RUNNING' || s === 'IN_PROGRESS') return 'RUNNING'
+  if (s === 'QUEUED' || s === 'PENDING') return 'QUEUED'
+  if (s === 'FAILED' || s === 'ERROR') return 'FAILED'
+  return 'NOT_STARTED'
+}
+
 /* ── Incident / Alert-driven API (V.2-UI-6) ── */
 
 export type AlertRelevance = 'SERVICE_ALERT' | 'PLATFORM_ALERT' | 'WATCHDOG_ALERT' | 'UNSUPPORTED_ALERT' | 'IGNORED_ALERT'
@@ -1053,13 +1132,23 @@ export interface IncidentRcaResultView {
   alertName: string
   service: string
   severity: string
-  status: string  // "running" | "completed" | "failed"
+  status: string  // "running" | "completed" | "failed" | "not_started" | "queued"
   decisionType?: string
   confidenceScore?: number
   topHypothesisName?: string
   hypothesisCount?: number
   durationMs?: number
   errorMessage?: string
+  /** V.2-UI-6.2: additional fields for list display */
+  namespace?: string
+  startedAt?: string
+  evidenceCount?: number
+  triggerSource?: string  // "alert" | "manual" | "lab-demo"
+  /** Alert fingerprint for rcaEligible checks */
+  alertFingerprint?: string
+  /** Whether this alert is eligible for RCA trigger */
+  rcaEligible?: boolean
+  ineligibleReason?: string
 }
 
 /** Fetch classified firing alerts with summary (V.2-UI-6.1). */
@@ -1095,4 +1184,88 @@ export async function getIncidentRcaAnalysis(incidentId: string): Promise<{ data
   if (result.error) return { data: null, error: result.error }
   if (!result.data) return { data: null, error: null }
   return { data: mapLiveScenarioToRcaView(result.data), error: null }
+}
+
+/* ── Chaos Experiment API (V.2-UI-7) ── */
+
+export type ChaosFaultType = 'latency' | 'error' | 'timeout' | 'resource_pressure'
+export type ChaosStatus = 'IDLE' | 'CONFIGURED' | 'RUNNING' | 'STOPPING' | 'STOPPED' | 'FAILED' | 'UNKNOWN'
+
+export interface ChaosConfig {
+  targetService: string
+  faultType: ChaosFaultType
+  latencyMs?: number
+  errorRate?: number
+  durationSeconds?: number
+  rps?: number
+  experimentName?: string
+  description?: string
+}
+
+export interface ChaosExperimentInfo {
+  targetService: string
+  faultType: string
+  experimentName: string
+  description: string
+  active: boolean
+  startedAt: string
+  expectedEndAt: string
+  stoppedAt?: string
+  durationSeconds: number
+  remainingSeconds: number
+}
+
+export interface ChaosServiceStatus {
+  service: string
+  health: string
+  faultConfig: string
+  reachable: boolean
+  experiment?: ChaosExperimentInfo
+}
+
+export interface ChaosStatusResponse {
+  services: ChaosServiceStatus[]
+  topology: string
+  activeExperiments: ChaosExperimentInfo[]
+}
+
+export interface ChaosActionResult {
+  status: string
+  targetService?: string
+  faultType?: string
+  startedAt?: string
+  expectedEndAt?: string
+  remainingSeconds?: number
+  message?: string
+  experiment?: ChaosExperimentInfo
+  hint?: string
+  error?: string
+}
+
+/** GET /api/chaos/status */
+export async function getChaosStatus(): Promise<{ data: ChaosStatusResponse | null; error: string | null }> {
+  return request<ChaosStatusResponse>('/api/chaos/status')
+}
+
+/** POST /api/chaos/start */
+export async function startChaosExperiment(config: ChaosConfig): Promise<{ data: ChaosActionResult | null; error: string | null }> {
+  return request<ChaosActionResult>('/api/chaos/start', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  })
+}
+
+/** POST /api/chaos/stop */
+export async function stopChaosExperiment(targetService: string): Promise<{ data: ChaosActionResult | null; error: string | null }> {
+  return request<ChaosActionResult>('/api/chaos/stop', {
+    method: 'POST',
+    body: JSON.stringify({ targetService }),
+  })
+}
+
+/** POST /api/chaos/reset */
+export async function resetChaosFaults(): Promise<{ data: ChaosActionResult | null; error: string | null }> {
+  return request<ChaosActionResult>('/api/chaos/reset', {
+    method: 'POST',
+  })
 }

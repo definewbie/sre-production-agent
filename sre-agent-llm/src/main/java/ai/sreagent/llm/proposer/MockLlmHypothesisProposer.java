@@ -78,78 +78,76 @@ public class MockLlmHypothesisProposer implements LlmHypothesisProposer {
             new ProbeIntent(
                 ProbeType.PROMETHEUS_QUERY,
                 "order-service", "order-service",
-                "Check order-service timeout error rate before and after deploy",
+                "检查 order-service 部署前后的超时错误率变化",
                 "metric_error_rate_spike",
-                "Determine if deployment increased timeout errors"
+                "判断部署是否导致超时错误增加"
             ),
             new ProbeIntent(
                 ProbeType.PROMETHEUS_QUERY,
                 "payment-service", "payment-service",
-                "Check payment-service p95 latency during incident window",
+                "检查 payment-service 在故障窗口的 P95 延迟",
                 "metric_latency_p95_spike",
-                "Determine if payment-service latency spiked after deploy"
+                "判断 payment-service 延迟是否在部署后飙升"
             ),
             new ProbeIntent(
                 ProbeType.LOKI_QUERY,
                 "order-service", "order-service",
-                "Search order-service logs for retry exhausted and downstream timeout",
+                "搜索 order-service 日志中的重试耗尽和下游超时记录",
                 "log_retry_exhausted",
-                "Find evidence of retry amplification"
+                "查找重试放大效应的证据"
             ),
             new ProbeIntent(
                 ProbeType.TRACE_QUERY,
                 "order-service", "order-service->payment-service",
-                "Inspect order-service to payment-service span latency and error spans",
+                "检查 order-service 到 payment-service 的调用链路延迟和错误 span",
                 "trace_downstream_span_slow",
-                "Confirm downstream latency amplification in trace data"
+                "从链路追踪确认下游延迟放大效应"
             ),
             new ProbeIntent(
                 ProbeType.KUBERNETES_QUERY,
                 "order-service", "order-service-pods",
-                "Check order-service pod restart/readiness to rule out local runtime instability",
+                "检查 order-service Pod 重启/就绪状态，排除本地运行时异常",
                 "pod_restart_count_increased",
-                "Rule out local pod issues as alternative cause"
+                "排除 Pod 本地问题作为替代根因"
             )
         );
 
         VerificationPlan plan = new VerificationPlan(
             List.of(
-                "timeout config diff exact value",
-                "pre/post deploy timeout error rate",
-                "payment-service p95 latency by endpoint",
-                "client-side cancellation / timeout metrics",
-                "retry exhausted logs",
-                "order-service -> payment-service slow/error spans"
+                "超时配置差异的具体数值",
+                "部署前后超时错误率对比",
+                "payment-service 按接口的 P95 延迟",
+                "客户端取消/超时相关指标",
+                "重试耗尽日志",
+                "order-service → payment-service 慢/错误 span"
             ),
             List.of(
-                "timeout config diff",
-                "client-side cancellation metrics",
-                "retry exhausted logs"
+                "超时配置差异",
+                "客户端取消指标",
+                "重试耗尽日志"
             ),
             List.of(
-                "payment-service independent error spike",
-                "network partition evidence"
+                "payment-service 独立错误飙升",
+                "网络分区证据"
             ),
             probes
         );
 
         return new UnverifiedHypothesisProposal(
             "llm_prop_deployment_timeout_amplification",
-            "Deployment timeout change may have amplified downstream latency",
+            "部署超时变更可能放大了下游延迟",
             "deployment_downstream_amplification_loop",
             result.incident() != null ? result.incident().service() : "order-service",
-            "Deployment timeout/retry configuration change amplified downstream latency symptoms, " +
-                "creating a feedback loop between order-service and payment-service",
-            "The two leading hypotheses (deployment regression and downstream dependency latency) " +
-                "may not be independent. A deployment timeout or retry behavior change could have " +
-                "amplified downstream latency, creating an apparent competing signal. " +
-                "The deployment changed timeout/retry configuration, which caused more aggressive " +
-                "retries to payment-service, which increased load and latency on payment-service, " +
-                "which then appeared as both a deployment regression and a downstream dependency issue.",
+            "部署中的超时/重试配置变更放大了下游延迟现象，" +
+                "在 order-service 和 payment-service 之间形成了反馈循环",
+            "排名前两位的假设（部署回归和下游依赖延迟）可能并非独立。" +
+                "部署中引入了超时或重试行为的变更，导致对 payment-service 的重试更激进，" +
+                "从而增加了 payment-service 的负载和延迟，" +
+                "最终同时表现为部署回归和下游依赖问题两种信号。",
             List.of(
-                "competing_hypotheses decision with small score gap",
-                "deployment event near incident window",
-                "downstream latency spike on payment-service"
+                "竞争假设决策模式下分数差距较小",
+                "部署事件发生在故障窗口附近",
+                "payment-service 下游延迟飙升"
             ),
             plan,
             0.35,

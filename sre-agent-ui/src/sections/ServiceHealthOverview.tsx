@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getServiceHealthSummary,
   getFiringAlerts,
+  getIncidents,
   triggerIncidentRca,
   ServiceHealthSummary,
   ServiceHealthView,
@@ -9,6 +10,7 @@ import {
   type AlertView,
   type AlertsResponse,
   type AlertSummary,
+  type IncidentRcaResultView,
 } from '../api/client'
 import { ChevronDown, RefreshCw, Zap } from 'lucide-react'
 
@@ -80,9 +82,53 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
   const [alertSummary, setAlertSummary] = useState<AlertSummary | null>(null)
   const [alertsLoading, setAlertsLoading] = useState(true)
   const [triggeringAlert, setTriggeringAlert] = useState<string | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [timeRange, setTimeRange] = useState<'5m' | '15m' | '1h' | '6h'>('5m')
+  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false)
+  const timeDropdownRef = useRef<HTMLDivElement>(null)
+  // Mixed-source alerts: Alertmanager + chaos incidents
+  const [incidents, setIncidents] = useState<IncidentRcaResultView[]>([])
+  const [incidentsLoading, setIncidentsLoading] = useState(true)
 
-  // Only show SERVICE_ALERT on the health overview page (V.2-UI-6.1)
+  // Pure Alertmanager service alerts (for summary count display)
   const serviceAlerts = alerts.filter(a => a.relevance === 'SERVICE_ALERT')
+
+  // Merge Alertmanager alerts with RCA incidents for unified display
+  interface MixedAlertItem {
+    fingerprint: string
+    alertName: string
+    service: string
+    severity: string
+    summary: string
+    rcaEligible: boolean
+    source: 'Alertmanager' | 'RCA'
+  }
+
+  // Convert incidents to alert-like items
+  const incidentAlerts: MixedAlertItem[] = incidents.map(inc => ({
+    fingerprint: inc.incidentId,
+    alertName: inc.alertName || `RCA: ${inc.service}`,
+    service: inc.service,
+    severity: (inc.decisionType === 'ROOT_CAUSE_CONFIRMED' || (inc.confidenceScore != null && inc.confidenceScore > 0.7))
+      ? 'critical' : 'warning',
+    summary: inc.decisionType
+      ? `决策: ${inc.decisionType}, 置信度: ${((inc.confidenceScore ?? 0) * 100).toFixed(0)}%`
+      : inc.errorMessage || `状态: ${inc.status}`,
+    rcaEligible: false,
+    source: 'RCA' as const,
+  }))
+  const mixedAlerts: MixedAlertItem[] = [
+    ...serviceAlerts.map(a => ({
+      fingerprint: a.fingerprint || a.alertName,
+      alertName: a.alertName,
+      service: a.service,
+      severity: a.severity,
+      summary: a.summary || (a.service ? '服务: ' + a.service : ''),
+      rcaEligible: a.rcaEligible,
+      source: 'Alertmanager' as const,
+    })),
+    ...incidentAlerts,
+  ]
 
   const loadData = useCallback(async () => {
     setRefreshing(true)
@@ -112,10 +158,55 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
     setAlertsLoading(false)
   }, [])
 
+  const loadIncidents = useCallback(async () => {
+    setIncidentsLoading(true)
+    const result = await getIncidents()
+    if (result.data) {
+      // Filter to completed/significant incidents (chaos or manual, skip pure alert-derived?)
+      setIncidents(result.data.filter(inc => inc.status === 'COMPLETED' || inc.status === 'RUNNING'))
+    } else {
+      setIncidents([])
+    }
+    setIncidentsLoading(false)
+  }, [])
+
   useEffect(() => {
     loadData()
     loadAlerts()
-  }, [loadData, loadAlerts])
+    loadIncidents()
+  }, [loadData, loadAlerts, loadIncidents])
+
+  // Auto-refresh interval
+  useEffect(() => {
+    if (!autoRefresh) return
+    const intervalMap = { '5m': 30_000, '15m': 60_000, '1h': 120_000, '6h': 300_000 }
+    const interval = setInterval(() => {
+      loadData()
+      loadAlerts()
+      loadIncidents()
+    }, intervalMap[timeRange])
+    return () => clearInterval(interval)
+  }, [autoRefresh, timeRange, loadData, loadAlerts, loadIncidents])
+
+  // Click outside to close time dropdown
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target as Node)) {
+        setTimeDropdownOpen(false)
+      }
+    }
+    if (timeDropdownOpen) {
+      document.addEventListener('mousedown', handleClick)
+      return () => document.removeEventListener('mousedown', handleClick)
+    }
+  }, [timeDropdownOpen])
+
+  const timeRangeLabels: Record<string, string> = {
+    '5m': '最近 5 分钟',
+    '15m': '最近 15 分钟',
+    '1h': '最近 1 小时',
+    '6h': '最近 6 小时',
+  }
 
   // Loading
   if (loading) {
@@ -151,6 +242,8 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
 
   const svcs = summary.services
   const hasMixed = summary.source === 'mixed' || svcs.some(s => s.source === 'mixed')
+  const hasMock = summary.source === 'mixed' || summary.source === 'mock'
+  const mockSup = hasMock ? (<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup>) : null
 
   return (
     <div>
@@ -158,13 +251,67 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <h1 className="page-title">1 服务健康总览</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <button className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            最近 5 分钟
-            <ChevronDown size={14} />
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--muted)' }}>
+          <div ref={timeDropdownRef} style={{ position: 'relative' }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+              onClick={() => setTimeDropdownOpen(o => !o)}
+            >
+              {timeRangeLabels[timeRange]}
+              <ChevronDown size={14} style={{ transform: timeDropdownOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.2s' }} />
+            </button>
+            {timeDropdownOpen && (
+              <>
+                <div
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 99,
+                  }}
+                  onClick={() => setTimeDropdownOpen(false)}
+                />
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: 4,
+                  background: 'var(--surface)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                  zIndex: 100,
+                  minWidth: 160,
+                  padding: '4px 0',
+                }}>
+                {(['5m', '15m', '1h', '6h'] as const).map(opt => (
+                  <div
+                    key={opt}
+                    onClick={(e) => { e.stopPropagation(); setTimeRange(opt); setTimeDropdownOpen(false) }}
+                    style={{
+                      padding: '8px 16px',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                      color: timeRange === opt ? 'var(--blue)' : 'var(--text)',
+                      background: timeRange === opt ? 'var(--blue-bg)' : 'transparent',
+                      fontWeight: timeRange === opt ? 600 : 400,
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={e => { if (timeRange !== opt) (e.target as HTMLElement).style.background = 'var(--hover-bg)' }}
+                    onMouseLeave={e => { if (timeRange !== opt) (e.target as HTMLElement).style.background = 'transparent' }}
+                  >
+                    {timeRangeLabels[opt]}
+                  </div>
+                ))}
+              </div>
+              </>
+            )}
+          </div>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--muted)', cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => setAutoRefresh(a => !a)}
+          >
             自动刷新：
-            <div className="toggle active" style={{ transform: 'scale(0.8)' }}>
+            <div className={'toggle' + (autoRefresh ? ' active' : '')} style={{ transform: 'scale(0.8)' }}>
               <div className="toggle-knob" />
             </div>
           </div>
@@ -173,7 +320,7 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
           </span>
           <button
             className="btn btn-ghost btn-sm"
-            onClick={loadData}
+            onClick={() => { loadData(); loadAlerts(); loadIncidents() }}
             disabled={refreshing}
             style={{ display: 'flex', alignItems: 'center', gap: 4 }}
           >
@@ -190,10 +337,14 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
         </div>
       )}
 
-      {/* Mock indicator */}
-      {hasMixed && (
+      {/* Data source indicator */}
+      {summary.source === 'real' ? (
+        <div style={{ background: '#e8f5e9', border: '1px solid #81c784', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#2e7d32' }}>
+          ✅ 指标来自 Prometheus 实时数据（错误率、P95 延迟、RPS、饱和度、重启数）
+        </div>
+      ) : hasMixed && (
         <div style={{ background: '#f0f4ff', border: '1px solid #b2ccff', borderRadius: 8, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: '#3366cc' }}>
-          ℹ 部分指标为 Mock Estimated（错误率、P95 延迟、流量、饱和度、重启数），服务可达性和 fault 状态来自真实 API
+          ⚠ Prometheus 不可用，部分指标降级为 Mock（错误率、P95 延迟、流量、饱和度、重启数），服务可达性和 fault 状态来自真实 API
         </div>
       )}
 
@@ -243,11 +394,11 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
             <tr>
               <th>服务名称</th>
               <th>状态</th>
-              <th>错误率 (5m)<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
-              <th>P95 延迟 (5m)<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
-              <th>流量 (rps)<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
-              <th>饱和度<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
-              <th>最近重启<sup style={{ fontSize: 10, color: 'var(--orange)' }}>M</sup></th>
+              <th>错误率 (5m){mockSup}</th>
+              <th>P95 延迟 (5m){mockSup}</th>
+              <th>流量 (rps){mockSup}</th>
+              <th>饱和度{mockSup}</th>
+              <th>最近重启{mockSup}</th>
             </tr>
           </thead>
           <tbody>
@@ -390,24 +541,24 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
             <button
               className="btn btn-ghost btn-sm"
               style={{ marginLeft: 'auto', fontSize: 12 }}
-              onClick={loadAlerts}
-              disabled={alertsLoading}
+              onClick={() => { loadAlerts(); loadIncidents() }}
+              disabled={alertsLoading || incidentsLoading}
             >
-              <RefreshCw size={12} className={alertsLoading ? 'spin' : ''} />
+              <RefreshCw size={12} className={alertsLoading || incidentsLoading ? 'spin' : ''} />
             </button>
           </div>
           <div>
-            {alertsLoading && serviceAlerts.length === 0 && (
+            {(alertsLoading || incidentsLoading) && mixedAlerts.length === 0 && (
               <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                正在从 Alertmanager 加载告警...
+                正在加载告警和 RCA 事件...
               </div>
             )}
-            {!alertsLoading && serviceAlerts.length === 0 && (
+            {!alertsLoading && !incidentsLoading && mixedAlerts.length === 0 && (
               <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                当前无业务告警（Alertmanager 无相关 firing alerts）
+                当前无业务告警（Alertmanager 无 firing alerts，无 RCA 事件记录）
               </div>
             )}
-            {serviceAlerts.map((a, i) => (
+            {mixedAlerts.map((a, i) => (
               <div key={a.fingerprint || i} style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -425,8 +576,11 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
                   <span style={{ flex: 1, fontSize: 14, color: 'var(--text)', fontWeight: 600 }}>
                     {a.alertName}
                   </span>
+                  <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: a.source === 'RCA' ? 'rgba(139,92,246,0.15)' : 'rgba(59,130,246,0.15)', color: a.source === 'RCA' ? '#8b5cf6' : '#3b82f6' }}>
+                    {a.source === 'RCA' ? '🤖 RCA' : '📡 Alertmanager'}
+                  </span>
                   <span className={'badge ' + (a.severity === 'critical' ? 'badge-red' : 'badge-orange')}>
-                    {a.severity === 'critical' ? '严重' : a.severity === 'warning' ? '警告' : a.severity}
+                    {a.severity === 'critical' ? '严重' : '警告'}
                   </span>
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--muted)', paddingLeft: 20 }}>
@@ -461,7 +615,7 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
       </div>
 
       <div className="footer-note">
-        * 服务状态（reachable / fault）来自真实 API · 错误率 / 延迟 / 流量 / 饱和度 / 重启为 Mock Estimated · 业务告警来自 Alertmanager Live（已过滤平台/基础设施告警）
+        * 服务状态（reachable / fault）来自真实 API · 指标（错误率 / 延迟 / RPS / 饱和度 / 重启）来自 Prometheus 实时数据 · 帮助邮箱 dev-platform@company.com
       </div>
     </div>
   )

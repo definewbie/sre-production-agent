@@ -22,6 +22,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -190,6 +191,93 @@ public class IncidentService {
             IncidentRcaResultView failedView = IncidentRcaResultView.failed(
                     incidentId, incidentTask.alertName(), incidentTask.service(), e.getMessage());
             incidentStore.put(incidentId, new IncidentRecord(incidentTask, alert, failedView, null, null));
+            return failedView;
+        }
+    }
+
+    // ── Direct RCA (Chaos / Lab Demo) ─────────────────────────────
+
+    /**
+     * Trigger RCA directly from a chaos experiment (no Alertmanager dependency).
+     * Creates a synthetic incident and runs the full evidence collection + workflow.
+     */
+    public IncidentRcaResultView triggerRcaDirect(
+            String targetService,
+            String faultType,
+            String experimentName,
+            String namespace,
+            String severity
+    ) {
+        long startTime = System.currentTimeMillis();
+
+        String incidentId = "inc-chaos-" + targetService + "-" + System.currentTimeMillis();
+        String alertName = "混沌实验: " + targetService + " " + faultType;
+
+        IncidentTask incidentTask = new IncidentTask(
+                incidentId,
+                alertName,
+                targetService,
+                namespace != null ? namespace : "demo",
+                severity != null ? severity : "warning",
+                Instant.now(),
+                Map.of("faultType", faultType, "source", "chaos", "experimentName",
+                        experimentName != null ? experimentName : alertName),
+                Map.of("description", "混沌实验注入故障: " + faultType + " on " + targetService)
+        );
+
+        // Store running state
+        IncidentRcaResultView runningView = IncidentRcaResultView.running(
+                incidentId, incidentTask.alertName(), incidentTask.service(), incidentTask.severity());
+        incidentStore.put(incidentId, new IncidentRecord(incidentTask, null, runningView, null, null));
+
+        log.info("Triggering direct RCA from chaos: incidentId={}, service={}, faultType={}",
+                incidentId, targetService, faultType);
+
+        try {
+            // Collect evidence from all live sources
+            String service = incidentTask.service();
+            String ns = incidentTask.namespace();
+            Duration lookback = Duration.ofMinutes(5);
+
+            LiveEvidenceCollector liveCollector = new LiveEvidenceCollector(
+                    prometheusUrl, lokiUrl, jaegerUrl, false);
+            LiveEvidenceReport liveReport = liveCollector.collect(service, ns, lookback);
+
+            List<Evidence> allEvidence = new ArrayList<>(liveReport.allEvidence());
+
+            // Also collect Alertmanager evidence (might have alerts from chaos)
+            try {
+                List<Evidence> alertEvidence = evidenceMapper.map(
+                        List.of(), incidentId, service, ns);
+                // Don't fail if Alertmanager is empty — chaos doesn't rely on it
+                log.info("Alertmanager evidence count for direct RCA: {}", alertEvidence.size());
+            } catch (Exception e) {
+                log.warn("Alertmanager evidence collection skipped (not required for chaos RCA): {}",
+                        e.getMessage());
+            }
+
+            log.info("Chaos RCA evidence collected: {} items from live sources, total={}",
+                    liveReport.totalEvidenceCount(), allEvidence.size());
+
+            // Run RCA
+            InvestigationResult rcaResult = workflow.runFromMemory(incidentTask, allEvidence);
+
+            long durationMs = System.currentTimeMillis() - startTime;
+
+            IncidentRcaResultView resultView = IncidentRcaResultView.completed(rcaResult, durationMs);
+            incidentStore.put(incidentId, new IncidentRecord(incidentTask, null, resultView, rcaResult, liveReport));
+
+            log.info("Chaos RCA completed: incidentId={}, decision={}, confidence={}, duration={}ms",
+                    incidentId, rcaResult.decision().decisionType(),
+                    String.format("%.2f", rcaResult.decision().confidenceScore()), durationMs);
+
+            return resultView;
+
+        } catch (Exception e) {
+            log.error("Chaos RCA failed: incidentId={}", incidentId, e);
+            IncidentRcaResultView failedView = IncidentRcaResultView.failed(
+                    incidentId, incidentTask.alertName(), incidentTask.service(), e.getMessage());
+            incidentStore.put(incidentId, new IncidentRecord(incidentTask, null, failedView, null, null));
             return failedView;
         }
     }
