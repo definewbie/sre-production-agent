@@ -78,7 +78,7 @@ public final class BuiltinPatterns {
                 entry("trace_error_span", 0.06),
                 entry("trace_root_span_slow", 0.06)
             ),
-            0.20
+            0.30
         );
     }
 

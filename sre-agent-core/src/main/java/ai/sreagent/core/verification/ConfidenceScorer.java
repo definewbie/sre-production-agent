@@ -55,6 +55,39 @@ public class ConfidenceScorer {
     /** Penalty per contradiction */
     private static final double CONTRADICTION_PENALTY = 0.05;
 
+    private static final Set<String> PROVIDER_ALIAS_PREFIXES = Set.of("metric_", "log_", "trace_");
+
+    /**
+     * Provider alias → core evidence type normalization map.
+     * Provider aliases are bonus evidence from optional observability providers.
+     * When present, they contribute to core type coverage without inflating the denominator.
+     */
+    private static final Map<String, String> ALIAS_TO_CORE = Map.ofEntries(
+            // metric → core
+            Map.entry("metric_error_rate_spike", "error_rate_spike_after_deploy"),
+            Map.entry("metric_downstream_latency_spike", "downstream_latency_spike"),
+            Map.entry("metric_latency_p95_spike", "downstream_latency_spike"),
+            Map.entry("metric_latency_p99_spike", "downstream_latency_spike"),
+            Map.entry("metric_memory_usage_high", "memory_usage_near_limit"),
+            Map.entry("metric_restart_rate_increased", "pod_restart_count_increased"),
+            Map.entry("metric_cpu_usage_high", "metric_cpu_usage_high"),
+            // log → core
+            Map.entry("log_timeout_error", "dependency_timeout_logs"),
+            Map.entry("log_downstream_timeout", "dependency_timeout_logs"),
+            Map.entry("log_exception_spike", "log_exception_spike"),
+            Map.entry("log_http_5xx", "log_http_5xx"),
+            Map.entry("log_oom_message", "kubernetes_event_oomkilled"),
+            Map.entry("log_crash_loop", "container_crash_loop_backoff"),
+            Map.entry("log_retry_exhausted", "retry_timeout_config_change"),
+            // trace → core
+            Map.entry("trace_error_span", "trace_error_span"),
+            Map.entry("trace_root_span_slow", "downstream_latency_spike"),
+            Map.entry("trace_downstream_span_slow", "downstream_latency_spike"),
+            Map.entry("trace_child_span_dominates_latency", "downstream_latency_spike"),
+            Map.entry("trace_dependency_path", "service_dependency_match"),
+            Map.entry("trace_timeout_span", "dependency_timeout_logs")
+    );
+
     private static final String CALIBRATION_NOTE =
             "MVP confidence score uses ratio-based evidence type coverage model (v2). "
             + "Score reflects directional consistency, not evidence quantity. "
@@ -85,7 +118,8 @@ public class ConfidenceScorer {
         for (String evId : verification.supportingEvidenceIds()) {
             String evType = evTypeMap.get(evId);
             if (evType != null) {
-                supportingTypesPresent.add(evType);
+                String normalized = normalizeEvidenceType(evType);
+                supportingTypesPresent.add(normalized);
                 evidence.stream()
                         .filter(e -> e.id().equals(evId))
                         .findFirst()
@@ -96,7 +130,8 @@ public class ConfidenceScorer {
         for (String evId : verification.counterEvidenceIds()) {
             String evType = evTypeMap.get(evId);
             if (evType != null) {
-                counterTypesPresent.add(evType);
+                String normalized = normalizeEvidenceType(evType);
+                counterTypesPresent.add(normalized);
                 evidence.stream()
                         .filter(e -> e.id().equals(evId))
                         .findFirst()
@@ -104,19 +139,27 @@ public class ConfidenceScorer {
             }
         }
 
+        // Collect core (non-alias) supporting and counter types for denominator
+        List<String> coreSupportingTypes = pattern.supportingEvidenceTypes().stream()
+                .filter(t -> !isProviderAlias(t))
+                .toList();
+        List<String> coreCounterTypes = pattern.counterEvidenceTypes().stream()
+                .filter(t -> !isProviderAlias(t))
+                .toList();
+
         // --- Ratio-based coverage calculation ---
-        // Supporting coverage: how many of the expected supporting types are actually present
-        int totalSupportingTypes = pattern.supportingEvidenceTypes().size();
-        long matchedSupportingTypes = pattern.supportingEvidenceTypes().stream()
+        // Supporting coverage: how many core expected supporting types are actually present
+        int totalSupportingTypes = coreSupportingTypes.size();
+        long matchedSupportingTypes = coreSupportingTypes.stream()
                 .filter(supportingTypesPresent::contains)
                 .count();
         double supportingCoverage = totalSupportingTypes > 0
                 ? (double) matchedSupportingTypes / totalSupportingTypes
                 : 0.0;
 
-        // Counter coverage: how many of the expected counter types are actually present
-        int totalCounterTypes = pattern.counterEvidenceTypes().size();
-        long matchedCounterTypes = pattern.counterEvidenceTypes().stream()
+        // Counter coverage: how many core expected counter types are actually present
+        int totalCounterTypes = coreCounterTypes.size();
+        long matchedCounterTypes = coreCounterTypes.stream()
                 .filter(counterTypesPresent::contains)
                 .count();
         double counterCoverage = totalCounterTypes > 0
@@ -127,7 +170,7 @@ public class ConfidenceScorer {
         // Types with higher weights contribute more to coverage score
         double weightedSupportingCoverage = 0.0;
         double totalSupportingWeight = 0.0;
-        for (String type : pattern.supportingEvidenceTypes()) {
+        for (String type : coreSupportingTypes) {
             double w = weights.getOrDefault(type, 0.05); // default weight for unregistered types
             totalSupportingWeight += w;
             if (supportingTypesPresent.contains(type)) {
@@ -141,7 +184,7 @@ public class ConfidenceScorer {
         // Apply type-weighted adjustments for counter coverage
         double weightedCounterCoverage = 0.0;
         double totalCounterWeight = 0.0;
-        for (String type : pattern.counterEvidenceTypes()) {
+        for (String type : coreCounterTypes) {
             double w = weights.getOrDefault(type, 0.05); // default weight for unregistered types
             totalCounterWeight += w;
             if (counterTypesPresent.contains(type)) {
@@ -217,6 +260,25 @@ public class ConfidenceScorer {
         if (score >= 0.60) return "medium";
         if (score >= 0.40) return "low";
         return "very_low";
+    }
+
+    /** Returns true if the evidence type is a provider alias (metric_*, log_*, trace_*). */
+    static boolean isProviderAlias(String evidenceType) {
+        if (evidenceType == null) return false;
+        return evidenceType.length() > 6
+                && (evidenceType.startsWith("metric_")
+                        || evidenceType.startsWith("log_")
+                        || evidenceType.startsWith("trace_"));
+    }
+
+    /**
+     * Normalize a provider alias to its core evidence type.
+     * If the type is not an alias, returns it unchanged.
+     */
+    static String normalizeEvidenceType(String type) {
+        if (type == null) return null;
+        String core = ALIAS_TO_CORE.get(type);
+        return core != null ? core : type;
     }
 
     private String mapDecision(double score) {

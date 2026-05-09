@@ -25,9 +25,9 @@ import static org.assertj.core.data.Percentage.withPercentage;
  *   → ConfidenceScorer → HypothesisComparator → InvestigationDecision
  *
  * Target values:
- *   deployment_regression        = 0.64
- *   downstream_dependency_latency = 0.58
- *   score_gap                    = 0.06
+ *   deployment_regression        = 0.50
+ *   downstream_dependency_latency = 0.45
+ *   score_gap                    = 0.05
  *   decision                     = competing_hypotheses
  */
 class ScenarioEConfidenceTest {
@@ -81,13 +81,13 @@ class ScenarioEConfidenceTest {
     @Test
     void deploymentRegression_shouldScore64() {
         ConfidenceResult result = findConfidence("hyp_deployment_regression");
-        assertThat(result.score()).isCloseTo(0.64, withPercentage(1.0));
+        assertThat(result.score()).isCloseTo(0.50, withPercentage(1.0));
     }
 
     @Test
     void downstreamDependencyLatency_shouldScore58() {
         ConfidenceResult result = findConfidence("hyp_downstream_dependency_latency");
-        assertThat(result.score()).isCloseTo(0.58, withPercentage(1.0));
+        assertThat(result.score()).isCloseTo(0.45, withPercentage(1.0));
     }
 
     @Test
@@ -95,7 +95,7 @@ class ScenarioEConfidenceTest {
         HypothesisComparator comparator = new HypothesisComparator();
         HypothesisComparison comparison = comparator.compare(incident, confidences, verifications, evidence);
 
-        assertThat(comparison.scoreGap()).isCloseTo(0.06, withPercentage(1.0));
+        assertThat(comparison.scoreGap()).isCloseTo(0.05, withPercentage(1.0));
     }
 
     @Test

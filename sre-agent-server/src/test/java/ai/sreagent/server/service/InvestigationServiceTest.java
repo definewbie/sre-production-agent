@@ -29,15 +29,15 @@ class InvestigationServiceTest {
     void runScenarioEReturnsCorrectScores() throws Exception {
         InvestigationResponse response = service.runScenarioE();
 
-        assertEquals(0.64, response.scores().get("hyp_deployment_regression"), 0.01);
-        assertEquals(0.58, response.scores().get("hyp_downstream_dependency_latency"), 0.01);
+        assertEquals(0.50, response.scores().get("hyp_deployment_regression"), 0.01);
+        assertEquals(0.45, response.scores().get("hyp_downstream_dependency_latency"), 0.01);
         assertTrue(response.scores().containsKey("hyp_pod_oom_killed"));
     }
 
     @Test
     void runScenarioEReturnsCorrectGap() throws Exception {
         InvestigationResponse response = service.runScenarioE();
-        assertEquals(0.06, response.scoreGap(), 0.01);
+        assertEquals(0.05, response.scoreGap(), 0.01);
     }
 
     @Test

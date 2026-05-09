@@ -32,7 +32,7 @@ class PatternRegistryTest {
         DiagnosticPattern pattern = BuiltinPatterns.deploymentRegression();
 
         assertThat(pattern.id()).isEqualTo("deployment_regression");
-        assertThat(pattern.baseScore()).isEqualTo(0.20);
+        assertThat(pattern.baseScore()).isEqualTo(0.30);
         assertThat(pattern.supportingEvidenceTypes()).contains(
                 "deploy_event_near_alert_window",
                 "error_rate_spike_after_deploy",

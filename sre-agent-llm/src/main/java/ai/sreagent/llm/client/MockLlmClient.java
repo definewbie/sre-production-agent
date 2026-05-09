@@ -33,8 +33,8 @@ public class MockLlmClient implements LlmClient {
         sb.append("This incident should not be treated as a single definitive RCA. ");
         sb.append("The deterministic investigation found two plausible hypotheses: ");
         sb.append("deployment_regression and downstream_dependency_latency. ");
-        sb.append("deployment_regression leads with score 0.64, but downstream_dependency_latency ");
-        sb.append("remains material at 0.58. Because the score gap is only 0.06, ");
+        sb.append("deployment_regression leads with score 0.50, but downstream_dependency_latency ");
+        sb.append("remains material at 0.45. Because the score gap is only 0.05, ");
         sb.append("the safer conclusion is competing_hypotheses.\n\n");
 
         sb.append("## Reasoning Narrative\n\n");
@@ -47,7 +47,7 @@ public class MockLlmClient implements LlmClient {
         sb.append("The topology evidence (order-service → payment-service) makes this a plausible alternative.\n\n");
 
         sb.append("## Uncertainty Explanation\n\n");
-        sb.append("The score gap of 0.06 is below the 0.10 decisive threshold. ");
+        sb.append("The score gap of 0.05 is below the 0.10 decisive threshold. ");
         sb.append("Both hypotheses have moderate confidence. ");
         sb.append("The contradiction in deployment_regression (pre-existing timeouts) prevents ");
         sb.append("it from being declared the definitive root cause. ");

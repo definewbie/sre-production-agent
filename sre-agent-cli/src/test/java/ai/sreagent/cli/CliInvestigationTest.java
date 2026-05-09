@@ -69,8 +69,8 @@ class CliInvestigationTest {
         runInvestigate();
 
         String report = Files.readString(outputFile.toPath());
-        assertThat(report).contains("0.64");
-        assertThat(report).contains("0.58");
+        assertThat(report).contains("0.50");
+        assertThat(report).contains("0.45");
     }
 
     @Test
@@ -78,7 +78,7 @@ class CliInvestigationTest {
         runInvestigate();
 
         String report = Files.readString(outputFile.toPath());
-        assertThat(report).contains("0.06");
+        assertThat(report).contains("0.05");
     }
 
     @Test

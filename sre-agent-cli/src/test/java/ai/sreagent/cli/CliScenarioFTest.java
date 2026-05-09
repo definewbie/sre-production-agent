@@ -54,11 +54,11 @@ class CliScenarioFTest {
     }
 
     @Test
-    void reportContainsLikelyRootCause() throws Exception {
+    void reportContainsProbableRootCause() throws Exception {
         runInvestigate();
 
         String report = Files.readString(outputFile.toPath());
-        assertThat(report).contains("高置信根因");
+        assertThat(report).contains("可能根因");
     }
 
     @Test

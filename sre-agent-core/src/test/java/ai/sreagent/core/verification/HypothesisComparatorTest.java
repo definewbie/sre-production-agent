@@ -29,14 +29,14 @@ class HypothesisComparatorTest {
     private List<ConfidenceResult> buildScenarioEConfidenceResults() {
         return List.of(
                 new ConfidenceResult(
-                        "hyp_deployment_regression", 0.64, "medium",
+                        "hyp_deployment_regression", 0.50, "low",
                         List.of("deploy_event", "error_spike", "timeout_logs", "config_change"),
                         List.of("historical_timeout", "downstream_latency"),
                         List.of(), List.of(),
                         "probable_root_cause", "calibration note"
                 ),
                 new ConfidenceResult(
-                        "hyp_downstream_dependency_latency", 0.58, "low",
+                        "hyp_downstream_dependency_latency", 0.45, "low",
                         List.of("timeout_logs", "latency_spike", "dependency_match"),
                         List.of("downstream_5xx_absent", "deploy_event"),
                         List.of(), List.of(),
@@ -112,7 +112,7 @@ class HypothesisComparatorTest {
                 incident, results, verResults, List.of()
         );
 
-        assertThat(comparison.scoreGap()).isCloseTo(0.06, withPercentage(1.0));
+        assertThat(comparison.scoreGap()).isCloseTo(0.05, withPercentage(1.0));
     }
 
     @Test

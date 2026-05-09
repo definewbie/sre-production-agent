@@ -66,9 +66,9 @@ class ConfidenceScorerTest {
 
         ConfidenceResult result = scorer.score(hypothesis, pattern, vr, scenarioEEvidence);
 
-        assertThat(result.score()).isCloseTo(0.64, withPercentage(1.0));
-        assertThat(result.level()).isEqualTo("medium");
-        assertThat(result.decision()).isEqualTo("probable_root_cause");
+        assertThat(result.score()).isCloseTo(0.50, withPercentage(1.0));
+        assertThat(result.level()).isEqualTo("low");
+        assertThat(result.decision()).isEqualTo("uncertain");
         assertThat(result.supportingFactors()).isNotEmpty();
         assertThat(result.counterFactors()).isNotEmpty();
         assertThat(result.calibrationNotes()).isNotBlank();
@@ -86,7 +86,7 @@ class ConfidenceScorerTest {
 
         ConfidenceResult result = scorer.score(hypothesis, pattern, vr, scenarioEEvidence);
 
-        assertThat(result.score()).isCloseTo(0.58, withPercentage(1.0));
+        assertThat(result.score()).isCloseTo(0.45, withPercentage(1.0));
         assertThat(result.level()).isEqualTo("low");
         assertThat(result.decision()).isEqualTo("uncertain");
         assertThat(result.supportingFactors()).isNotEmpty();
