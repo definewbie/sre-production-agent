@@ -25,6 +25,10 @@ Thumbs.db
 # Build
 hs_err_pid*
 
+# H2 Database (local dev)
+*.mv.db
+*.trace.db
+
 # Frontend
 sre-agent-ui/dist/
 sre-agent-ui/node_modules/
