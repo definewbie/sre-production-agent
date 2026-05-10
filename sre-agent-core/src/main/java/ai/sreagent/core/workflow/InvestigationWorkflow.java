@@ -11,6 +11,7 @@ import ai.sreagent.core.patterns.PatternRegistry;
 import ai.sreagent.core.report.MarkdownReporter;
 import ai.sreagent.core.verification.ConfidenceScorer;
 import ai.sreagent.core.verification.HypothesisComparator;
+import ai.sreagent.core.verification.TemporalAligner;
 import ai.sreagent.core.verification.VerificationEngine;
 
 import java.io.File;
@@ -52,6 +53,13 @@ public class InvestigationWorkflow {
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "EVIDENCE_LOADED",
                 Map.of("count", evidence.size())));
 
+        // ── V.2-RCA-1A.3: Derive problem window ──
+        ProblemWindow problemWindow = ProblemWindow.deriveFromIncident(incident, evidence);
+        traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "PROBLEM_WINDOW_DERIVED",
+                Map.of("source", problemWindow.source(),
+                        "problemStart", problemWindow.problemStart() != null ? problemWindow.problemStart().toString() : "none",
+                        "problemEnd", problemWindow.problemEnd() != null ? problemWindow.problemEnd().toString() : "none")));
+
         // Load patterns
         PatternRegistry registry = BuiltinPatterns.defaultRegistry();
         Map<String, DiagnosticPattern> patternMap = new LinkedHashMap<>();
@@ -76,8 +84,18 @@ public class InvestigationWorkflow {
         }
 
         // Score confidence
+        // ── V.2-RCA-1A.3: Compute temporal alignment ──
+        TemporalAligner temporalAligner = new TemporalAligner();
+        Map<String, TemporalAlignmentResult> temporalResults = temporalAligner.alignAll(problemWindow, evidence, hypotheses);
+        for (var entry : temporalResults.entrySet()) {
+            traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "TEMPORAL_ALIGNED",
+                    Map.of("hypothesisId", entry.getKey(),
+                            "temporalScore", entry.getValue().score(),
+                            "temporalConfidence", entry.getValue().confidence().name())));
+        }
+
         ConfidenceScorer scorer = new ConfidenceScorer();
-        List<ConfidenceResult> confResults = scorer.scoreAll(hypotheses, patternMap, verResults, evidence);
+        List<ConfidenceResult> confResults = scorer.scoreAll(hypotheses, patternMap, verResults, evidence, temporalResults);
         for (ConfidenceResult cr : confResults) {
             traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "CONFIDENCE_SCORED",
                     Map.of("hypothesisId", cr.hypothesisId(), "score", cr.score())));
@@ -100,7 +118,8 @@ public class InvestigationWorkflow {
 
         // Generate report
         MarkdownReporter reporter = new MarkdownReporter();
-        String markdownReport = reporter.generate(incident, hypotheses, verResults, confResults, comparison, decision, evidence);
+        String markdownReport = reporter.generate(incident, hypotheses, verResults, confResults,
+                comparison, decision, evidence, problemWindow);
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "REPORT_GENERATED",
                 Map.of()));
 

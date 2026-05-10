@@ -8,7 +8,7 @@
 
 SRE Production Agent 的 RCA 模型不是简单的 pattern matching，而是以 **Problem Window** 为时间边界，以 **Topology Graph** 为上下文，以 **Propagation Path** 识别影响传播，以 **Candidate Root Cause Entity** 为推理对象，再结合 metrics / logs / traces / events 做 **Fault Mode Classification** 和 **Causal Scoring**。
 
-当前系统已完成从 pattern-first 到 topology-first 的第一步重构（Provider Alias 分离、证据类型归一化、Score Breakdown 可观测），但 Problem Window、Topology Graph、Propagation Path 等核心因果维度仍在设计阶段，尚未在代码中落地。
+当前系统已完成从 pattern-first 到 topology-first 的第一步重构（Provider Alias 分离、证据类型归一化、Score Breakdown 可观测）。**Problem Window & Temporal Alignment 已于 V.2-RCA-1A.3 落地**；Topology Graph、Propagation Path 仍在设计阶段，尚未在代码中落地。
 
 ---
 
@@ -77,7 +77,7 @@ flowchart TD
 
 | 阶段 | 输入 | 输出 | 当前状态 |
 |------|------|------|----------|
-| Problem Window | Alert startsAt, lookback config | 时间边界 [problemStart, problemEnd] | **设计阶段** — 当前使用固定 lookback |
+| Problem Window | Alert startsAt, lookback config | 时间边界 [problemStart, problemEnd] | **已实现** — `ProblemWindow.deriveFromIncident()` + 可配置 lookback/lookahead |
 | Affected Entity | Alert labels, service name | 受影响实体列表 | **部分实现** — 从 alert 提取 service |
 | Topology Graph | Trace data, K8s labels, config | 实体间依赖图 | **设计阶段** — demo-services 有硬编码拓扑 |
 | Propagation Path | Topology + affected entity | 传播路径（从候选根因到受影响实体） | **设计阶段** |
@@ -112,7 +112,7 @@ lookaheadWindow — 向前观测窗口（如 5min）
 3. 判断 deploy/change event 是否在合理窗口内
 4. 防止把无关时间段的 evidence 误纳入 RCA
 
-**当前状态：** 系统使用固定 lookback（通常 30min），尚未实现可配置的动态 Problem Window。时间对齐评分（temporalAlignmentScore）尚未纳入评分公式。
+**当前状态：** `ProblemWindow` 值对象已实现（`domain/ProblemWindow.java`）。通过 `deriveFromIncident()` 从 incident 推导窗口（默认 lookback=5min, lookahead=10min），支持 alert/evidence_fallback/unknown 三种来源。`TemporalAligner` 已接入 `ConfidenceScorer`，`temporalAlignmentScore` 范围 [-0.15, +0.15] 作为评分公式中的一个加权维度。
 
 ---
 
@@ -311,7 +311,7 @@ deploy event AFTER anomaly                → 排除 deployment_regression
 temporalAlignmentScore  — 0.0-1.0，归一化到评分公式
 ```
 
-**当前状态：** 时序逻辑未在代码中显式实现。`deploy_event_near_alert_window` 作为佐证证据类型存在，隐式承载了部分时序语义。
+**当前状态：** `TemporalAligner`（`verification/TemporalAligner.java`）已实现。通过区分 candidate entity 与 impacted entity 的 evidence 时间戳判断因果方向（candidate before impacted → +0.10, simultaneous → +0.05, reverse → -0.10），结合 evidence 在 Problem Window 内的覆盖率调整窗口分（+0.05 上限，-0.05 上限）。`TemporalAlignmentResult` 记录 score/confidence/explanation/firstSeen 时间戳/窗口覆盖率。缺失 timestamp 时降级为 `TemporalConfidence.UNKNOWN`，score=0，不影响现有 scoring。
 
 ---
 
@@ -666,63 +666,136 @@ decision: competing_hypotheses
 
 ---
 
-## LLM 的位置
+## LLM 的位置：Online Investigator + Deterministic Decision Boundary + Offline Knowledge Evolution
 
-### Online Decision Loop（在线决策环）
+本系统不会把 LLM 排除在 RCA 过程之外。LLM 很适合做 online investigator：规划调查路径、选择 probe、提出候选根因、解释证据、指出 missing evidence。但生产 RCA 的最终结论必须经过 evidence verification、topology-aware causal scoring、hypothesis comparison 和 event trace 审计。因此，**LLM 是 investigator 和 hypothesis proposer，不是无约束的 judge**。
 
-```
-Evidence
-  → Topology-first RCA Engine
-  → Deterministic Causal Scoring
-  → Decision
-```
+> `LLM participates in online investigation, but deterministic RCA engine owns final decision authority.`  
+> LLM 负责提出和解释；RCA 引擎负责验证和裁决。  
+> **LLM proposes. RCA Engine verifies and decides.**
 
-LLM **不参与**在线决策：
+系统架构分为三层：
 
 ```
-score          — 确定性计算公式，不依赖 LLM
-decision       — 规则引擎判定，不依赖 LLM
-pattern mutation — 不自动修改，需 human review
+┌──────────────────────────────────────────┐
+│  Layer 1: LLM Online RCA Investigator    │
+│  规划调查路径 / 选择 probe / 提出假设      │
+│  解释证据 / 指出 missing evidence          │
+│  → 输出：investigation_plan, hypothesis   │
+├──────────────────────────────────────────┤
+│  Layer 2: Deterministic RCA Decision      │
+│  验证 evidence / 计算 causal score        │
+│  比较 hypotheses / 生成 final decision    │
+│  → 输出：score, decision, event trace     │
+├──────────────────────────────────────────┤
+│  Layer 3: LLM Offline Knowledge Evolution │
+│  复盘 / Gap 分析 / candidate 生成         │
+│  → 输出：CausalGapReport, candidate       │
+│  → human review → regression test → ship  │
+└──────────────────────────────────────────┘
 ```
 
-### Offline Learning Loop（离线学习环）
+---
+
+### Layer 1: LLM Online RCA Investigator
+
+LLM 可以参与在线调查过程，但**不直接拥有最终裁判权**。
+
+**LLM 可以做（Online）：**
+
+| 职责 | 产出物 |
+|------|--------|
+| 规划调查路径 | `investigation_plan` |
+| 选择 probe | `recommended_probe` |
+| 提出 hypothesis | `proposed_hypothesis` |
+| 解释 evidence | `evidence_interpretation` |
+| 指出 missing evidence | `missing_evidence` |
+| 生成置信度理由 | `confidence_rationale` |
+| 建议下一步查询（metrics / logs / traces / k8s / deploy events） | `next_probe_targets` |
+
+**LLM 不能直接写入：**
 
 ```
-RCA Run
-  → CausalGapReport          — 识别因果维度缺失
-  → Diagnostic Knowledge Candidate — LLM 生成 candidate
-  → Regression Case           — 转化为回归测试
-  → Human Review              — 人工审核
-  → Versioned Registry        — 版本化入库
+final_decision
+final_score
+root_cause_entity
+production_pattern_registry
 ```
 
-LLM **可以做**（离线）：
+---
 
-```
-critic                      — 分析 RCA 质量
-gap analysis                — 识别因果模型缺失
-candidate generator         — 生成新的 fault mode / evidence contract 候选
-regression test suggestion  — 建议新增回归场景
-```
+### Layer 2: Deterministic RCA Decision Engine
 
-LLM **不可以做**（在线+离线）：
+最终 decision 由 deterministic RCA engine 负责，不依赖 LLM。
 
-```
-直接裁判 root cause
-直接改 score
-直接发布 pattern
-```
+**职责：**
+
+| 职责 | 说明 |
+|------|------|
+| 验证 evidence 是否真实存在 | VerificationEngine |
+| 验证 evidence 是否在 problem window 内 | 时间边界校验 |
+| 验证 topology path 是否存在 | 拓扑路径验证 |
+| 计算 causal score | ConfidenceScorer 确定性公式 |
+| 比较 hypotheses | HypothesisComparator 规则引擎 |
+| 生成 final decision | InvestigationDecision |
+| 记录 event trace | EventTraceStore 审计日志 |
+
+**关键表述：**
+
+> LLM proposes. RCA Engine verifies and decides.  
+> LLM 提出假设、解释证据；RCA 引擎验证真伪、计算分数、做出裁决。
+
+---
+
+### Layer 3: LLM Offline Knowledge Evolution Assistant
+
+LLM 用于复盘、知识候选生成和回归测试建议。
+
+**职责：**
+
+| 职责 | 说明 |
+|------|------|
+| RCA run 复盘 | 分析一次调查的质量 |
+| CausalGapReport | 识别因果维度缺失 |
+| scoring gap analysis | 评分与实际 root cause 的差距分析 |
+| pattern / fault mode contract candidate | 生成新的故障模式候选 |
+| evidence mapping candidate | 建议新的 evidence → fault mode 映射 |
+| regression case generation | 建议新增回归场景 |
+| postmortem summarization | 生成事后总结 |
+| diagnostic knowledge evolution | 知识库持续进化 |
+
+**安全边界：**
+
+> offline candidate 需要 human review、regression test、versioned release 后才能进入 production。  
+> 不自动发布 pattern / rule / scoring weight。
+
+---
+
+### LLM 能做与不能做（总表）
+
+| ✅ 能做 | ❌ 不能做 |
+|---------|----------|
+| 规划调查路径 | 直接覆盖 final decision |
+| 选择 probe | 直接修改 score |
+| 提出 hypothesis | 直接发布 pattern |
+| 解释 evidence | 编造 evidence |
+| 指出 missing evidence | 绕过 verification |
+| 生成 CausalGapReport | 绕过 human review |
+| 建议新 fault mode candidate | 直接写入 production registry |
+| 生成 postmortem 总结 | 直接修改 scoring weight |
+
+---
 
 ### 当前架构中的 LLM
 
-当前 `sre-agent-llm` 模块已实现 **advisory-only** 的 LLM 集成：
+当前 `sre-agent-llm` 模块包含 Layer 1（online investigator）和 Layer 3（offline knowledge evolution）的**实验性初始实现**，代码已存在但尚未进入生产评估阶段：
 
 - `LlmReportSynthesizer` — 生成叙述性总结（不改 decision/scores）
-- `LlmHypothesisProposer` — 在 inconclusive 时建议新假设（状态 UNVERIFIED_PROPOSAL）
+- `LlmHypothesisProposer` — 在 inconclusive 时建议新假设（状态 UNVERIFIED_PROPOSAL，进入 verification pipeline 而非直接采纳）
 - `MockLlmClient` / `OpenAiCompatibleLlmClient` — 可插拔的 LLM 客户端
-- 所有 LLM 输出标记 `advisoryOnly=true`，`canAffectDecision=false`
+- LLM 产出的 hypothesis 经过 VerificationEngine 验证后才参与 scoring，而非直接成为结论
 
-这与设计文档中 LLM 的定位一致：**offline critic / knowledge evolution，不是 online decision owner**。
+Layer 2（Deterministic RCA Decision Engine）完全由确定性代码实现，不使用 LLM。三层之间通过明确的 API 契约隔离：Layer 1 产出 hypothesis/probe，Layer 2 验证和评分，Layer 3 消费 Layer 2 的结果做离线分析。
 
 ---
 
@@ -731,10 +804,11 @@ LLM **不可以做**（在线+离线）：
 ```
 V.2-RCA-1A.2 ✅:  Causal Model Design Doc（本文档）
 
-V.2-RCA-1A.3:     Problem Window & Temporal Alignment
+V.2-RCA-1A.3 ✅:  Problem Window & Temporal Alignment
                   - ProblemWindow 数据结构
                   - temporalAlignmentScore 实现
                   - 集成到 ConfidenceScorer 评分公式
+                  - 语义边界说明（V2_RCA_1A_3_TEMPORAL_SEMANTICS_NOTES.md）
 
 V.2-RCA-1A.4:     Propagation Path Quality / Edge Confidence
                   - Topology Graph 数据结构
@@ -764,6 +838,34 @@ V.2-RCA-1C:       Diagnostic Knowledge Candidate Generator
 
 ---
 
+## 时间对齐语义边界
+
+> 详见 `docs/reports/V2_RCA_1A_3_TEMPORAL_SEMANTICS_NOTES.md`
+
+### 核心定位
+
+Temporal Alignment 是 **supportive evidence**，不是 sufficient evidence。它回答「候选异常的时间顺序是否支持因果假设」，但不能单独回答「这个假设是不是根因」。
+
+```
+temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
+```
+
+### 关键语义边界
+
+| 可以接受 | 需要谨慎 |
+|----------|----------|
+| deployment/change event 类证据早于 ProblemWindow start（部署变更是触发因子，expected to be early） | latency/error/timeout 类 runtime anomaly 远早于 ProblemWindow 可能是 stale anomaly，不应仅因时序靠前就获得正向 temporalScore |
+| 无拓扑数据时正向 temporalScore 仍可作为辅助支撑 | no topology + positive temporalScore 不应直接产生 LIKELY_ROOT_CAUSE |
+| 多个假设获得相同 temporalScore 是合理的（共享同一批 evidence 时间戳） | 仅凭 temporalScore 微小差距就区分 competing hypotheses 不可靠 |
+
+### 设计决策
+
+- **当前阶段（V.2-RCA-1A.3）不引入 fault-mode-specific temporal rules**——TemporalAligner 对所有证据类型一视同仁。
+- **V.2-RCA-1A.5（Fault Mode Evidence Contract）将细化**：runtime anomaly 要求 candidateFirstSeen 在 lookback 范围内；deployment/change event 允许更远的 temporal distance。
+- **scoring 公式不变**：temporalScore 权重上限 0.15 是设计选择，防止「时间顺序完美但无实质 evidence 的假设」得分过高。
+
+---
+
 ## 当前实现差距
 
 ### Already Implemented ✅
@@ -774,10 +876,12 @@ V.2-RCA-1C:       Diagnostic Knowledge Candidate Generator
 | 比率型覆盖评分（ratio-based v2） | `ConfidenceScorer.score()` |
 | 佐证证据类型（加分不扣分） | `DiagnosticPattern.corroboratingEvidenceTypes` |
 | 确定性决策规则 | `HypothesisComparator` |
+| Problem Window 时间边界 | `ProblemWindow.deriveFromIncident()` |
+| Temporal Alignment 评分 | `TemporalAligner` → `ConfidenceScorer` |
 | 10 步工作流 pipeline | `InvestigationWorkflow` |
 | Event trace 审计日志 | `EventTraceStore` |
 | Markdown report 生成 | `MarkdownReporter` |
-| LLM advisory-only 集成 | `sre-agent-llm` 模块 |
+| LLM online investigator + offline knowledge evolution 集成 | `sre-agent-llm` 模块（Layer 1 + Layer 3 实验性实现） |
 | 多 provider 证据采集 | k8s/prometheus/loki/alertmanager/trace providers |
 | Agent 能力上下文注入 | `HermesAgentCapabilitiesProvider` |
 | 完整回归测试矩阵 | ScenarioE/F + 边界测试 + 全量 132/132 |
@@ -790,15 +894,13 @@ V.2-RCA-1C:       Diagnostic Knowledge Candidate Generator
 | Fault mode classification | DiagnosticPattern 隐式承载 fault mode 语义，但无独立 FaultMode 枚举/分类器 |
 | Entity 建模 | Evidence.service 字段存在，但无 affectedEntity/candidateEntity 一级抽象 |
 | Topology context | EvidenceCausalRole.TOPOLOGY_CONTEXT 已定义，demo-services 有硬编码拓扑，但无结构化 Topology Graph |
-| Causal scoring dimensions | ConfidenceScorer v2 覆盖 faultModeEvidence + counterPenalty + corroborating，缺少 temporal/topology/propagation |
+| Causal scoring dimensions | ConfidenceScorer v2 覆盖 faultModeEvidence + counterPenalty + corroborating + temporal，缺少 topology/propagation |
 | Score Breakdown 前端展示 | ScoreBreakdown 数据结构已产出，前端 RCA 详情页已展示 |
 
 ### Missing ❌
 
 | 能力 | 说明 |
 |------|------|
-| Problem Window 数据结构 | 当前使用固定 lookback，无可配置时间边界 |
-| temporalAlignmentScore | 时序评分未实现 |
 | Topology Graph 构建器 | 无 TopologyBuilder 类 |
 | Propagation Path 计算 | 无传播路径抽象 |
 | topologyCausalityScore | 拓扑评分未实现 |
@@ -815,16 +917,16 @@ V.2-RCA-1C:       Diagnostic Knowledge Candidate Generator
 | 过度设计 | 本阶段不写代码，仅固化设计文档；后续每个阶段控制 scope（≤ 3 个类） |
 | topology 数据不足 | 优先使用 trace provider 已有数据；无拓扑场景下降级为 pattern-only scoring（已支持） |
 | 历史测试大面积失效 | 新维度逐步加入评分公式，每次只引入一个维度，全量测试通过后再引入下一个 |
-| LLM 越界 | 当前架构已通过 advisoryOnly + canAffectDecision=false 强制隔离 |
+| LLM 越界 | 三层架构强制隔离：Layer 1 产出 hypothesis/probe → Layer 2 验证/评分/决策 → Layer 3 消费结果做离线分析。LLM 不可跨层写入 final_decision/final_score/registry |
 
 ### Next Step
 
-建议进入 **V.2-RCA-1A.3：Problem Window & Temporal Alignment**。
+建议进入 **V.2-RCA-1B：Topology Graph & Propagation Path**。
 
 理由：
-1. Problem Window 是后续所有维度的基础（topology 中的边需要时间戳、propagation 需要时序关系）
-2. 实现量可控（~3 个类：ProblemWindow 值对象、TemporalAligner 评分器、集成到 ConfidenceScorer）
-3. 不依赖其他未实现维度，可以独立落地并跑通全量测试
+1. Topology Graph 是 propagation path 和 topologyCausalityScore 的前提
+2. 实现量可控（~3 个类：TopologyGraph 数据模型、TopologyBuilder 构建器、与现有 demo-services 对接）
+3. 可以独立落地并跑通全量测试
 
 ---
 

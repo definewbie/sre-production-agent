@@ -98,12 +98,26 @@ public class ConfidenceScorer {
 
     /**
      * Score a single hypothesis given its verification result, pattern, and evidence.
+     * Uses TemporalAlignmentResult.UNKNOWN for backward compatibility.
      */
     public ConfidenceResult score(
             Hypothesis hypothesis,
             DiagnosticPattern pattern,
             VerificationResult verification,
             List<Evidence> evidence
+    ) {
+        return score(hypothesis, pattern, verification, evidence, TemporalAlignmentResult.UNKNOWN);
+    }
+
+    /**
+     * Score a single hypothesis with temporal alignment result.
+     */
+    public ConfidenceResult score(
+            Hypothesis hypothesis,
+            DiagnosticPattern pattern,
+            VerificationResult verification,
+            List<Evidence> evidence,
+            TemporalAlignmentResult temporalResult
     ) {
         Map<String, Double> weights = pattern.confidenceWeights();
 
@@ -235,12 +249,14 @@ public class ConfidenceScorer {
         double contradictionPenalty = verification.contradictions().size() * CONTRADICTION_PENALTY;
 
         // Final score calculation
+        double temporalScore = temporalResult != null ? temporalResult.score() : 0.0;
         double rawScore = pattern.baseScore()
                 + weightedSupportingCoverage * SUPPORTING_BONUS_CAP
                 + weightedCorroboratingCoverage * CORROBORATING_BONUS_CAP
                 - weightedCounterCoverage * COUNTER_PENALTY_CAP
                 - missingPenalty
-                - contradictionPenalty;
+                - contradictionPenalty
+                + temporalScore;
 
         double score = Math.round(Math.max(0.0, Math.min(1.0, rawScore)) * 100.0) / 100.0;
 
@@ -256,18 +272,36 @@ public class ConfidenceScorer {
                 verification.missingEvidence(),
                 verification.contradictions(),
                 decision,
-                CALIBRATION_NOTE
+                CALIBRATION_NOTE,
+                temporalScore,
+                temporalResult != null ? temporalResult.confidence().name() : "UNKNOWN",
+                temporalResult != null ? temporalResult.candidateFirstSeen() : null,
+                temporalResult != null ? temporalResult.impactedFirstSeen() : null,
+                temporalResult != null ? temporalResult.explanation() : ""
         );
     }
 
     /**
-     * Score all hypotheses in batch.
+     * Score all hypotheses in batch (no temporal alignment).
      */
     public List<ConfidenceResult> scoreAll(
             List<Hypothesis> hypotheses,
             Map<String, DiagnosticPattern> patterns,
             List<VerificationResult> verifications,
             List<Evidence> evidence
+    ) {
+        return scoreAll(hypotheses, patterns, verifications, evidence, Map.of());
+    }
+
+    /**
+     * Score all hypotheses in batch with temporal alignment results.
+     */
+    public List<ConfidenceResult> scoreAll(
+            List<Hypothesis> hypotheses,
+            Map<String, DiagnosticPattern> patterns,
+            List<VerificationResult> verifications,
+            List<Evidence> evidence,
+            Map<String, TemporalAlignmentResult> temporalResults
     ) {
         Map<String, VerificationResult> verByHyp = new LinkedHashMap<>();
         for (VerificationResult vr : verifications) {
@@ -281,7 +315,9 @@ public class ConfidenceScorer {
             if (pattern == null || vr == null) {
                 continue;
             }
-            results.add(score(h, pattern, vr, evidence));
+            TemporalAlignmentResult temporal = temporalResults.getOrDefault(
+                    h.id(), TemporalAlignmentResult.UNKNOWN);
+            results.add(score(h, pattern, vr, evidence, temporal));
         }
         return results;
     }

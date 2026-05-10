@@ -20,7 +20,8 @@ public class MarkdownReporter {
             List<ConfidenceResult> confidenceResults,
             HypothesisComparison comparison,
             InvestigationDecision decision,
-            List<Evidence> evidence) {
+            List<Evidence> evidence,
+            ProblemWindow problemWindow) {
 
         StringBuilder sb = new StringBuilder();
 
@@ -65,6 +66,60 @@ public class MarkdownReporter {
                 .forEach(c -> sb.append(String.format("| %s | %.2f | %s | %s |\n",
                         hypothesisTitleZh(c.hypothesisId()), c.score(), levelZh(c.level()), decisionZh(c.decision()))));
         sb.append("\n");
+
+        // ── V.2-RCA-1A.3: Temporal Alignment Analysis ──
+        sb.append("## 时间对齐分析\n\n");
+        sb.append("Temporal alignment 评估证据时间戳是否支持各假设的因果顺序")
+                .append("（candidate 异常先于 impacted 服务异常）。\n\n");
+
+        // Problem Window status
+        if (problemWindow != null && problemWindow.isValid()) {
+            sb.append("**Problem Window**: ")
+                    .append(problemWindow.problemStart().toString()).append(" → ")
+                    .append(problemWindow.problemEnd().toString())
+                    .append("（来源: ").append(problemWindow.source())
+                    .append(", lookback: ").append(problemWindow.lookbackWindow().toMinutes()).append("min")
+                    .append(", lookahead: ").append(problemWindow.lookaheadWindow().toMinutes()).append("min）\n\n");
+        } else {
+            sb.append("> ⚠️ **PARTIAL** — Problem Window 尚未接入报告层。")
+                    .append("当前为无 temporal 路径（score=0, confidence=UNKNOWN），")
+                    .append("不代表 TemporalAligner 不可用，而是调用链未贯通。\n\n");
+        }
+
+        sb.append("| 假设 | Temporal Score | Temporal 置信度 | Candidate First Seen | Impacted First Seen |\n");
+        sb.append("|---|---|---|---:|---:|\n");
+        confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .forEach(c -> sb.append(String.format("| %s | %+.2f | %s | %s | %s |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        c.temporalAlignmentScore(),
+                        temporalConfidenceZh(c.temporalConfidence()),
+                        c.candidateFirstSeen() != null ? c.candidateFirstSeen().toString() : "N/A",
+                        c.impactedFirstSeen() != null ? c.impactedFirstSeen().toString() : "N/A")));
+        sb.append("\n");
+
+        if (problemWindow == null || !problemWindow.isValid()) {
+            sb.append("> ⚠️ 以上 temporal 数据来自 ConfidenceResult（由 ConfidenceScorer 注入）。")
+                    .append("若为全部默认值则说明调用链未传入 TemporalAlignmentResult。\n\n");
+        }
+
+        // Per-hypothesis temporal detail
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            sb.append("### ").append(hypothesisTitleZh(c.hypothesisId()))
+                    .append(" 时间对齐详情\n\n");
+            sb.append("- **Temporal Score**: ").append(String.format("%+.2f", c.temporalAlignmentScore())).append("\n");
+            sb.append("- **Temporal 置信度**: ").append(temporalConfidenceZh(c.temporalConfidence())).append("\n");
+            sb.append("- **Candidate First Seen**: ")
+                    .append(c.candidateFirstSeen() != null ? c.candidateFirstSeen().toString() : "N/A").append("\n");
+            sb.append("- **Impacted First Seen**: ")
+                    .append(c.impactedFirstSeen() != null ? c.impactedFirstSeen().toString() : "N/A").append("\n");
+            String explanation = c.temporalExplanation();
+            sb.append("- **Temporal 说明**: ")
+                    .append(explanation != null && !explanation.isEmpty() ? explanation : "N/A（无 temporal alignment 数据）")
+                    .append("\n\n");
+        }
 
         // Leading Hypothesis
         sb.append("## 领先假设\n\n");
@@ -202,6 +257,16 @@ public class MarkdownReporter {
             case "uncertain" -> "不确定";
             case "insufficient_evidence" -> "证据不足";
             default -> decision != null ? decision : "-";
+        };
+    }
+
+    private String temporalConfidenceZh(String confidence) {
+        return switch (confidence) {
+            case "HIGH" -> "高";
+            case "MEDIUM" -> "中";
+            case "LOW" -> "低";
+            case "UNKNOWN" -> "未知";
+            default -> confidence != null ? confidence : "未知";
         };
     }
 }

@@ -308,7 +308,80 @@ class ConfidenceScorerTest {
         assertThat(result.score()).isLessThanOrEqualTo(0.15);
     }
 
-    // ── 6c. deployment_regression 额外边界 ──
+    // ── 6d. Temporal-as-supportive-evidence semantic test ──
+
+    /**
+     * Proves temporalScore is <b>supportive, not sufficient</b> evidence.
+     *
+     * <p>Creates a hypothesis with deliberately weak fault mode evidence
+     * (1/6 supporting types matched) but max temporalScore (+0.15).
+     * Verifies the total confidence does NOT reach probable_root_cause
+     * (threshold: 0.60), proving temporal alignment alone cannot
+     * carry a weak hypothesis to a strong decision.</p>
+     *
+     * <p>Scoring breakdown (approximate):</p>
+     * <pre>
+     *   baseScore:        0.05
+     *   supportingCoverage: (1/6) × 0.60 = 0.10
+     *   corroborating:    0.10 (deploy_event_near_alert_window fully matched)
+     *   counterPenalty:   0
+     *   temporalScore:    +0.15 (max)
+     *   ─────────────────────
+     *   rawScore:         0.40
+     *   decision:         "uncertain" (below 0.60 probable_root_cause)
+     * </pre>
+     *
+     * <p>Refinement: V.2-RCA-1A.5 will add fault-mode-specific temporal rules.</p>
+     */
+    @Test
+    void maxTemporalCannotMakeWeakEvidenceProbableRootCause() {
+        // minimal evidence — only 1 supporting type + 1 corroborating
+        List<Evidence> weakEvidence = List.of(
+                new Evidence("ev_w1", "inc_weak", "metric", "error_rate_spike_after_deploy",
+                        "order-service", Instant.parse("2026-04-28T10:03:00Z"),
+                        "error rate elevated", Map.of(), 0.90),
+                // corroborating — deploy event present (bonus, not penalty)
+                new Evidence("ev_w2", "inc_weak", "deploy", "deploy_event_near_alert_window",
+                        "order-service", Instant.parse("2026-04-28T10:00:00Z"),
+                        "order-service v1.2.3 deployed", Map.of(), 0.85)
+        );
+
+        DiagnosticPattern pattern = registry.get("deployment_regression").orElseThrow();
+        Hypothesis hypothesis = new Hypothesis(
+                "hyp_weak_temporal", "inc_weak", "deployment_regression",
+                "Deployment regression (weak evidence, strong temporal)",
+                "change_regression", "order-service", "cause"
+        );
+        VerificationResult vr = verificationEngine.verify(hypothesis, pattern, weakEvidence);
+
+        // Max possible temporal alignment — best-case temporal signal
+        TemporalAlignmentResult maxTemporal = new TemporalAlignmentResult(
+                0.15,                                    // max score
+                TemporalConfidence.HIGH,
+                "candidate anomaly clearly before impacted anomaly",
+                Instant.parse("2026-04-28T10:03:00Z"),   // candidateFirstSeen
+                Instant.parse("2026-04-28T10:06:00Z"),   // impactedFirstSeen
+                2, 0);
+
+        ConfidenceResult result = scorer.score(hypothesis, pattern, vr, weakEvidence, maxTemporal);
+
+        // Key assertion: max temporalScore alone cannot reach probable_root_cause
+        assertThat(result.decision())
+                .as("max temporalScore (+0.15) with 1/6 evidence must not reach probable_root_cause")
+                .isNotEqualTo("probable_root_cause")
+                .isNotEqualTo("likely_root_cause");
+
+        // Score must be bounded and reasonable
+        assertThat(result.score()).isBetween(0.0, 1.0);
+        assertThat(result.score())
+                .as("even with max temporal, weak evidence stays in uncertain/insufficient range")
+                .isLessThan(0.60);
+
+        // temporalScore is correctly recorded
+        assertThat(result.temporalAlignmentScore()).isEqualTo(0.15);
+    }
+
+    // ── 6e. deployment_regression 额外边界 ──
 
     /**
      * 仅有 counter 证据（deploy_successful + no_error_increase），
