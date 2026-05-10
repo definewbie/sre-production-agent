@@ -122,6 +122,7 @@ public class LiveScenarioService {
             }
 
             // Phase 1: Inject fault (live mode only)
+            Instant faultInjectedAt = Instant.now();  // anchor for evidence time window
             if (!isSimulation) {
                 injectFault(faultMode, faultParams);
 
@@ -145,8 +146,12 @@ public class LiveScenarioService {
                     prometheusUrl, lokiUrl, jaegerUrl, isSimulation, kubernetesReader);
 
             // Collect for the alerting service (order-service) and the suspected downstream (payment-service)
-            LiveEvidenceReport orderReport = collector.collect("order-service", "demo", Duration.ofMinutes(15));
-            LiveEvidenceReport paymentReport = collector.collect("payment-service", "demo", Duration.ofMinutes(15));
+            // Anchor queries at fault injection time so the window covers the active fault period
+            Duration lookback = Duration.ofMinutes(15);
+            LiveEvidenceReport orderReport = collector.collect(
+                    "order-service", "demo", lookback, faultInjectedAt);
+            LiveEvidenceReport paymentReport = collector.collect(
+                    "payment-service", "demo", lookback, faultInjectedAt);
 
             // Merge evidence
             List<Evidence> allEvidence = new ArrayList<>();

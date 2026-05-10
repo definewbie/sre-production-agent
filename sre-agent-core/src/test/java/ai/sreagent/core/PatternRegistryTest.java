@@ -34,16 +34,17 @@ class PatternRegistryTest {
         assertThat(pattern.id()).isEqualTo("deployment_regression");
         assertThat(pattern.baseScore()).isEqualTo(0.30);
         assertThat(pattern.supportingEvidenceTypes()).contains(
-                "deploy_event_near_alert_window",
                 "error_rate_spike_after_deploy",
                 "dependency_timeout_logs",
                 "retry_timeout_config_change"
+        );
+        assertThat(pattern.corroboratingEvidenceTypes()).contains(
+                "deploy_event_near_alert_window"
         );
         assertThat(pattern.counterEvidenceTypes()).contains(
                 "historical_timeout_logs_present",
                 "downstream_latency_spike"
         );
-        assertThat(pattern.confidenceWeights()).containsEntry("deploy_event_near_alert_window", 0.18);
     }
 
     @Test

@@ -159,7 +159,8 @@ public class IncidentService {
 
             LiveEvidenceCollector liveCollector = new LiveEvidenceCollector(
                     prometheusUrl, lokiUrl, jaegerUrl, false);
-            LiveEvidenceReport liveReport = liveCollector.collect(service, namespace, lookback);
+            LiveEvidenceReport liveReport = liveCollector.collect(service, namespace, lookback,
+                    alert.startsAt());
 
             List<Evidence> allEvidence = new ArrayList<>(liveReport.allEvidence());
 
@@ -202,6 +203,7 @@ public class IncidentService {
      * Creates a synthetic incident and runs the full evidence collection + workflow.
      */
     public IncidentRcaResultView triggerRcaDirect(
+            String incidentId,
             String targetService,
             String faultType,
             String experimentName,
@@ -209,8 +211,6 @@ public class IncidentService {
             String severity
     ) {
         long startTime = System.currentTimeMillis();
-
-        String incidentId = "inc-chaos-" + targetService + "-" + System.currentTimeMillis();
         String alertName = "混沌实验: " + targetService + " " + faultType;
 
         IncidentTask incidentTask = new IncidentTask(
@@ -241,7 +241,8 @@ public class IncidentService {
 
             LiveEvidenceCollector liveCollector = new LiveEvidenceCollector(
                     prometheusUrl, lokiUrl, jaegerUrl, false);
-            LiveEvidenceReport liveReport = liveCollector.collect(service, ns, lookback);
+            LiveEvidenceReport liveReport = liveCollector.collect(service, ns, lookback,
+                    incidentTask.startedAt());
 
             List<Evidence> allEvidence = new ArrayList<>(liveReport.allEvidence());
 
@@ -303,7 +304,9 @@ public class IncidentService {
         InvestigationResult rca = record.rcaResult;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("scenarioId", rca.incidentId());
-        result.put("scenarioName", "Alert-driven: " + record.sourceAlert.alertName());
+        result.put("scenarioName", record.sourceAlert != null
+                ? "Alert-driven: " + record.sourceAlert.alertName()
+                : "Fault injection: " + rca.incidentId());
         result.put("status", "COMPLETED");
         result.put("phase", "completed");
         result.put("incidentId", rca.incidentId());

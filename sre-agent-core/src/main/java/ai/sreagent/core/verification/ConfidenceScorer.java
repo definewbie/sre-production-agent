@@ -55,6 +55,9 @@ public class ConfidenceScorer {
     /** Penalty per contradiction */
     private static final double CONTRADICTION_PENALTY = 0.05;
 
+    /** Maximum bonus from corroborating evidence (optional — no penalty when absent) */
+    private static final double CORROBORATING_BONUS_CAP = 0.10;
+
     private static final Set<String> PROVIDER_ALIAS_PREFIXES = Set.of("metric_", "log_", "trace_");
 
     /**
@@ -70,17 +73,17 @@ public class ConfidenceScorer {
             Map.entry("metric_latency_p99_spike", "downstream_latency_spike"),
             Map.entry("metric_memory_usage_high", "memory_usage_near_limit"),
             Map.entry("metric_restart_rate_increased", "pod_restart_count_increased"),
-            Map.entry("metric_cpu_usage_high", "metric_cpu_usage_high"),
+            Map.entry("metric_cpu_usage_high", "cpu_usage_high"),
             // log → core
             Map.entry("log_timeout_error", "dependency_timeout_logs"),
             Map.entry("log_downstream_timeout", "dependency_timeout_logs"),
-            Map.entry("log_exception_spike", "log_exception_spike"),
-            Map.entry("log_http_5xx", "log_http_5xx"),
+            Map.entry("log_exception_spike", "exception_logs_present"),
+            Map.entry("log_http_5xx", "http_5xx_logs_present"),
             Map.entry("log_oom_message", "kubernetes_event_oomkilled"),
             Map.entry("log_crash_loop", "container_crash_loop_backoff"),
             Map.entry("log_retry_exhausted", "retry_timeout_config_change"),
             // trace → core
-            Map.entry("trace_error_span", "trace_error_span"),
+            Map.entry("trace_error_span", "error_traces_present"),
             Map.entry("trace_root_span_slow", "downstream_latency_spike"),
             Map.entry("trace_downstream_span_slow", "downstream_latency_spike"),
             Map.entry("trace_child_span_dominates_latency", "downstream_latency_spike"),
@@ -181,6 +184,33 @@ public class ConfidenceScorer {
             weightedSupportingCoverage /= totalSupportingWeight;
         }
 
+        // Corroborating evidence — optional bonus when present, no penalty when absent.
+        // Corroborating types (e.g., deploy_event_near_alert_window) boost confidence
+        // when found but don't hurt the score when missing.
+        // Check against ALL evidence types (not just supporting), since VE won't classify
+        // corroborating types as supporting or counter.
+        Set<String> allEvidenceTypes = evidence.stream()
+                .map(Evidence::evidenceType)
+                .map(ConfidenceScorer::normalizeEvidenceType)
+                .collect(Collectors.toSet());
+
+        double weightedCorroboratingCoverage = 0.0;
+        List<String> corroboratingTypes = pattern.corroboratingEvidenceTypes();
+        if (corroboratingTypes != null && !corroboratingTypes.isEmpty()) {
+            double totalCorroboratingWeight = 0.0;
+            double matchedCorroboratingWeight = 0.0;
+            for (String type : corroboratingTypes) {
+                double w = weights.getOrDefault(type, 0.05);
+                totalCorroboratingWeight += w;
+                if (allEvidenceTypes.contains(type)) {
+                    matchedCorroboratingWeight += w;
+                }
+            }
+            if (totalCorroboratingWeight > 0) {
+                weightedCorroboratingCoverage = matchedCorroboratingWeight / totalCorroboratingWeight;
+            }
+        }
+
         // Apply type-weighted adjustments for counter coverage
         double weightedCounterCoverage = 0.0;
         double totalCounterWeight = 0.0;
@@ -207,6 +237,7 @@ public class ConfidenceScorer {
         // Final score calculation
         double rawScore = pattern.baseScore()
                 + weightedSupportingCoverage * SUPPORTING_BONUS_CAP
+                + weightedCorroboratingCoverage * CORROBORATING_BONUS_CAP
                 - weightedCounterCoverage * COUNTER_PENALTY_CAP
                 - missingPenalty
                 - contradictionPenalty;

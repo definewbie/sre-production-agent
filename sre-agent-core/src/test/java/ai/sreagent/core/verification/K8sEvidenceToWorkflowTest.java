@@ -63,7 +63,7 @@ class K8sEvidenceToWorkflowTest {
                 .findFirst().orElseThrow();
 
         // pod_crash_loop must be the top hypothesis
-        assertThat(podCrashLoopConf.score()).isCloseTo(0.70, withPercentage(5.0));
+        assertThat(podCrashLoopConf.score()).isCloseTo(0.62, withPercentage(5.0));
         assertThat(podCrashLoopConf.decision()).isEqualTo("probable_root_cause");
 
         // Decision at incident level

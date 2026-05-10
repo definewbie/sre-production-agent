@@ -71,13 +71,38 @@ public class LiveEvidenceCollector {
 
     /**
      * Collect evidence from all configured sources.
+     * Uses Instant.now() as the time anchor — suitable for real-time queries.
      */
     public LiveEvidenceReport collect(String service, String namespace, Duration lookback) {
+        return collect(service, namespace, lookback, null);
+    }
+
+    /**
+     * Collect evidence from all configured sources, anchored at a specific time.
+     *
+     * When anchorTime is non-null, the query window is [anchorTime - lookback, anchorTime].
+     * This ensures evidence queries cover the period when the fault was actually active,
+     * rather than the current time (which may be well after the fault has ended).
+     *
+     * When anchorTime is null (e.g. from the legacy collect() signature), falls back
+     * to Instant.now() for backward compatibility.
+     *
+     * @param anchorTime the moment when the incident started / fault was injected;
+     *                   null to use Instant.now()
+     */
+    public LiveEvidenceReport collect(String service, String namespace, Duration lookback, Instant anchorTime) {
         List<Evidence> allEvidence = new ArrayList<>();
         Map<String, LiveEvidenceReport.SourceReport> sourceReports = new LinkedHashMap<>();
         List<String> warnings = new ArrayList<>();
 
-        Instant endTime = Instant.now();
+        Instant now = Instant.now();
+        Instant endTime;
+        if (anchorTime != null) {
+            Instant buffered = anchorTime.plusSeconds(30);
+            endTime = buffered.isBefore(now) ? buffered : now;  // 30s buffer, capped at now
+        } else {
+            endTime = now;
+        }
         Instant startTime = endTime.minus(lookback);
 
         collectPrometheus(service, namespace, startTime, endTime, lookback, allEvidence, sourceReports, warnings);

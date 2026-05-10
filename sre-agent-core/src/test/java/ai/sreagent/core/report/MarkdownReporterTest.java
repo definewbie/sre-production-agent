@@ -75,13 +75,13 @@ class MarkdownReporterTest {
 
     @Test
     void reportContainsScores() {
-        assertThat(report).contains("0.50");
-        assertThat(report).contains("0.45");
+        assertThat(report).contains("0.25");
+        assertThat(report).contains("0.23");
     }
 
     @Test
     void reportContainsScoreGap() {
-        assertThat(report).contains("0.05");
+        assertThat(report).contains("0.02");
     }
 
     @Test

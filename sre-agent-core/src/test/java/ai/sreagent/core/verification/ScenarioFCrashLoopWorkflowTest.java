@@ -22,8 +22,8 @@ import static org.assertj.core.data.Percentage.withPercentage;
  * End-to-end test for Scenario F (K8s CrashLoopBackOff).
  * Loads k8s_crashloop alert/evidence from classpath and runs the full chain.
  *
- * Target values (V2 ratio-based scoring):
- *   pod_crash_loop score ≈ 0.70
+ * Target values (V2 ratio-based scoring with provider alias normalization):
+ *   pod_crash_loop score ≈ 0.62
  *   decision = probable_root_cause
  *   selected hypothesis = hyp_pod_crash_loop
  */
@@ -72,9 +72,9 @@ class ScenarioFCrashLoopWorkflowTest {
     }
 
     @Test
-    void podCrashLoop_shouldScoreAbove80() {
+    void podCrashLoop_shouldScoreAbove60() {
         ConfidenceResult result = findConfidence("hyp_pod_crash_loop");
-        assertThat(result.score()).isCloseTo(0.70, withPercentage(5.0));
+        assertThat(result.score()).isCloseTo(0.62, withPercentage(5.0));
     }
 
     @Test

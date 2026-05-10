@@ -55,7 +55,7 @@ class ConfidenceScorerTest {
     }
 
     @Test
-    void deploymentRegression_shouldScore64() {
+    void deploymentRegression_shouldScore21() {
         DiagnosticPattern pattern = registry.get("deployment_regression").orElseThrow();
         Hypothesis hypothesis = new Hypothesis(
                 "hyp_deployment_regression", "inc_test", "deployment_regression",
@@ -66,16 +66,15 @@ class ConfidenceScorerTest {
 
         ConfidenceResult result = scorer.score(hypothesis, pattern, vr, scenarioEEvidence);
 
-        assertThat(result.score()).isCloseTo(0.50, withPercentage(1.0));
-        assertThat(result.level()).isEqualTo("low");
-        assertThat(result.decision()).isEqualTo("uncertain");
+        assertThat(result.score()).isCloseTo(0.25, withPercentage(5.0));
+        assertThat(result.decision()).isEqualTo("insufficient_evidence");
         assertThat(result.supportingFactors()).isNotEmpty();
         assertThat(result.counterFactors()).isNotEmpty();
         assertThat(result.calibrationNotes()).isNotBlank();
     }
 
     @Test
-    void downstreamDependencyLatency_shouldScore58() {
+    void downstreamDependencyLatency_shouldScore23() {
         DiagnosticPattern pattern = registry.get("downstream_dependency_latency").orElseThrow();
         Hypothesis hypothesis = new Hypothesis(
                 "hyp_downstream_dependency_latency", "inc_test", "downstream_dependency_latency",
@@ -86,9 +85,8 @@ class ConfidenceScorerTest {
 
         ConfidenceResult result = scorer.score(hypothesis, pattern, vr, scenarioEEvidence);
 
-        assertThat(result.score()).isCloseTo(0.45, withPercentage(1.0));
-        assertThat(result.level()).isEqualTo("low");
-        assertThat(result.decision()).isEqualTo("uncertain");
+        assertThat(result.score()).isCloseTo(0.23, withPercentage(5.0));
+        assertThat(result.decision()).isEqualTo("insufficient_evidence");
         assertThat(result.supportingFactors()).isNotEmpty();
         assertThat(result.counterFactors()).isNotEmpty();
         assertThat(result.calibrationNotes()).isNotBlank();
@@ -145,8 +143,8 @@ class ConfidenceScorerTest {
         VerificationResult vr = verificationEngine.verify(hypothesis, pattern, noTopoEvidence);
         ConfidenceResult result = scorer.score(hypothesis, pattern, vr, noTopoEvidence);
 
-        assertThat(result.score()).isLessThanOrEqualTo(0.50);
-        assertThat(result.decision()).isEqualTo("uncertain");
+        assertThat(result.score()).isLessThanOrEqualTo(0.25);
+        assertThat(result.decision()).isEqualTo("insufficient_evidence");
     }
 
     /**

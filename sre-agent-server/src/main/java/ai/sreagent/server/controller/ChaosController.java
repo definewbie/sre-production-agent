@@ -202,7 +202,7 @@ public class ChaosController {
                 try {
                     log.info("Chaos RCA background thread starting for incidentId={}", rcaIncidentId);
                     IncidentRcaResultView rcaResult = incidentService.triggerRcaDirect(
-                            targetService, faultType, experimentName, namespace, severity);
+                            rcaIncidentId, targetService, faultType, experimentName, namespace, severity);
                     log.info("Chaos RCA completed: incidentId={}, decision={}, confidence={}",
                             rcaIncidentId,
                             rcaResult.decisionType(),
