@@ -18,7 +18,18 @@
 最近安全点：
 
 ```text
-7d2aeb1 V.2-RCA-1A.4: cover configured topology provider workflow
+b051d13 fix: render fanout service topology
+```
+
+最新修复点还包括：
+
+```text
+- IncidentDetector 使用滑动时间窗口判断持续异常，而不是单次 tick 立即触发
+- normal / unknown faultConfig 不应触发 RCA
+- latency / error / timeout faultConfig 应正确识别，不应显示 unknown
+- Alertmanager / chaos direct RCA 会按 topology connected component + 可配置时间窗口做 incident normalization
+- incident normalization 默认窗口为 300s，可通过 `sre-agent.incident.normalization-window-seconds` 调整
+- chaos direct RCA 会注入 chaos_fault_injected 证据，作为实验控制面事实
 ```
 
 单元 / reactor 测试已通过：
@@ -41,6 +52,13 @@ payment-service 故障
   -> 解析 payment-service -> order-service propagation path
   -> propagationScore > 0
   -> downstream_dependency_latency 成为领先或强竞争假设
+```
+
+同时验证 SRE incident 触发语义：
+
+```text
+单次瞬时异常不应立即触发 incident。
+同一完整服务调用链路上，如果多个点在同一 incident normalization 时间窗口内发生告警，应根据 topology + time bucket 归一化为一次 RCA。
 ```
 
 ## 环境假设
@@ -196,10 +214,42 @@ curl -s http://localhost:8080/api/live-scenario/{scenarioId} \
     - payment-service
     - order-service
 12. diagnosticQuality 不应因为 Loki/Prometheus/Jaeger 全盲而退化；若某 provider blind，需要说明真实原因
-13. decision 可以是 probable_root_cause / competing_hypotheses / uncertain_requires_more_evidence，但必须解释为什么
+13. decision 可以是 likely_root_cause / probable_root_cause / competing_hypotheses / uncertain_requires_more_evidence，但必须解释为什么
+14. chaos / detector 触发的 RCA raw evidence 中应包含 `chaos_fault_injected`
+15. detector 生成的 alertName 不应再出现 `unknown` faultType，除非 faultConfig 真实不可解析
+16. normal / unknown faultConfig 的服务不应产生新的 RCA incident
+17. 同一拓扑链路同一 normalization 时间窗口内，order-service / payment-service / inventory-service 多点告警不应生成多条独立 RCA；应复用已有 incident。默认窗口是 300s，如需快速验证可以临时调小 `sre-agent.incident.normalization-window-seconds`
 ```
 
 注意：本次 E2E 重点不是强行要求某个固定 final decision，而是验证 live evidence + topology propagation 是否闭环。
+
+请注意 RCA detail JSON 使用 snake_case 字段。不要用 camelCase 读取这些断言字段：
+
+```text
+hypothesis_id
+topology_causality_score
+propagation_score
+propagation_path
+```
+
+建议对最新 incident 执行：
+
+```bash
+curl -s http://localhost:8080/api/incidents/{incidentId}/rca \
+  | jq '.baseRca.evidence[]? | select(.evidence_type=="chaos_fault_injected")'
+
+curl -s http://localhost:8080/api/incidents/{incidentId}/rca \
+  | jq '.baseRca.confidenceResults[]
+        | select(.hypothesis_id=="hyp_downstream_dependency_latency")
+        | {
+            score,
+            topology_causality_score,
+            propagation_score,
+            propagation_path,
+            diagnostic_quality,
+            provider_blindness
+          }'
+```
 
 ## 额外诊断
 

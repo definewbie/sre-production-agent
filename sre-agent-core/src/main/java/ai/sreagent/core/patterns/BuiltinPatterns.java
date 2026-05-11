@@ -208,7 +208,7 @@ public final class BuiltinPatterns {
                 entry("trace_child_span_dominates_latency", 0.14)
             ),
             0.25,
-            List.of()
+            List.of("chaos_fault_injected")
         );
     }
 

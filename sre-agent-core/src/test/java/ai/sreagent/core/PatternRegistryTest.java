@@ -64,6 +64,9 @@ class PatternRegistryTest {
                 "downstream_5xx_absent",
                 "deploy_event_near_alert_window"
         );
+        assertThat(pattern.corroboratingEvidenceTypes()).contains(
+                "chaos_fault_injected"
+        );
     }
 
     @Test

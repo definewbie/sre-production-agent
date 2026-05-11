@@ -2,7 +2,13 @@ package ai.sreagent.server.incident;
 
 import ai.sreagent.core.domain.ServiceTopology;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -20,20 +26,68 @@ public record IncidentFingerprint(
         String chainSummary,
         long timeWindowBucket
 ) {
-    /** 1-minute time window for deduplication. */
-    private static final long WINDOW_MINUTES = 1;
+    /** Default incident normalization window. */
+    public static final Duration DEFAULT_WINDOW = Duration.ofMinutes(5);
 
     /**
-     * Create a fingerprint from the affected service and topology.
-     * The chainSummary includes all services in the topology that are 
-     * reachable from (or upstream of) the affected service.
+     * Create a fingerprint from a service and topology.
+     * The chainSummary is the connected topology component containing the service,
+     * treating dependencies as undirected for normalization. This groups alerts
+     * from order-service and payment-service into one incident window when they
+     * are part of the same call chain.
      */
     public static IncidentFingerprint from(String service, ServiceTopology topology) {
-        String chain = topology.findAffectedNodes(service).stream()
+        return from(service, topology, DEFAULT_WINDOW);
+    }
+
+    public static IncidentFingerprint from(String service, ServiceTopology topology, Duration window) {
+        return from(service, topology, window, Instant.now());
+    }
+
+    static IncidentFingerprint from(String service, ServiceTopology topology, Duration window, Instant timestamp) {
+        String chain = connectedComponent(service, topology).stream()
                 .sorted()
                 .collect(Collectors.joining("→"));
-        long bucket = System.currentTimeMillis() / (WINDOW_MINUTES * 60_000);
+        long windowSeconds = normalizedWindowSeconds(window);
+        long bucket = timestamp.getEpochSecond() / windowSeconds;
         return new IncidentFingerprint(chain, bucket);
+    }
+
+    private static long normalizedWindowSeconds(Duration window) {
+        if (window == null || window.isZero() || window.isNegative()) {
+            return DEFAULT_WINDOW.toSeconds();
+        }
+        return Math.max(1, window.toSeconds());
+    }
+
+    private static Set<String> connectedComponent(String service, ServiceTopology topology) {
+        Set<String> visited = new LinkedHashSet<>();
+        if (service == null || service.isBlank() || topology == null || topology.size() == 0) {
+            if (service != null && !service.isBlank()) {
+                visited.add(service);
+            }
+            return visited;
+        }
+
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(service);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            if (!visited.add(current)) {
+                continue;
+            }
+            for (String next : topology.getDownstream(current)) {
+                if (!visited.contains(next)) {
+                    queue.add(next);
+                }
+            }
+            for (String next : topology.getUpstream(current)) {
+                if (!visited.contains(next)) {
+                    queue.add(next);
+                }
+            }
+        }
+        return visited;
     }
 
     @Override

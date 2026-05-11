@@ -31,14 +31,25 @@ public record IncidentRcaResultView(
 
     public static IncidentRcaResultView running(String incidentId, String alertName,
                                                   String service, String severity) {
+        return running(incidentId, alertName, service, severity, "alertmanager");
+    }
+
+    public static IncidentRcaResultView running(String incidentId, String alertName,
+                                                  String service, String severity,
+                                                  String triggerSource) {
         return new IncidentRcaResultView(
-                incidentId, IncidentStatus.RUNNING.name(), "alertmanager",
+                incidentId, IncidentStatus.RUNNING.name(), triggerSource,
                 alertName, service, null, severity, null,
                 null, null, 0, 0, null, null, 0, null
         );
     }
 
     public static IncidentRcaResultView completed(InvestigationResult r, long durationMs) {
+        return completed(r, durationMs, "alertmanager");
+    }
+
+    public static IncidentRcaResultView completed(InvestigationResult r, long durationMs,
+                                                  String triggerSource) {
         var incident = r.incident();
         Map<String, Double> scores = null;
         if (r.confidenceResults() != null) {
@@ -49,7 +60,7 @@ public record IncidentRcaResultView(
         }
 
         return new IncidentRcaResultView(
-                r.incidentId(), IncidentStatus.COMPLETED.name(), "alertmanager",
+                r.incidentId(), IncidentStatus.COMPLETED.name(), triggerSource,
                 incident != null ? incident.alertName() : null,
                 incident != null ? incident.service() : null,
                 incident != null ? incident.namespace() : null,
@@ -67,8 +78,14 @@ public record IncidentRcaResultView(
 
     public static IncidentRcaResultView failed(String incidentId, String alertName,
                                                  String service, String errorMessage) {
+        return failed(incidentId, alertName, service, errorMessage, "alertmanager");
+    }
+
+    public static IncidentRcaResultView failed(String incidentId, String alertName,
+                                                 String service, String errorMessage,
+                                                 String triggerSource) {
         return new IncidentRcaResultView(
-                incidentId, IncidentStatus.FAILED.name(), "alertmanager",
+                incidentId, IncidentStatus.FAILED.name(), triggerSource,
                 alertName, service, null, null, null,
                 null, null, 0, 0, null, null, 0, errorMessage
         );

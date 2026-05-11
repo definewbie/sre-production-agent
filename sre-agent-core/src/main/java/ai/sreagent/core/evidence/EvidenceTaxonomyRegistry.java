@@ -90,6 +90,7 @@ public final class EvidenceTaxonomyRegistry {
         register("memory_usage_normal",            EvidenceCategory.METRIC,     EvidenceSignal.MEMORY_PRESSURE,        EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("pod_ready",                      EvidenceCategory.KUBERNETES, EvidenceSignal.POD_NOT_READY,          EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("container_running_normal",       EvidenceCategory.KUBERNETES, EvidenceSignal.CRASH_LOOP,             EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
+        register("chaos_fault_injected",           EvidenceCategory.RUNTIME,    EvidenceSignal.UNKNOWN,                EvidenceSourceKind.STATIC,     EvidenceCausalRole.CONTEXT);
     }
 
     private static void register(

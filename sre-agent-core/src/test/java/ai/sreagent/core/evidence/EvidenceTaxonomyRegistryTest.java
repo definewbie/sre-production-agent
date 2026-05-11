@@ -102,6 +102,19 @@ class EvidenceTaxonomyRegistryTest {
             assertThat(EvidenceTaxonomyRegistry.getCausalRole("deployment_metadata"))
                     .isEqualTo(EvidenceCausalRole.CONTEXT);
         }
+
+        @Test
+        @DisplayName("chaos_fault_injected → RUNTIME / UNKNOWN / STATIC / CONTEXT")
+        void chaosFaultInjected() {
+            assertThat(EvidenceTaxonomyRegistry.getCategory("chaos_fault_injected"))
+                    .isEqualTo(EvidenceCategory.RUNTIME);
+            assertThat(EvidenceTaxonomyRegistry.getSignal("chaos_fault_injected"))
+                    .isEqualTo(EvidenceSignal.UNKNOWN);
+            assertThat(EvidenceTaxonomyRegistry.getSourceKind("chaos_fault_injected", null))
+                    .isEqualTo(EvidenceSourceKind.STATIC);
+            assertThat(EvidenceTaxonomyRegistry.getCausalRole("chaos_fault_injected"))
+                    .isEqualTo(EvidenceCausalRole.CONTEXT);
+        }
     }
 
     @Nested

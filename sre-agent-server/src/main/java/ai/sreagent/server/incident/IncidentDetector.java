@@ -13,12 +13,16 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Continuous anomaly detector that monitors demo services and triggers RCA
- * only after sustained anomalies (N consecutive detection periods with
- * fault conditions exceeding thresholds).
+ * only after sustained anomalies (N anomalous observations within a sliding
+ * detection window).
  *
  * <p><b>Design rationale:</b>
  * <ul>
@@ -35,7 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *   sre-agent.detector:
  *     enabled: true              # enable/disable periodic scan
  *     interval-seconds: 15       # scan interval
- *     consecutive-threshold: 4   # consecutive anomaly ticks before RCA
+ *     consecutive-threshold: 4   # anomalous observations required in window
+ *     window-seconds: 60         # sliding detection window
  *     cooldown-minutes: 5        # min gap between RCAs for same service
  * </pre>
  */
@@ -48,11 +53,15 @@ public class IncidentDetector {
     private static final int DEFAULT_INTERVAL_SECONDS = 15;
     private static final int DEFAULT_CONSECUTIVE_THRESHOLD = 4;
     private static final int DEFAULT_COOLDOWN_MINUTES = 5;
+    private static final int DEFAULT_WINDOW_SECONDS =
+            DEFAULT_INTERVAL_SECONDS * DEFAULT_CONSECUTIVE_THRESHOLD;
 
     private final DemoServiceClient demoClient;
     private final IncidentService incidentService;
     private final ServiceTopology topology;
     private final int consecutiveThreshold;
+    private final Duration detectionWindow;
+    private final Duration normalizationWindow;
     private final Duration cooldown;
 
     /** Per-service anomaly tracking. Key = service name. */
@@ -64,7 +73,15 @@ public class IncidentDetector {
     /** Active fingerprint → incident ID, for chain-level deduplication. */
     private final ConcurrentHashMap<IncidentFingerprint, String> activeFingerprints = new ConcurrentHashMap<>();
 
-    private record DetectionState(int consecutiveAnomalies, Instant lastRcaAt, String lastIncidentId) {}
+    private record DetectionState(
+            List<Instant> anomalyObservations,
+            Instant lastRcaAt,
+            String lastIncidentId
+    ) {
+        int anomalyCount() {
+            return anomalyObservations.size();
+        }
+    }
 
     public IncidentDetector(DemoServiceClient demoClient,
                             IncidentService incidentService,
@@ -76,11 +93,18 @@ public class IncidentDetector {
         this.consecutiveThreshold = env.getProperty(
                 "sre-agent.detector.consecutive-threshold",
                 Integer.class, DEFAULT_CONSECUTIVE_THRESHOLD);
+        this.detectionWindow = Duration.ofSeconds(env.getProperty(
+                "sre-agent.detector.window-seconds",
+                Integer.class, DEFAULT_WINDOW_SECONDS));
+        this.normalizationWindow = Duration.ofSeconds(env.getProperty(
+                "sre-agent.incident.normalization-window-seconds",
+                Integer.class, Math.toIntExact(IncidentFingerprint.DEFAULT_WINDOW.toSeconds())));
         this.cooldown = Duration.ofMinutes(env.getProperty(
                 "sre-agent.detector.cooldown-minutes",
                 Integer.class, DEFAULT_COOLDOWN_MINUTES));
-        log.info("IncidentDetector started: threshold={} consecutive ticks, cooldown={}m",
-                consecutiveThreshold, cooldown.toMinutes());
+        log.info("IncidentDetector started: threshold={} observations, window={}s, normalizationWindow={}s, cooldown={}m",
+                consecutiveThreshold, detectionWindow.toSeconds(),
+                normalizationWindow.toSeconds(), cooldown.toMinutes());
     }
 
     /**
@@ -103,35 +127,44 @@ public class IncidentDetector {
     private void processService(DemoServiceStatus svc) {
         String serviceName = svc.service();
         boolean anomalous = isAnomalous(svc);
+        Instant now = Instant.now();
         DetectionState current = stateMap.getOrDefault(serviceName,
-                new DetectionState(0, Instant.EPOCH, null));
+                new DetectionState(List.of(), Instant.EPOCH, null));
 
         if (anomalous) {
-            int newCount = current.consecutiveAnomalies() + 1;
-            log.debug("Service {} anomalous (tick {}/{}): health={}, faults={}",
-                    serviceName, newCount, consecutiveThreshold,
+            List<Instant> observations = addObservation(current.anomalyObservations(), now);
+            int observationCount = observations.size();
+            log.debug("Service {} anomalous ({}/{} observations in {}s): health={}, faults={}",
+                    serviceName, observationCount, consecutiveThreshold, detectionWindow.toSeconds(),
                     svc.health(), svc.faultConfig());
 
-            if (newCount >= consecutiveThreshold) {
+            if (observationCount >= consecutiveThreshold) {
                 if (shouldTriggerRca(current, serviceName)) {
                     triggerRcaForService(serviceName, svc);
                 }
-                // Keep counter at threshold to avoid re-triggering every tick;
-                // cooldown gate handles duplicate prevention.
-                stateMap.put(serviceName,
-                        new DetectionState(newCount, current.lastRcaAt(), current.lastIncidentId()));
-            } else {
-                stateMap.put(serviceName,
-                        new DetectionState(newCount, current.lastRcaAt(), current.lastIncidentId()));
-            }
-        } else {
-            if (current.consecutiveAnomalies() > 0) {
-                log.info("Service {} recovered after {} anomalous ticks", serviceName,
-                        current.consecutiveAnomalies());
             }
             stateMap.put(serviceName,
-                    new DetectionState(0, current.lastRcaAt(), current.lastIncidentId()));
+                    new DetectionState(observations, current.lastRcaAt(), current.lastIncidentId()));
+        } else {
+            if (current.anomalyCount() > 0) {
+                log.info("Service {} recovered after {} anomalous observations in sliding window", serviceName,
+                        current.anomalyCount());
+            }
+            stateMap.put(serviceName,
+                    new DetectionState(List.of(), current.lastRcaAt(), current.lastIncidentId()));
         }
+    }
+
+    private List<Instant> addObservation(List<Instant> existing, Instant now) {
+        Instant cutoff = now.minus(detectionWindow);
+        List<Instant> observations = new ArrayList<>();
+        for (Instant seenAt : existing) {
+            if (!seenAt.isBefore(cutoff)) {
+                observations.add(seenAt);
+            }
+        }
+        observations.add(now);
+        return List.copyOf(observations);
     }
 
     /**
@@ -147,10 +180,7 @@ public class IncidentDetector {
         if (health == null || !"up".equalsIgnoreCase(health.trim())) {
             return true;
         }
-        // Check fault config — non-empty means a fault is active
-        String faultConfig = svc.faultConfig();
-        return faultConfig != null && !faultConfig.isBlank()
-                && !"{}".equals(faultConfig.trim());
+        return hasActiveFault(svc.faultConfig());
     }
 
     private boolean shouldTriggerRca(DetectionState state, String serviceName) {
@@ -165,7 +195,7 @@ public class IncidentDetector {
         }
         // Chain-level dedup: if another service on the same topology chain
         // already triggered an RCA within the time window, suppress this one.
-        IncidentFingerprint fp = IncidentFingerprint.from(serviceName, topology);
+        IncidentFingerprint fp = IncidentFingerprint.from(serviceName, topology, normalizationWindow);
         if (activeFingerprints.containsKey(fp)) {
             log.info("Chain-level dedup: RCA already active for fingerprint {} (service {}), suppressing {}",
                     fp, activeFingerprints.get(fp), serviceName);
@@ -177,6 +207,7 @@ public class IncidentDetector {
     private void triggerRcaForService(String serviceName, DemoServiceStatus svc) {
         String incidentId = "inc-detect-" + serviceName + "-" + System.currentTimeMillis();
         String faultType = inferFaultType(svc.faultConfig());
+        String investigationService = selectInvestigationService(serviceName);
         String namespace = "demo";
         String severity = "warning";
 
@@ -188,17 +219,17 @@ public class IncidentDetector {
         }
 
         activeIncidents.put(serviceName, incidentId);
-        activeFingerprints.put(IncidentFingerprint.from(serviceName, topology), incidentId);
-        log.info("Sustained anomaly detected on {} ({} consecutive ticks): triggering RCA {}",
-                serviceName, consecutiveThreshold, incidentId);
+        activeFingerprints.put(IncidentFingerprint.from(serviceName, topology, normalizationWindow), incidentId);
+        log.info("Sustained anomaly detected on {} ({} observations in {}s): triggering RCA {} for impacted service {}",
+                serviceName, consecutiveThreshold, detectionWindow.toSeconds(), incidentId, investigationService);
 
         // Trigger RCA in background thread
         new Thread(() -> {
             try {
                 IncidentRcaResultView result = incidentService.triggerRcaDirect(
-                        incidentId, serviceName, faultType,
+                        incidentId, investigationService, faultType,
                         "detected-" + faultType + "-" + serviceName,
-                        namespace, severity);
+                        namespace, severity, serviceName);
                 log.info("Detector-triggered RCA completed: incidentId={}, decision={}, confidence={}",
                         incidentId, result.decisionType(),
                         String.format("%.2f", result.confidenceScore()));
@@ -211,17 +242,49 @@ public class IncidentDetector {
                 DetectionState prev = stateMap.get(serviceName);
                 if (prev != null) {
                     stateMap.put(serviceName,
-                            new DetectionState(consecutiveThreshold, Instant.now(), incidentId));
+                            new DetectionState(prev.anomalyObservations(), Instant.now(), incidentId));
                 }
             }
         }, "detector-rca-" + incidentId).start();
     }
 
-    private String inferFaultType(String faultConfigStr) {
+    private String selectInvestigationService(String faultedService) {
+        Set<String> affectedNodes = topology.findAffectedNodes(faultedService);
+        return affectedNodes.stream()
+                .filter(s -> !s.equals(faultedService))
+                .filter(topology::isRoot)
+                .findFirst()
+                .orElseGet(() -> affectedNodes.stream()
+                        .filter(s -> !s.equals(faultedService))
+                        .sorted(Comparator.naturalOrder())
+                        .findFirst()
+                        .orElse(faultedService));
+    }
+
+    static boolean hasActiveFault(String faultConfigStr) {
+        return switch (inferFaultType(faultConfigStr)) {
+            case "latency", "error", "timeout" -> true;
+            default -> false;
+        };
+    }
+
+    static String inferFaultType(String faultConfigStr) {
         if (faultConfigStr == null || faultConfigStr.isBlank() || "{}".equals(faultConfigStr.trim())) {
             return "unknown";
         }
-        String lower = faultConfigStr.toLowerCase();
+        String lower = faultConfigStr.trim().toLowerCase();
+        if ("normal".equals(lower) || "unknown".equals(lower)) {
+            return "unknown";
+        }
+        if ("latency".equals(lower) || lower.matches(".*\"mode\"\\s*:\\s*\"latency\".*")) {
+            return "latency";
+        }
+        if ("error".equals(lower) || lower.matches(".*\"mode\"\\s*:\\s*\"error\".*")) {
+            return "error";
+        }
+        if ("timeout".equals(lower) || lower.matches(".*\"mode\"\\s*:\\s*\"timeout\".*")) {
+            return "timeout";
+        }
         if (lower.contains("\"errorrate\"") && lower.matches(".*\"errorrate\"\\s*:\\s*[1-9].*")) {
             return "error";
         }
