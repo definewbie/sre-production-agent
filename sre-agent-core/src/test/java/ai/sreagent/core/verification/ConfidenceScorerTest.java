@@ -7,8 +7,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.data.Percentage.withPercentage;
@@ -381,6 +383,35 @@ class ConfidenceScorerTest {
         assertThat(result.temporalAlignmentScore()).isEqualTo(0.15);
     }
 
+    @Test
+    void blindProvidersShouldDegradeQualityAndReduceMissingPenalty() {
+        List<Evidence> evidence = List.of(
+                new Evidence("ev_metric", "inc_blind", "prometheus", "metric_error_rate_spike",
+                        "order-service", Instant.parse("2026-04-28T10:03:00Z"),
+                        "5xx rate increased", Map.of(), 0.90),
+                new Evidence("ev_loki_none", "inc_blind", "loki", "log_no_signal",
+                        "order-service", Instant.parse("2026-04-28T10:03:00Z"),
+                        "Loki returned no log entries", Map.of(), 0.0),
+                new Evidence("ev_trace_none", "inc_blind", "jaeger", "trace_no_signal",
+                        "order-service", Instant.parse("2026-04-28T10:03:00Z"),
+                        "Jaeger returned no traces", Map.of(), 0.0)
+        );
+
+        DiagnosticPattern pattern = registry.get("service_internal_error").orElseThrow();
+        Hypothesis hypothesis = new Hypothesis(
+                "hyp_service_internal_error", "inc_blind", "service_internal_error",
+                "Service internal error", "application_error", "order-service", "cause"
+        );
+
+        VerificationResult vr = verificationEngine.verify(hypothesis, pattern, evidence);
+        ConfidenceResult result = scorer.score(hypothesis, pattern, vr, evidence);
+
+        assertThat(result.diagnosticQuality()).isEqualTo("SEVERELY_DEGRADED");
+        assertThat(result.providerBlindness()).containsExactly("log", "trace");
+        assertThat(result.score()).isGreaterThan(0.30);
+        assertThat(result.score()).isLessThanOrEqualTo(0.50);
+    }
+
     // ── 6e. deployment_regression 额外边界 ──
 
     /**
@@ -410,6 +441,101 @@ class ConfidenceScorerTest {
         assertThat(result.score()).isBetween(0.0, 1.0);
         assertThat(result.score()).isLessThanOrEqualTo(0.20);
         assertThat(result.decision()).isEqualTo("insufficient_evidence");
+    }
+
+    // ═══ Section 7: Topology Edge Tests ═══
+
+    /** Topology evidence (ev_008: service_dependency_match) resolves to a real edge. */
+    @Test
+    void topologyEdge_withServiceDependency_shouldBePopulated() {
+        DiagnosticPattern pattern = registry.get("deployment_regression").orElseThrow();
+        Hypothesis hypothesis = new Hypothesis(
+                "hyp_deployment_regression", "inc_test", "deployment_regression",
+                "Recent deployment introduced a regression",
+                "change_regression", "order-service", "cause"
+        );
+        VerificationResult vr = verificationEngine.verify(hypothesis, pattern, scenarioEEvidence);
+        ConfidenceResult result = scorer.score(hypothesis, pattern, vr, scenarioEEvidence);
+
+        TopologyEdge edge = result.topologyEdge();
+        assertThat(edge).isNotNull();
+        assertThat(edge.isPresent()).isTrue();
+        assertThat(edge.fromService()).isEqualTo("order-service");
+        assertThat(edge.toService()).contains("payment-service");
+        assertThat(edge.pathLength()).isEqualTo(1);
+        assertThat(edge.direction()).isEqualTo(PropagationDirection.UPSTREAM_TO_DOWNSTREAM);
+        assertThat(edge.edgeConfidence()).isEqualTo(TopologyEdgeConfidence.LOW);
+    }
+
+    /** No topology evidence → TopologyEdge.NONE. */
+    @Test
+    void topologyEdge_noTopology_shouldReturnNone() {
+        // Use counter-only evidence — no topology, no dependency signals
+        List<Evidence> counterOnly = List.of(
+                new Evidence("ev_none_c1", "inc_none", "metric", "no_error_increase",
+                        "order-service", Instant.parse("2026-04-28T10:00:00Z"),
+                        "Error rate unchanged", Map.of(), 0.80)
+        );
+
+        DiagnosticPattern pattern = registry.get("deployment_regression").orElseThrow();
+        Hypothesis hypothesis = new Hypothesis(
+                "hyp_deployment_regression", "inc_none", "deployment_regression",
+                "Recent deployment introduced a regression",
+                "change_regression", "order-service", "cause"
+        );
+        VerificationResult vr = verificationEngine.verify(hypothesis, pattern, counterOnly);
+        ConfidenceResult result = scorer.score(hypothesis, pattern, vr, counterOnly);
+
+        TopologyEdge edge = result.topologyEdge();
+        assertThat(edge).isNotNull();
+        assertThat(edge.isPresent()).isFalse();
+        assertThat(edge.edgeConfidence()).isEqualTo(TopologyEdgeConfidence.LOW);
+    }
+
+    /** Edge source → confidence tier mapping: topology source → HIGH. */
+    @Test
+    void topologyEdge_confidenceTiers_areCorrect() {
+        Evidence topoEvidence = new Evidence("ev_topo", "inc_tier", "topology",
+                "service_dependency_match", "svc-a", Instant.now(),
+                "svc-a depends on svc-b", Map.of(), 0.80);
+
+        DiagnosticPattern pattern = registry.get("deployment_regression").orElseThrow();
+        Hypothesis h = new Hypothesis("hyp_tier", "inc_tier", "deployment_regression",
+                "t", "x", "svc-a", "c");
+        VerificationResult vr = verificationEngine.verify(h, pattern, List.of(topoEvidence));
+        ConfidenceResult r = scorer.score(h, pattern, vr, List.of(topoEvidence));
+
+        assertThat(r.topologyEdge().isPresent()).isTrue();
+        assertThat(r.topologyEdge().edgeConfidence()).isEqualTo(TopologyEdgeConfidence.LOW);
+    }
+
+    /** scoreAll() produces multiple results, each with correct topology edge. */
+    @Test
+    void topologyEdge_inScoreAll_shouldNotMixEdges() {
+        List<Hypothesis> hypotheses = List.of(
+                new Hypothesis("hyp_deployment_regression", "inc_topall", "deployment_regression",
+                        "Deployment regression", "change_regression", "order-service", "cause"),
+                new Hypothesis("hyp_downstream_dependency_latency", "inc_topall",
+                        "downstream_dependency_latency", "Downstream latency",
+                        "dependency_latency", "order-service", "cause")
+        );
+
+        Map<String, DiagnosticPattern> patterns = registry.all().stream()
+                .collect(Collectors.toMap(DiagnosticPattern::id, p -> p));
+        List<VerificationResult> verifications = new ArrayList<>();
+        for (Hypothesis h : hypotheses) {
+            DiagnosticPattern p = patterns.get(h.patternId());
+            verifications.add(verificationEngine.verify(h, p, scenarioEEvidence));
+        }
+
+        List<ConfidenceResult> results = scorer.scoreAll(hypotheses, patterns,
+                verifications, scenarioEEvidence);
+
+        assertThat(results).hasSize(2);
+        for (ConfidenceResult r : results) {
+            assertThat(r.topologyEdge()).isNotNull();
+            assertThat(r.topologyEdge().isPresent()).isTrue();
+        }
     }
 
 }

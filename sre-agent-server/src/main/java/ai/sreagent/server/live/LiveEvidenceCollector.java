@@ -2,6 +2,7 @@ package ai.sreagent.server.live;
 
 import ai.sreagent.core.domain.Evidence;
 import ai.sreagent.core.domain.IncidentTask;
+import ai.sreagent.core.domain.ServiceTopology;
 import ai.sreagent.k8s.*;
 import ai.sreagent.loki.LokiEvidenceProvider;
 import ai.sreagent.loki.LokiEvidenceRequest;
@@ -54,6 +55,9 @@ public class LiveEvidenceCollector {
     // simulate mode uses fixture reader.
     private final KubernetesResourceReader kubernetesReaderOverride;
 
+    /** Optional topology for evidence filtering (leaf nodes skip downstream queries). */
+    private ServiceTopology topology;
+
     public LiveEvidenceCollector(String prometheusUrl, String lokiUrl, String jaegerUrl,
                                   boolean forceFixture) {
         this(prometheusUrl, lokiUrl, jaegerUrl, forceFixture, null);
@@ -67,6 +71,11 @@ public class LiveEvidenceCollector {
         this.jaegerUrl = jaegerUrl;
         this.forceFixture = forceFixture;
         this.kubernetesReaderOverride = kubernetesReaderOverride;
+    }
+
+    /** Set the service topology for evidence filtering. */
+    public void setTopology(ServiceTopology topology) {
+        this.topology = topology;
     }
 
     /**
@@ -119,15 +128,22 @@ public class LiveEvidenceCollector {
                                     Map<String, LiveEvidenceReport.SourceReport> reports,
                                     List<String> warnings) {
         try {
-            List<PrometheusQueryType> queryTypes = List.of(
+            List<PrometheusQueryType> queryTypes = new ArrayList<>(List.of(
                     PrometheusQueryType.ERROR_RATE,
                     PrometheusQueryType.LATENCY_P95,
-                    PrometheusQueryType.DOWNSTREAM_LATENCY_P95,
                     PrometheusQueryType.REQUEST_RATE,
                     PrometheusQueryType.MEMORY_USAGE,
                     PrometheusQueryType.CPU_USAGE,
                     PrometheusQueryType.RESTART_RATE
-            );
+            ));
+
+            // Topology-aware filtering: leaf nodes skip downstream latency query
+            // (no real downstream calls exist, and the metric double-counts self-latency)
+            if (topology != null && topology.isLeaf(service)) {
+                log.debug("Service {} is a leaf node, skipping DOWNSTREAM_LATENCY_P95 query", service);
+            } else {
+                queryTypes.add(PrometheusQueryType.DOWNSTREAM_LATENCY_P95);
+            }
 
             PrometheusEvidenceProvider provider;
             String readerName;

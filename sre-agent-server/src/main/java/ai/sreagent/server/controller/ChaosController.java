@@ -4,8 +4,6 @@ import ai.sreagent.server.demo.DemoServiceClient;
 import ai.sreagent.server.demo.DemoServiceConfig;
 import ai.sreagent.server.demo.DemoServiceStatus;
 import ai.sreagent.server.demo.DemoServicesStatusResponse;
-import ai.sreagent.server.incident.IncidentService;
-import ai.sreagent.server.incident.IncidentRcaResultView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -34,14 +32,12 @@ public class ChaosController {
     private static final Logger log = LoggerFactory.getLogger(ChaosController.class);
 
     private final DemoServiceClient demoClient;
-    private final IncidentService incidentService;
 
     // In-memory experiment tracking (simple, no persistence needed for demo)
     private final Map<String, ChaosExperimentState> experiments = new LinkedHashMap<>();
 
-    public ChaosController(DemoServiceClient demoClient, IncidentService incidentService) {
+    public ChaosController(DemoServiceClient demoClient) {
         this.demoClient = demoClient;
-        this.incidentService = incidentService;
     }
 
     /**
@@ -51,6 +47,7 @@ public class ChaosController {
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getStatus() {
         try {
+            expireCompletedExperiments();
             DemoServicesStatusResponse status = demoClient.checkAllServices();
 
             List<Map<String, Object>> serviceStatuses = status.services().stream()
@@ -102,6 +99,7 @@ public class ChaosController {
     @PostMapping("/start")
     public ResponseEntity<Map<String, Object>> startExperiment(@RequestBody Map<String, Object> body) {
         try {
+            expireCompletedExperiments();
             String targetService = (String) body.get("targetService");
             String faultType = (String) body.get("faultType");
 
@@ -171,9 +169,8 @@ public class ChaosController {
                     ? ((Number) body.get("rps")).intValue() : 2;
             int durationSeconds = body.containsKey("durationSeconds") && body.get("durationSeconds") != null
                     ? ((Number) body.get("durationSeconds")).intValue() : 300;
-            int trafficCount = Math.max(rps, 2);
-            int successes = demoClient.generateTraffic(trafficCount);
-            log.info("Generated {} checkout requests: {}/{} succeeded", trafficCount, successes, trafficCount);
+            demoClient.generateTrafficAsync(rps, durationSeconds);
+            log.info("Started background checkout traffic: rps={}, durationSeconds={}", rps, durationSeconds);
 
             // Track experiment state
             String experimentName = body.containsKey("experimentName")
@@ -192,26 +189,6 @@ public class ChaosController {
             );
             experiments.put(targetService, state);
 
-            // Generate RCA incident ID upfront for frontend polling
-            String rcaIncidentId = "inc-chaos-" + targetService + "-" + System.currentTimeMillis();
-
-            // Trigger RCA in background thread (don't block the response)
-            String namespace = body.containsKey("namespace") ? (String) body.get("namespace") : "demo";
-            String severity = body.containsKey("severity") ? (String) body.get("severity") : "warning";
-            new Thread(() -> {
-                try {
-                    log.info("Chaos RCA background thread starting for incidentId={}", rcaIncidentId);
-                    IncidentRcaResultView rcaResult = incidentService.triggerRcaDirect(
-                            rcaIncidentId, targetService, faultType, experimentName, namespace, severity);
-                    log.info("Chaos RCA completed: incidentId={}, decision={}, confidence={}",
-                            rcaIncidentId,
-                            rcaResult.decisionType(),
-                            String.format("%.2f", rcaResult.confidenceScore()));
-                } catch (Exception e) {
-                    log.error("Chaos RCA background thread failed: incidentId={}", rcaIncidentId, e);
-                }
-            }, "chaos-rca-" + rcaIncidentId).start();
-
             // Re-check status
             DemoServicesStatusResponse status = demoClient.checkAllServices();
 
@@ -222,11 +199,8 @@ public class ChaosController {
             result.put("startedAt", state.startedAt.toString());
             result.put("expectedEndAt", state.expectedEndAt.toString());
             result.put("remainingSeconds", durationSeconds);
-            result.put("message", "故障已注入 " + targetService + "（" + faultType + "），RCA 分析已自动启动");
+            result.put("message", "故障已注入 " + targetService + "（" + faultType + "），IncidentDetector 正在持续监测中");
             result.put("experiment", expToMap(state));
-            result.put("rcaIncidentId", rcaIncidentId);
-            result.put("rcaStatus", "RUNNING");
-            result.put("hint", "RCA 正在后台分析中，可通过 incidentId=" + rcaIncidentId + " 查询结果");
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
@@ -352,5 +326,27 @@ public class ChaosController {
         long remaining = exp.expectedEndAt.getEpochSecond() - Instant.now().getEpochSecond();
         m.put("remainingSeconds", exp.active ? Math.max(0, remaining) : 0);
         return m;
+    }
+
+    private void expireCompletedExperiments() {
+        Instant now = Instant.now();
+        experiments.forEach((service, exp) -> {
+            if (exp.active && !exp.expectedEndAt.isAfter(now)) {
+                Map<String, Object> normalConfig = Map.of(
+                        "mode", "normal",
+                        "latencyMs", 0,
+                        "errorRate", 0.0,
+                        "timeoutRate", 0.0
+                );
+                try {
+                    demoClient.setNamedServiceFaultConfig(service, normalConfig);
+                    exp.active = false;
+                    exp.stoppedAt = now;
+                    log.info("Auto-expired chaos experiment on {}", service);
+                } catch (Exception e) {
+                    log.warn("Failed to auto-expire chaos experiment on {}: {}", service, e.getMessage());
+                }
+            }
+        });
     }
 }

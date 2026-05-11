@@ -52,6 +52,12 @@ public class ConfidenceScorer {
     /** Penalty per missing core evidence type */
     private static final double MISSING_PENALTY_PER_ITEM = 0.03;
 
+    /** Reduced penalty when the owning provider is observable-blind. */
+    private static final double BLIND_PROVIDER_MISSING_PENALTY_PER_ITEM = 0.01;
+
+    /** Score ceiling when most observability providers are blind. */
+    private static final double DEGRADED_CONFIDENCE_CAP = 0.50;
+
     /** Penalty per contradiction */
     private static final double CONTRADICTION_PENALTY = 0.05;
 
@@ -59,6 +65,7 @@ public class ConfidenceScorer {
     private static final double CORROBORATING_BONUS_CAP = 0.10;
 
     private static final Set<String> PROVIDER_ALIAS_PREFIXES = Set.of("metric_", "log_", "trace_");
+    private static final List<String> OBSERVABILITY_PROVIDERS = List.of("metric", "log", "trace");
 
     /**
      * Provider alias → core evidence type normalization map.
@@ -98,7 +105,7 @@ public class ConfidenceScorer {
 
     /**
      * Score a single hypothesis given its verification result, pattern, and evidence.
-     * Uses TemporalAlignmentResult.UNKNOWN for backward compatibility.
+     * Uses TemporalAlignmentResult.UNKNOWN and TopologyEdge.NONE for backward compatibility.
      */
     public ConfidenceResult score(
             Hypothesis hypothesis,
@@ -106,11 +113,13 @@ public class ConfidenceScorer {
             VerificationResult verification,
             List<Evidence> evidence
     ) {
-        return score(hypothesis, pattern, verification, evidence, TemporalAlignmentResult.UNKNOWN);
+        return score(hypothesis, pattern, verification, evidence,
+                TemporalAlignmentResult.UNKNOWN, resolveTopologyEdge(hypothesis, pattern, evidence));
     }
 
     /**
      * Score a single hypothesis with temporal alignment result.
+     * Uses TopologyEdge.NONE for backward compatibility.
      */
     public ConfidenceResult score(
             Hypothesis hypothesis,
@@ -118,6 +127,21 @@ public class ConfidenceScorer {
             VerificationResult verification,
             List<Evidence> evidence,
             TemporalAlignmentResult temporalResult
+    ) {
+        return score(hypothesis, pattern, verification, evidence, temporalResult,
+                resolveTopologyEdge(hypothesis, pattern, evidence));
+    }
+
+    /**
+     * Score a single hypothesis with temporal alignment and topology edge.
+     */
+    public ConfidenceResult score(
+            Hypothesis hypothesis,
+            DiagnosticPattern pattern,
+            VerificationResult verification,
+            List<Evidence> evidence,
+            TemporalAlignmentResult temporalResult,
+            TopologyEdge topologyEdge
     ) {
         Map<String, Double> weights = pattern.confidenceWeights();
 
@@ -239,17 +263,24 @@ public class ConfidenceScorer {
             weightedCounterCoverage /= totalCounterWeight;
         }
 
-        // Missing evidence penalty
-        long missingTypeCount = verification.missingEvidence().stream()
+        ProviderHealth providerHealth = assessProviderHealth(evidence);
+
+        // Missing evidence penalty. Provider-blind missing evidence is not equivalent
+        // to confirmed absence, so it receives a lower penalty.
+        List<String> missingTypes = verification.missingEvidence().stream()
                 .filter(m -> m.startsWith("Missing expected evidence type: "))
-                .count();
-        double missingPenalty = missingTypeCount * MISSING_PENALTY_PER_ITEM;
+                .map(m -> m.substring("Missing expected evidence type: ".length()))
+                .toList();
+        double missingPenalty = missingTypes.stream()
+                .mapToDouble(type -> missingPenaltyFor(type, providerHealth))
+                .sum();
 
         // Contradiction penalty
         double contradictionPenalty = verification.contradictions().size() * CONTRADICTION_PENALTY;
 
         // Final score calculation
         double temporalScore = temporalResult != null ? temporalResult.score() : 0.0;
+
         double rawScore = pattern.baseScore()
                 + weightedSupportingCoverage * SUPPORTING_BONUS_CAP
                 + weightedCorroboratingCoverage * CORROBORATING_BONUS_CAP
@@ -258,7 +289,10 @@ public class ConfidenceScorer {
                 - contradictionPenalty
                 + temporalScore;
 
-        double score = Math.round(Math.max(0.0, Math.min(1.0, rawScore)) * 100.0) / 100.0;
+        double cappedScore = providerHealth.blindProviders().size() >= 2
+                ? Math.min(rawScore, DEGRADED_CONFIDENCE_CAP)
+                : rawScore;
+        double score = Math.round(Math.max(0.0, Math.min(1.0, cappedScore)) * 100.0) / 100.0;
 
         String level = mapLevel(score);
         String decision = mapDecision(score);
@@ -277,7 +311,210 @@ public class ConfidenceScorer {
                 temporalResult != null ? temporalResult.confidence().name() : "UNKNOWN",
                 temporalResult != null ? temporalResult.candidateFirstSeen() : null,
                 temporalResult != null ? temporalResult.impactedFirstSeen() : null,
-                temporalResult != null ? temporalResult.explanation() : ""
+                temporalResult != null ? temporalResult.explanation() : "",
+                topologyEdge,
+                providerHealth.diagnosticQuality(),
+                providerHealth.blindProviders()
+        );
+    }
+
+    private ProviderHealth assessProviderHealth(List<Evidence> evidence) {
+        Set<String> providersWithNoSignal = new LinkedHashSet<>();
+        Set<String> activeProviders = new LinkedHashSet<>();
+
+        for (Evidence item : evidence) {
+            String type = item.evidenceType();
+            String provider = providerForEvidenceType(type);
+            if (provider == null) {
+                continue;
+            }
+            if (type.endsWith("_no_signal")) {
+                providersWithNoSignal.add(provider);
+            } else {
+                activeProviders.add(provider);
+            }
+        }
+
+        List<String> blindProviders = OBSERVABILITY_PROVIDERS.stream()
+                .filter(p -> providersWithNoSignal.contains(p) && !activeProviders.contains(p))
+                .toList();
+        String quality = blindProviders.isEmpty()
+                ? "FULL"
+                : blindProviders.size() >= 2 ? "SEVERELY_DEGRADED" : "DEGRADED";
+        return new ProviderHealth(Set.copyOf(activeProviders), List.copyOf(blindProviders), quality);
+    }
+
+    private double missingPenaltyFor(String coreType, ProviderHealth providerHealth) {
+        Set<String> candidateProviders = providersForCoreType(coreType);
+        if (candidateProviders.isEmpty()) {
+            return MISSING_PENALTY_PER_ITEM;
+        }
+        if (candidateProviders.stream().anyMatch(providerHealth.activeProviders()::contains)) {
+            return MISSING_PENALTY_PER_ITEM;
+        }
+        if (candidateProviders.stream().allMatch(providerHealth.blindProviders()::contains)) {
+            return 0.0;
+        }
+        if (candidateProviders.stream().anyMatch(providerHealth.blindProviders()::contains)) {
+            return BLIND_PROVIDER_MISSING_PENALTY_PER_ITEM;
+        }
+        return MISSING_PENALTY_PER_ITEM;
+    }
+
+    private Set<String> providersForCoreType(String coreType) {
+        return ALIAS_TO_CORE.entrySet().stream()
+                .filter(e -> e.getValue().equals(coreType))
+                .map(e -> providerForEvidenceType(e.getKey()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private static String providerForEvidenceType(String type) {
+        if (type == null) return null;
+        if (type.startsWith("metric_")) return "metric";
+        if (type.startsWith("log_")) return "log";
+        if (type.startsWith("trace_")) return "trace";
+        return null;
+    }
+
+    private record ProviderHealth(
+            Set<String> activeProviders,
+            List<String> blindProviders,
+            String diagnosticQuality
+    ) {}
+
+    /**
+     * Resolve a TopologyEdge from available topology evidence.
+     *
+     * <p>Topology source → confidence mapping:</p>
+     * <ul>
+     *   <li>TRACE evidence (trace_dependency_path) → HIGH</li>
+     *   <li>OBSERVED_DEPENDENCY (downstream latency/log correlation) → MEDIUM</li>
+     *   <li>CONFIGURED_TOPOLOGY (service_dependency_match from static config) → MEDIUM</li>
+     *   <li>STATIC_FALLBACK (heuristic inference) → LOW</li>
+     * </ul>
+     *
+     * <p>When no topology evidence is found, returns TopologyEdge.NONE.</p>
+     */
+    private TopologyEdge resolveTopologyEdge(
+            Hypothesis hypothesis,
+            DiagnosticPattern pattern,
+            List<Evidence> evidence
+    ) {
+        // Look for trace-derived dependency path (highest confidence)
+        var traceDepEvidence = evidence.stream()
+                .filter(e -> "trace_dependency_path".equals(e.evidenceType()))
+                .findFirst();
+
+        if (traceDepEvidence.isPresent()) {
+            Evidence e = traceDepEvidence.get();
+            return buildEdge(
+                    e.service(), extractToService(e), TopologyEdgeSource.TRACE,
+                    PropagationDirection.UPSTREAM_TO_DOWNSTREAM, 1,
+                    "从 trace evidence 推断：" + e.service() + " → " + extractToService(e)
+                            + "（span parent-child 关系）"
+            );
+        }
+
+        // Look for static topology evidence (service_dependency_match)
+        var staticTopoEvidence = evidence.stream()
+                .filter(e -> "service_dependency_match".equals(e.evidenceType()))
+                .findFirst();
+
+        if (staticTopoEvidence.isPresent()) {
+            Evidence e = staticTopoEvidence.get();
+            String src = e.source() != null ? e.source().toLowerCase() : "static";
+            TopologyEdgeSource edgeSrc = switch (src) {
+                case "trace" -> TopologyEdgeSource.TRACE;
+                case "metric", "log", "prometheus", "loki" -> TopologyEdgeSource.OBSERVED_DEPENDENCY;
+                case "k8s", "kubernetes", "config" -> TopologyEdgeSource.CONFIGURED_TOPOLOGY;
+                default -> TopologyEdgeSource.STATIC_FALLBACK;
+            };
+            return buildEdge(
+                    e.service(), extractToService(e), edgeSrc,
+                    PropagationDirection.UPSTREAM_TO_DOWNSTREAM, 1,
+                    "从 " + src + " 证据推断：" + e.service() + " → " + extractToService(e)
+                            + "（" + e.content() + "）"
+            );
+        }
+
+        // Check for observed dependency signals (downstream latency/timeout patterns)
+        boolean hasDownstreamSignal = evidence.stream()
+                .anyMatch(e -> {
+                    String t = normalizeEvidenceType(e.evidenceType());
+                    return "downstream_latency_spike".equals(t)
+                            || "dependency_timeout_logs".equals(t);
+                });
+
+        if (hasDownstreamSignal) {
+            String affectedService = hypothesis.affectedService();
+            // Try to infer downstream service from evidence content
+            String downstreamService = evidence.stream()
+                    .filter(e -> {
+                        String t = normalizeEvidenceType(e.evidenceType());
+                        return "downstream_latency_spike".equals(t)
+                                || "dependency_timeout_logs".equals(t);
+                    })
+                    .findFirst()
+                    .map(this::extractToService)
+                    .orElse("unknown-downstream");
+            return buildEdge(
+                    affectedService, downstreamService,
+                    TopologyEdgeSource.OBSERVED_DEPENDENCY,
+                    PropagationDirection.DOWNSTREAM_TO_UPSTREAM_IMPACT, 1,
+                    "从 observed dependency 信号推断：" + affectedService + " → " + downstreamService
+                            + "（下游延迟/超时证据）"
+            );
+        }
+
+        return TopologyEdge.NONE;
+    }
+
+    /**
+     * Attempt to extract the downstream/to service name from evidence content.
+     * Heuristic: looks for "→ service" or "dependency" patterns.
+     */
+    private String extractToService(Evidence evidence) {
+        String content = evidence.content();
+        if (content == null) return "unknown";
+
+        // Try "X → Y" pattern
+        int arrowIdx = content.indexOf("→");
+        if (arrowIdx >= 0) {
+            String after = content.substring(arrowIdx + 1).trim();
+            // Take first word as service name
+            int spaceIdx = after.indexOf(" ");
+            if (spaceIdx >= 0) {
+                return after.substring(0, spaceIdx).replaceAll("[^a-zA-Z0-9_-]", "");
+            }
+            return after.replaceAll("[^a-zA-Z0-9_-]", "");
+        }
+
+        // Try to find service name from evidence.service that differs from the source
+        if (!evidence.service().equals("unknown") && !evidence.service().isEmpty()) {
+            return evidence.service();
+        }
+
+        // Fallback: try "payment-service" pattern in content
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("([a-z]+-service)")
+                .matcher(content);
+        if (m.find()) {
+            return m.group(1);
+        }
+
+        return "unknown";
+    }
+
+    private TopologyEdge buildEdge(
+            String fromService, String toService,
+            TopologyEdgeSource source, PropagationDirection direction,
+            int pathLength, String explanation
+    ) {
+        return new TopologyEdge(
+                fromService, toService, source,
+                TopologyEdge.deriveConfidence(source), direction,
+                pathLength, explanation
         );
     }
 

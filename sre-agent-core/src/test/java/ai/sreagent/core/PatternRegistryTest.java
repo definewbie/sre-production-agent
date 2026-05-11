@@ -17,12 +17,13 @@ class PatternRegistryTest {
     void defaultRegistryHasAllPatterns() {
         PatternRegistry registry = BuiltinPatterns.defaultRegistry();
 
-        assertThat(registry.size()).isEqualTo(4);
+        assertThat(registry.size()).isEqualTo(5);
         assertThat(registry.patternIds()).containsExactlyInAnyOrder(
                 "deployment_regression",
                 "downstream_dependency_latency",
                 "pod_oom_killed",
-                "pod_crash_loop"
+                "pod_crash_loop",
+                "service_internal_error"
         );
     }
 

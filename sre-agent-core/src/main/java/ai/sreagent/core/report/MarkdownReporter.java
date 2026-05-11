@@ -67,6 +67,21 @@ public class MarkdownReporter {
                         hypothesisTitleZh(c.hypothesisId()), c.score(), levelZh(c.level()), decisionZh(c.decision()))));
         sb.append("\n");
 
+        // Observability quality
+        sb.append("## 可观测性质量\n\n");
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            List<String> blindProviders = c.providerBlindness();
+            sb.append("- ").append(hypothesisTitleZh(c.hypothesisId()))
+                    .append(": ").append(c.diagnosticQuality() != null ? c.diagnosticQuality() : "FULL");
+            if (blindProviders != null && !blindProviders.isEmpty()) {
+                sb.append("（blind providers: ").append(String.join(", ", blindProviders)).append("）");
+            }
+            sb.append("\n");
+        }
+        sb.append("\n");
+
         // ── V.2-RCA-1A.3: Temporal Alignment Analysis ──
         sb.append("## 时间对齐分析\n\n");
         sb.append("Temporal alignment 评估证据时间戳是否支持各假设的因果顺序")
@@ -119,6 +134,42 @@ public class MarkdownReporter {
             sb.append("- **Temporal 说明**: ")
                     .append(explanation != null && !explanation.isEmpty() ? explanation : "N/A（无 temporal alignment 数据）")
                     .append("\n\n");
+        }
+
+        // ── V.2-RCA-1A.4: Topology Edge Analysis ──
+        sb.append("## 拓扑分析\n\n");
+        sb.append("Topology edge 描述候选假设中涉及的**服务间调用/依赖关系**及其发现方式。\n\n");
+        sb.append("| 假设 | Edge Source | Edge Confidence | Direction | Path Length | 说明 |\n");
+        sb.append("|---|---|---|---|---:|---|\n");
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            TopologyEdge edge = c.topologyEdge();
+            if (edge != null && edge.isPresent()) {
+                sb.append(String.format("| %s | %s | %s | %s | %d | %s |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        topologyEdgeSourceZh(edge.edgeSource()),
+                        topologyEdgeConfidenceZh(edge.edgeConfidence()),
+                        propagationDirectionZh(edge.direction()),
+                        edge.pathLength(),
+                        edge.explanation() != null ? edge.explanation() : "—"));
+            } else {
+                sb.append(String.format("| %s | — | — | — | — | ⚠️ 无拓扑证据：无法确认服务间依赖关系 |\n",
+                        hypothesisTitleZh(c.hypothesisId())));
+            }
+        }
+        sb.append("\n");
+
+        boolean hasTopology = confidenceResults.stream()
+                .anyMatch(c -> {
+                    TopologyEdge e = c.topologyEdge();
+                    return e != null && e.isPresent();
+                });
+
+        if (!hasTopology) {
+            sb.append("> ⚠️ **NO-TOPOLOGY GUARDRAIL**：所有假设均缺少拓扑证据。\n");
+            sb.append("> 在没有拓扑信息支持的情况下，仅凭 temporal alignment 不能将假设判定为\n");
+            sb.append("> `likely_root_cause` 或 `probable_root_cause`。需要补充服务依赖关系证据后才可信赖。\n\n");
         }
 
         // Leading Hypothesis
@@ -267,6 +318,31 @@ public class MarkdownReporter {
             case "LOW" -> "低";
             case "UNKNOWN" -> "未知";
             default -> confidence != null ? confidence : "未知";
+        };
+    }
+
+    private String topologyEdgeSourceZh(TopologyEdgeSource source) {
+        return switch (source) {
+            case TRACE -> "追踪";
+            case OBSERVED_DEPENDENCY -> "观测依赖";
+            case CONFIGURED_TOPOLOGY -> "配置拓扑";
+            case STATIC_FALLBACK -> "静态回退";
+        };
+    }
+
+    private String topologyEdgeConfidenceZh(TopologyEdgeConfidence confidence) {
+        return switch (confidence) {
+            case HIGH -> "🔴 高";
+            case MEDIUM -> "🟡 中";
+            case LOW -> "⚪ 低";
+        };
+    }
+
+    private String propagationDirectionZh(PropagationDirection direction) {
+        return switch (direction) {
+            case UPSTREAM_TO_DOWNSTREAM -> "上游→下游";
+            case DOWNSTREAM_TO_UPSTREAM_IMPACT -> "下游影响上游";
+            case UNKNOWN -> "未知";
         };
     }
 }

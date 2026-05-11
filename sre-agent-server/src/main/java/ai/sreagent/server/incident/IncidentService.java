@@ -16,6 +16,7 @@ import ai.sreagent.core.workflow.InvestigationResult;
 import ai.sreagent.core.workflow.InvestigationWorkflow;
 import ai.sreagent.server.live.LiveEvidenceCollector;
 import ai.sreagent.server.live.LiveEvidenceReport;
+import ai.sreagent.server.topology.TopologyProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -46,11 +47,13 @@ public class IncidentService {
     private final String prometheusUrl;
     private final String lokiUrl;
     private final String jaegerUrl;
+    private final TopologyProvider topologyProvider;
 
     /** In-memory store for incident records (alert-driven RCA results). */
     private final ConcurrentHashMap<String, IncidentRecord> incidentStore = new ConcurrentHashMap<>();
 
-    public IncidentService(Environment env) {
+    public IncidentService(Environment env, TopologyProvider topologyProvider) {
+        this.topologyProvider = topologyProvider;
         String alertmanagerUrl = env.getProperty(
                 "sre-agent.observability.alertmanager-url", "http://localhost:9093");
         this.alertClient = new HttpAlertmanagerClient(AlertmanagerClientConfig.of(alertmanagerUrl));
@@ -159,6 +162,7 @@ public class IncidentService {
 
             LiveEvidenceCollector liveCollector = new LiveEvidenceCollector(
                     prometheusUrl, lokiUrl, jaegerUrl, false);
+            liveCollector.setTopology(topologyProvider.getTopology());
             LiveEvidenceReport liveReport = liveCollector.collect(service, namespace, lookback,
                     alert.startsAt());
 
@@ -171,6 +175,9 @@ public class IncidentService {
 
             log.info("Evidence collected: {} from live sources, {} from alertmanager, total={}",
                     liveReport.totalEvidenceCount(), alertEvidence.size(), allEvidence.size());
+
+            // Bug #4: Liveness probe failure reclassification
+            addLivenessProbeFailureEvidence(allEvidence, null, incidentId, service, namespace);
 
             // 6. Run RCA
             InvestigationResult rcaResult = workflow.runFromMemory(incidentTask, allEvidence);
@@ -241,10 +248,27 @@ public class IncidentService {
 
             LiveEvidenceCollector liveCollector = new LiveEvidenceCollector(
                     prometheusUrl, lokiUrl, jaegerUrl, false);
+            liveCollector.setTopology(topologyProvider.getTopology());
+
+            // Collect evidence from the primary affected service
             LiveEvidenceReport liveReport = liveCollector.collect(service, ns, lookback,
                     incidentTask.startedAt());
-
             List<Evidence> allEvidence = new ArrayList<>(liveReport.allEvidence());
+
+            // Also collect from services affected by this failure
+            // (chain-aware evidence aggregation — captures blast radius)
+            Set<String> affectedNodes = topologyProvider.getTopology().findAffectedNodes(service);
+            for (String node : affectedNodes) {
+                if (node.equals(service)) continue; // Already collected
+                try {
+                    LiveEvidenceReport nodeReport = liveCollector.collect(
+                            node, ns, lookback, incidentTask.startedAt());
+                    allEvidence.addAll(nodeReport.allEvidence());
+                    log.info("Chain evidence from {}: {} items", node, nodeReport.totalEvidenceCount());
+                } catch (Exception e) {
+                    log.warn("Failed to collect chain evidence from {}: {}", node, e.getMessage());
+                }
+            }
 
             // Also collect Alertmanager evidence (might have alerts from chaos)
             try {
@@ -259,6 +283,11 @@ public class IncidentService {
 
             log.info("Chaos RCA evidence collected: {} items from live sources, total={}",
                     liveReport.totalEvidenceCount(), allEvidence.size());
+
+            // Bug #4: Liveness probe failure reclassification
+            // When latency fault + restart evidence coexist, the pod restart is
+            // likely caused by K8s liveness probe timeout, not application crash.
+            addLivenessProbeFailureEvidence(allEvidence, faultType, incidentId, service, ns);
 
             // Run RCA
             InvestigationResult rcaResult = workflow.runFromMemory(incidentTask, allEvidence);
@@ -355,6 +384,49 @@ public class IncidentService {
                     .findFirst();
         }
         return Optional.empty();
+    }
+
+    /**
+     * Bug #4: If latency fault coexists with restart evidence, the pod restart is
+     * likely caused by K8s liveness probe timeout, not a real application crash.
+     * Adds a synthetic {@code liveness_probe_failure} evidence item so that the
+     * {@code liveness_probe_timeout} pattern can rank above {@code pod_crash_loop}.
+     */
+    private void addLivenessProbeFailureEvidence(List<Evidence> allEvidence, String faultType,
+                                                  String incidentId, String service, String ns) {
+        // Check if latency context exists (from fault config or labels)
+        boolean hasLatencyContext = "latency".equalsIgnoreCase(faultType);
+        if (!hasLatencyContext) {
+            // Also check evidence for latency spike (alert-driven path lacks faultType)
+            hasLatencyContext = allEvidence.stream()
+                    .anyMatch(e -> "metric_latency_p95_spike".equals(e.evidenceType()));
+        }
+        if (!hasLatencyContext) return;
+
+        // Check if restart evidence exists
+        boolean hasRestartEvidence = allEvidence.stream()
+                .anyMatch(e -> "metric_restart_rate_increased".equals(e.evidenceType())
+                        || "pod_restart_count_increased".equals(e.evidenceType()));
+        if (!hasRestartEvidence) return;
+
+        // Already has liveness_probe_failure? skip duplicate
+        boolean alreadyHasLiveness = allEvidence.stream()
+                .anyMatch(e -> "liveness_probe_failure".equals(e.evidenceType()));
+        if (alreadyHasLiveness) return;
+
+        Evidence livenessEvidence = new Evidence(
+                "ev-liveness-" + incidentId.substring(0, 8),
+                incidentId,
+                "kubernetes",
+                "liveness_probe_failure",
+                service,
+                Instant.now(),
+                "Pod restarted due to liveness probe timeout — latency spike caused probe to fail, not an application crash",
+                Map.of("reason", "LivenessProbeTimeout", "faultType", faultType != null ? faultType : "unknown"),
+                0.75
+        );
+        allEvidence.add(livenessEvidence);
+        log.info("Bug #4: Added liveness_probe_failure evidence — restarts likely probe-induced, not crash-loop");
     }
 
     /**

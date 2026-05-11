@@ -15,6 +15,7 @@ public enum EvidenceSignal {
     CRASH_LOOP,
     OOM,
     RESTART,
+    LIVENESS_PROBE_FAILURE,
     POD_NOT_READY,
     MEMORY_PRESSURE,
     CPU_PRESSURE,

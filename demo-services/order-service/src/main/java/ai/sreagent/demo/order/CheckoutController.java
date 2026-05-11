@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,8 +26,10 @@ public class CheckoutController {
     private final String inventoryUrl;
     private final int timeoutMs;
     private final HttpClient httpClient;
+    private final FaultConfigController faultConfigController;
 
-    public CheckoutController() {
+    public CheckoutController(FaultConfigController faultConfigController) {
+        this.faultConfigController = faultConfigController;
         this.paymentUrl = env("PAYMENT_URL", "http://localhost:8082");
         this.inventoryUrl = env("INVENTORY_URL", "http://localhost:8083");
         this.timeoutMs = Integer.parseInt(env("ORDER_TIMEOUT_MS", "1000"));
@@ -40,6 +43,41 @@ public class CheckoutController {
         Instant start = Instant.now();
         String orderId = "ORD-" + System.currentTimeMillis();
         log.info("[order] [checkout] orderId={} started", orderId);
+
+        // Self fault injection: make order-service faults observable directly.
+        FaultConfig fault = faultConfigController.getCurrent();
+        if (fault.latencyMs() > 0 && ("latency".equals(fault.mode()) || "mixed".equals(fault.mode()))) {
+            try {
+                log.info("[order] [checkout] injected-latency orderId={} latencyMs={}", orderId, fault.latencyMs());
+                Thread.sleep(fault.latencyMs());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("[order] [checkout] interrupted during injected-latency orderId={}", orderId);
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(errorBody(orderId, "order", 500, "interrupted during injected latency"));
+            }
+        }
+        if ("timeout".equals(fault.mode()) || shouldTrigger(fault.timeoutRate())) {
+            try {
+                int sleepMs = Math.max(fault.latencyMs(), timeoutMs + 500);
+                log.error("[order] [checkout] injected-timeout orderId={} sleepMs={} timeoutRate={}",
+                        orderId, sleepMs, fault.timeoutRate());
+                Thread.sleep(sleepMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("[order] [checkout] interrupted during injected-timeout orderId={}", orderId);
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(errorBody(orderId, "order", 500, "interrupted during injected timeout"));
+            }
+            return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
+                    .body(errorBody(orderId, "order", 504, "injected timeout: checkout exceeded deadline"));
+        }
+        if ("error".equals(fault.mode()) && shouldTrigger(fault.errorRate())) {
+            log.error("[order] [checkout] injected-error checkout failed, orderId={} faultMode=error errorRate={}",
+                    orderId, fault.errorRate());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorBody(orderId, "order", 500, "injected error: checkout failed"));
+        }
 
         // Call payment-service /charge
         Map<String, Object> paymentResult;
@@ -120,5 +158,9 @@ public class CheckoutController {
     private static String env(String key, String def) {
         String val = System.getenv(key);
         return val != null ? val : def;
+    }
+
+    private static boolean shouldTrigger(double rate) {
+        return rate > 0.0 && ThreadLocalRandom.current().nextDouble() < rate;
     }
 }

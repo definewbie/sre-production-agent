@@ -71,7 +71,7 @@ class LokiQueryTemplateRegistryTest {
             LokiQueryTemplate template = registry.getTemplate(LokiQueryType.EXCEPTION_LOGS).orElseThrow();
             String query = template.buildQuery("order-service", "demo");
 
-            assertThat(query).contains("Exception|ERROR");
+            assertThat(query).contains("(?i)exception|error");
         }
     }
 

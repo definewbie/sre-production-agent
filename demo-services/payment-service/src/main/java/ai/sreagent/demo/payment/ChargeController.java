@@ -38,7 +38,7 @@ public class ChargeController {
                 }
                 case "error" -> {
                     if (ThreadLocalRandom.current().nextDouble() < config.errorRate()) {
-                        log.warn("[payment] [charge] txnId={} injected-error errorRate={}", txnId, config.errorRate());
+                        log.error("[payment] [charge] txnId={} injected-error errorRate={}", txnId, config.errorRate());
                         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                                 .body(errorBody(txnId, "injected error", mode));
                     }
@@ -53,7 +53,7 @@ public class ChargeController {
                         Thread.sleep(config.latencyMs());
                     }
                     if (ThreadLocalRandom.current().nextDouble() < config.errorRate()) {
-                        log.warn("[payment] [charge] txnId={} injected-error errorRate={}", txnId, config.errorRate());
+                        log.error("[payment] [charge] txnId={} injected-error errorRate={}", txnId, config.errorRate());
                         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                                 .body(errorBody(txnId, "injected error (mixed)", mode));
                     }
@@ -68,7 +68,7 @@ public class ChargeController {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.warn("[payment] [charge] txnId={} interrupted", txnId);
+            log.error("[payment] [charge] txnId={} interrupted", txnId);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(errorBody(txnId, "interrupted", mode));
         }

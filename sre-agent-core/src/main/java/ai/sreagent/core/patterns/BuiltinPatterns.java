@@ -88,6 +88,69 @@ public final class BuiltinPatterns {
         );
     }
 
+    /**
+     * Service internal error — application returns 5xx without external trigger.
+     * Distinguishes from deployment_regression (has deploy event) and
+     * capacity_saturation (has CPU/memory pressure) via counter evidence.
+     */
+    public static DiagnosticPattern serviceInternalError() {
+        return new DiagnosticPattern(
+            "service_internal_error",
+            "应用内部错误导致5xx响应（无部署、无下游故障、无资源压力）",
+            List.of(
+                "错误率飙升（5xx/4xx）",
+                "无近期部署事件",
+                "无下游依赖异常",
+                "CPU/内存无显著压力"
+            ),
+            List.of(
+                // Core error evidence
+                "error_rate_spike_after_deploy",
+                "exception_logs_present",
+                "http_5xx_logs_present",
+                "error_traces_present",
+                // Provider aliases
+                "metric_error_rate_spike",
+                "log_exception_spike",
+                "log_http_5xx",
+                "trace_error_span"
+            ),
+            List.of(
+                // Counter — distinguishes deployment_regression, downstream, resource pressure
+                "deploy_event_near_alert_window",
+                "downstream_latency_spike",
+                "memory_usage_near_limit",
+                "cpu_usage_high",
+                // Provider aliases for counter
+                "metric_downstream_latency_spike",
+                "metric_memory_usage_high",
+                "metric_cpu_usage_high"
+            ),
+            Map.ofEntries(
+                // Core weights (supporting) — 4 core types, total 0.52
+                entry("error_rate_spike_after_deploy", 0.18),
+                entry("exception_logs_present", 0.14),
+                entry("http_5xx_logs_present", 0.10),
+                entry("error_traces_present", 0.10),
+                // Counter weights — higher = stronger refutation
+                entry("deploy_event_near_alert_window", 0.35),
+                entry("downstream_latency_spike", 0.25),
+                entry("memory_usage_near_limit", 0.20),
+                entry("cpu_usage_high", 0.20),
+                // Provider alias weights (supporting)
+                entry("metric_error_rate_spike", 0.10),
+                entry("log_exception_spike", 0.08),
+                entry("log_http_5xx", 0.08),
+                entry("trace_error_span", 0.08),
+                // Provider alias weights (counter)
+                entry("metric_downstream_latency_spike", 0.12),
+                entry("metric_memory_usage_high", 0.10),
+                entry("metric_cpu_usage_high", 0.10)
+            ),
+            0.15, // baseScore
+            List.of() // no corroborating evidence
+        );
+    }
     public static DiagnosticPattern downstreamDependencyLatency() {
         return new DiagnosticPattern(
             "downstream_dependency_latency",
@@ -251,6 +314,7 @@ public final class BuiltinPatterns {
     public static PatternRegistry defaultRegistry() {
         PatternRegistry registry = new PatternRegistry();
         registry.register(deploymentRegression());
+        registry.register(serviceInternalError());
         registry.register(downstreamDependencyLatency());
         registry.register(podOomKilled());
         registry.register(podCrashLoop());

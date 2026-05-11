@@ -29,7 +29,7 @@ class ScenarioFApiTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.decisionType").value("probable_root_cause"))
                 .andExpect(jsonPath("$.selectedHypothesisId").value("hyp_pod_crash_loop"))
-                .andExpect(jsonPath("$.confidenceScore").value(equalTo(0.7)))
+                .andExpect(jsonPath("$.confidenceScore").value(equalTo(0.67)))
                 .andExpect(jsonPath("$.reportUrl").value(containsString("/report")))
                 .andExpect(jsonPath("$.traceUrl").value(containsString("/trace")));
     }

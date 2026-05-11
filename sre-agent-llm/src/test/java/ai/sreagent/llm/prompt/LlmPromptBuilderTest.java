@@ -74,7 +74,7 @@ class LlmPromptBuilderTest {
     @Test
     void userPromptContainsConstraints() {
         LlmRequest request = builder.build(createScenarioEResult());
-        assertThat(request.userPrompt()).contains("Do not infer missing K8s");
+        assertThat(request.userPrompt()).contains("不得推测缺失的 K8s");
     }
 
     private InvestigationResult createScenarioEResult() {

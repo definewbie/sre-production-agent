@@ -84,6 +84,7 @@ public final class EvidenceTaxonomyRegistry {
         register("downstream_5xx_absent",          EvidenceCategory.METRIC,     EvidenceSignal.HTTP_5XX,               EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("service_dependency_match",       EvidenceCategory.TOPOLOGY,   EvidenceSignal.SERVICE_DEPENDENCY,     EvidenceSourceKind.STATIC,     EvidenceCausalRole.TOPOLOGY_CONTEXT);
         register("kubernetes_event_oomkilled",     EvidenceCategory.KUBERNETES, EvidenceSignal.OOM,                    EvidenceSourceKind.KUBERNETES, EvidenceCausalRole.CAUSE_CANDIDATE);
+        register("liveness_probe_failure",          EvidenceCategory.KUBERNETES, EvidenceSignal.LIVENESS_PROBE_FAILURE,   EvidenceSourceKind.KUBERNETES, EvidenceCausalRole.CAUSE_CANDIDATE);
         register("memory_usage_near_limit",        EvidenceCategory.METRIC,     EvidenceSignal.MEMORY_PRESSURE,        EvidenceSourceKind.STATIC,     EvidenceCausalRole.SYMPTOM);
         register("no_restart_observed",            EvidenceCategory.KUBERNETES, EvidenceSignal.RESTART,                EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("memory_usage_normal",            EvidenceCategory.METRIC,     EvidenceSignal.MEMORY_PRESSURE,        EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);

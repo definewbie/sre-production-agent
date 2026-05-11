@@ -13,6 +13,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Client that communicates with demo microservices to check health,
@@ -145,27 +149,61 @@ public class DemoServiceClient {
 
     /**
      * Generate synthetic traffic by calling order-service checkout endpoint.
+     * Uses virtual threads (Java 21) for concurrent request dispatch.
      * This ensures Prometheus/Loki/Jaeger capture metrics under fault conditions.
      *
-     * @param requests number of checkout requests to send
+     * @param requests number of checkout requests to send concurrently
      * @return number of successful requests
      */
     public int generateTraffic(int requests) {
         String orderUrl = config.getOrderServiceUrl();
-        int success = 0;
-        for (int i = 0; i < requests; i++) {
-            try {
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(orderUrl + "/checkout"))
-                        .timeout(Duration.ofSeconds(15))
-                        .GET()
-                        .build();
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                success++;
-            } catch (Exception e) {
-                // Expected under fault conditions (timeouts, errors) — still counts as traffic
+        AtomicInteger success = new AtomicInteger(0);
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < requests; i++) {
+                executor.submit(() -> {
+                    try {
+                        HttpRequest request = HttpRequest.newBuilder()
+                                .uri(URI.create(orderUrl + "/checkout"))
+                                .timeout(Duration.ofSeconds(15))
+                                .GET()
+                                .build();
+                        httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                        success.incrementAndGet();
+                    } catch (Exception e) {
+                        // Expected under fault conditions — still counts as traffic
+                    }
+                });
             }
+            executor.shutdown();
+            // Wait up to 20s for all requests to complete (15s timeout + overhead)
+            if (!executor.awaitTermination(20, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
-        return success;
+        return success.get();
+    }
+
+    /**
+     * Start background checkout traffic for the requested duration.
+     * Returns immediately so the chaos API does not block for the full experiment.
+     */
+    public void generateTrafficAsync(int rps, int durationSeconds) {
+        int safeRps = Math.max(rps, 1);
+        int safeDuration = Math.max(durationSeconds, 1);
+        Thread.startVirtualThread(() -> {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(safeDuration);
+            while (System.nanoTime() < deadline) {
+                generateTraffic(safeRps);
+                try {
+                    Thread.sleep(1_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        });
     }
 }
