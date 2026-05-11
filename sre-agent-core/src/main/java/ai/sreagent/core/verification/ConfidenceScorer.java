@@ -616,6 +616,20 @@ public class ConfidenceScorer {
             List<Evidence> evidence,
             Map<String, TemporalAlignmentResult> temporalResults
     ) {
+        return scoreAll(hypotheses, patterns, verifications, evidence, temporalResults, Map.of());
+    }
+
+    /**
+     * Score all hypotheses in batch with temporal alignment and propagation paths.
+     */
+    public List<ConfidenceResult> scoreAll(
+            List<Hypothesis> hypotheses,
+            Map<String, DiagnosticPattern> patterns,
+            List<VerificationResult> verifications,
+            List<Evidence> evidence,
+            Map<String, TemporalAlignmentResult> temporalResults,
+            Map<String, PropagationPath> propagationPaths
+    ) {
         Map<String, VerificationResult> verByHyp = new LinkedHashMap<>();
         for (VerificationResult vr : verifications) {
             verByHyp.put(vr.hypothesisId(), vr);
@@ -630,7 +644,12 @@ public class ConfidenceScorer {
             }
             TemporalAlignmentResult temporal = temporalResults.getOrDefault(
                     h.id(), TemporalAlignmentResult.UNKNOWN);
-            results.add(score(h, pattern, vr, evidence, temporal));
+            PropagationPath path = propagationPaths.get(h.id());
+            if (path != null && path.isPresent()) {
+                results.add(score(h, pattern, vr, evidence, temporal, path));
+            } else {
+                results.add(score(h, pattern, vr, evidence, temporal));
+            }
         }
         return results;
     }

@@ -12,6 +12,7 @@ import ai.sreagent.core.report.MarkdownReporter;
 import ai.sreagent.core.verification.ConfidenceScorer;
 import ai.sreagent.core.verification.HypothesisComparator;
 import ai.sreagent.core.verification.TemporalAligner;
+import ai.sreagent.core.verification.TopologyPathResolver;
 import ai.sreagent.core.verification.VerificationEngine;
 
 import java.io.File;
@@ -42,6 +43,17 @@ public class InvestigationWorkflow {
      * No file I/O required.
      */
     public InvestigationResult runFromMemory(IncidentTask incident, List<Evidence> evidence) {
+        return runFromMemory(incident, evidence, null);
+    }
+
+    /**
+     * Run investigation from in-memory domain objects with optional configured topology.
+     */
+    public InvestigationResult runFromMemory(
+            IncidentTask incident,
+            List<Evidence> evidence,
+            ServiceTopology topology
+    ) {
         EventTraceStore traceStore = new InMemoryEventTraceStore();
         String incidentId = incident.id() != null ? incident.id()
                 : "inc_" + Instant.now().toString().replace(":", "").replace(".", "");
@@ -94,8 +106,21 @@ public class InvestigationWorkflow {
                             "temporalConfidence", entry.getValue().confidence().name())));
         }
 
+        // ── V.2-RCA-1A.4: Resolve propagation paths from configured topology ──
+        TopologyPathResolver pathResolver = new TopologyPathResolver();
+        Map<String, PropagationPath> propagationPaths =
+                pathResolver.resolveAll(topology, evidence, hypotheses, patternMap);
+        for (var entry : propagationPaths.entrySet()) {
+            traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "PROPAGATION_PATH_RESOLVED",
+                    Map.of("hypothesisId", entry.getKey(),
+                            "pathLength", entry.getValue().pathLength(),
+                            "pathConfidence", entry.getValue().pathConfidence().name(),
+                            "services", entry.getValue().services())));
+        }
+
         ConfidenceScorer scorer = new ConfidenceScorer();
-        List<ConfidenceResult> confResults = scorer.scoreAll(hypotheses, patternMap, verResults, evidence, temporalResults);
+        List<ConfidenceResult> confResults = scorer.scoreAll(
+                hypotheses, patternMap, verResults, evidence, temporalResults, propagationPaths);
         for (ConfidenceResult cr : confResults) {
             traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "CONFIDENCE_SCORED",
                     Map.of("hypothesisId", cr.hypothesisId(), "score", cr.score())));

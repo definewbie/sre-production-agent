@@ -180,7 +180,8 @@ public class IncidentService {
             addLivenessProbeFailureEvidence(allEvidence, null, incidentId, service, namespace);
 
             // 6. Run RCA
-            InvestigationResult rcaResult = workflow.runFromMemory(incidentTask, allEvidence);
+            InvestigationResult rcaResult = workflow.runFromMemory(
+                    incidentTask, allEvidence, topologyProvider.getTopology());
 
             long durationMs = System.currentTimeMillis() - startTime;
 
@@ -290,7 +291,8 @@ public class IncidentService {
             addLivenessProbeFailureEvidence(allEvidence, faultType, incidentId, service, ns);
 
             // Run RCA
-            InvestigationResult rcaResult = workflow.runFromMemory(incidentTask, allEvidence);
+            InvestigationResult rcaResult = workflow.runFromMemory(
+                    incidentTask, allEvidence, topologyProvider.getTopology());
 
             long durationMs = System.currentTimeMillis() - startTime;
 

@@ -21,6 +21,7 @@ import ai.sreagent.server.demo.DemoServiceClient;
 import ai.sreagent.server.demo.DemoServiceConfig;
 import ai.sreagent.server.demo.DemoServicesStatusResponse;
 import ai.sreagent.server.demo.DemoServiceStatus;
+import ai.sreagent.server.topology.TopologyProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -59,15 +60,18 @@ public class LiveScenarioService {
     private final String prometheusUrl;
     private final String lokiUrl;
     private final String jaegerUrl;
+    private final TopologyProvider topologyProvider;
     private final KubernetesResourceReader kubernetesReader;
 
     // Store results in memory
     private final ConcurrentHashMap<String, LiveScenarioResult> resultStore = new ConcurrentHashMap<>();
 
     public LiveScenarioService(DemoServiceClient demoClient, DemoServiceConfig demoConfig,
-                                org.springframework.core.env.Environment env) {
+                                org.springframework.core.env.Environment env,
+                                TopologyProvider topologyProvider) {
         this.demoClient = demoClient;
         this.demoConfig = demoConfig;
+        this.topologyProvider = topologyProvider;
         this.prometheusUrl = env.getProperty("sre-agent.observability.prometheus-url", "http://localhost:9090");
         this.lokiUrl = env.getProperty("sre-agent.observability.loki-url", "http://localhost:3100");
         this.jaegerUrl = env.getProperty("sre-agent.observability.trace-url", "http://localhost:16686");
@@ -144,6 +148,7 @@ public class LiveScenarioService {
             // forceFixture=true for simulation mode; false for live mode
             LiveEvidenceCollector collector = new LiveEvidenceCollector(
                     prometheusUrl, lokiUrl, jaegerUrl, isSimulation, kubernetesReader);
+            collector.setTopology(topologyProvider.getTopology());
 
             // Collect for the alerting service (order-service) and the suspected downstream (payment-service)
             // Anchor queries at fault injection time so the window covers the active fault period
@@ -186,7 +191,8 @@ public class LiveScenarioService {
 
             // Phase 4: Run deterministic RCA
             InvestigationWorkflow workflow = new InvestigationWorkflow();
-            InvestigationResult rcaResult = workflow.runFromMemory(incident, allEvidence);
+            InvestigationResult rcaResult = workflow.runFromMemory(
+                    incident, allEvidence, topologyProvider.getTopology());
             log.info("RCA completed: incidentId={}, decision={}, confidence={}",
                     rcaResult.incidentId(),
                     rcaResult.decision().decisionType(),
