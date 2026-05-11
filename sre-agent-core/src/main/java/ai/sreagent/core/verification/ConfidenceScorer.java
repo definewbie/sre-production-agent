@@ -64,8 +64,8 @@ public class ConfidenceScorer {
     /** Maximum bonus from corroborating evidence (optional — no penalty when absent) */
     private static final double CORROBORATING_BONUS_CAP = 0.10;
 
-    /** Maximum bounded bonus from topology causality for dependency-propagation hypotheses. */
-    private static final double TOPOLOGY_CAUSALITY_BONUS_CAP = 0.10;
+    /** Maximum bounded bonus from confirmed propagation paths. */
+    private static final double PROPAGATION_BONUS_CAP = 0.10;
 
     private static final Set<String> PROVIDER_ALIAS_PREFIXES = Set.of("metric_", "log_", "trace_");
     private static final List<String> OBSERVABILITY_PROVIDERS = List.of("metric", "log", "trace");
@@ -314,7 +314,8 @@ public class ConfidenceScorer {
 
         // Final score calculation
         double temporalScore = temporalResult != null ? temporalResult.score() : 0.0;
-        double topologyScore = topologyCausalityScore(pattern, propagationPath);
+        double propagationScore = propagationScore(pattern, propagationPath);
+        double topologyScore = propagationScore;
 
         double rawScore = pattern.baseScore()
                 + weightedSupportingCoverage * SUPPORTING_BONUS_CAP
@@ -351,12 +352,17 @@ public class ConfidenceScorer {
                 topologyEdge,
                 propagationPath,
                 topologyScore,
+                propagationScore,
                 providerHealth.diagnosticQuality(),
                 providerHealth.blindProviders()
         );
     }
 
     private double topologyCausalityScore(DiagnosticPattern pattern, PropagationPath propagationPath) {
+        return propagationScore(pattern, propagationPath);
+    }
+
+    private double propagationScore(DiagnosticPattern pattern, PropagationPath propagationPath) {
         if (pattern == null || propagationPath == null || !propagationPath.isPresent()) {
             return 0.0;
         }
@@ -376,7 +382,7 @@ public class ConfidenceScorer {
                 ? 0.50
                 : 1.0;
 
-        double score = TOPOLOGY_CAUSALITY_BONUS_CAP
+        double score = PROPAGATION_BONUS_CAP
                 * confidenceMultiplier
                 * pathMultiplier
                 * directionMultiplier;

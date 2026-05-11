@@ -541,6 +541,7 @@ class ConfidenceScorerTest {
         assertThat(r.propagationPath().isPresent()).isTrue();
         assertThat(r.propagationPath().pathLength()).isEqualTo(1);
         assertThat(r.topologyCausalityScore()).isEqualTo(0.10);
+        assertThat(r.propagationScore()).isEqualTo(0.10);
     }
 
     /** Non-topology-sensitive hypotheses keep topology context but do not get topology score. */
@@ -559,6 +560,7 @@ class ConfidenceScorerTest {
 
         assertThat(r.topologyEdge().isPresent()).isTrue();
         assertThat(r.topologyCausalityScore()).isEqualTo(0.0);
+        assertThat(r.propagationScore()).isEqualTo(0.0);
     }
 
     /** Multi-hop propagation paths contribute less than direct paths. */
@@ -587,6 +589,7 @@ class ConfidenceScorerTest {
         assertThat(r.propagationPath().pathLength()).isEqualTo(3);
         assertThat(r.propagationPath().pathConfidence()).isEqualTo(TopologyEdgeConfidence.MEDIUM);
         assertThat(r.topologyCausalityScore()).isEqualTo(0.03);
+        assertThat(r.propagationScore()).isEqualTo(0.03);
     }
 
     /** scoreAll() produces multiple results, each with correct topology edge. */

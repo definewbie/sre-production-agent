@@ -127,6 +127,11 @@ class MarkdownReporterTest {
     }
 
     @Test
+    void reportContainsPropagationScoreColumn() {
+        assertThat(report).contains("Propagation Score");
+    }
+
+    @Test
     void reportContainsTemporalDetailSubsections() {
         assertThat(report).contains("时间对齐详情");
         assertThat(report).contains("Temporal 说明");

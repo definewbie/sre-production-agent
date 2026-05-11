@@ -138,25 +138,28 @@ public class MarkdownReporter {
 
         // ── V.2-RCA-1A.4: Topology Edge Analysis ──
         sb.append("## 拓扑分析\n\n");
-        sb.append("Topology edge 描述候选假设中涉及的**服务间调用/依赖关系**及其发现方式。\n\n");
-        sb.append("| 假设 | Topology Score | Edge Source | Edge Confidence | Direction | Path Length | 说明 |\n");
-        sb.append("|---|---:|---|---|---|---:|---|\n");
+        sb.append("Topology edge 描述候选假设中涉及的**服务间调用/依赖关系**及其发现方式；Propagation Score 描述该路径对根因传播解释的有界加分。\n\n");
+        sb.append("| 假设 | Topology Score | Propagation Score | Edge Source | Edge Confidence | Direction | Path Length | 说明 |\n");
+        sb.append("|---|---:|---:|---|---|---|---:|---|\n");
         for (ConfidenceResult c : confidenceResults.stream()
                 .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
                 .toList()) {
             TopologyEdge edge = c.topologyEdge();
             if (edge != null && edge.isPresent()) {
-                sb.append(String.format("| %s | %+.2f | %s | %s | %s | %d | %s |\n",
+                sb.append(String.format("| %s | %+.2f | %+.2f | %s | %s | %s | %d | %s |\n",
                         hypothesisTitleZh(c.hypothesisId()),
                         c.topologyCausalityScore(),
+                        c.propagationScore(),
                         topologyEdgeSourceZh(edge.edgeSource()),
                         topologyEdgeConfidenceZh(edge.edgeConfidence()),
                         propagationDirectionZh(edge.direction()),
                         edge.pathLength(),
                         edge.explanation() != null ? edge.explanation() : "—"));
             } else {
-                sb.append(String.format("| %s | %+.2f | — | — | — | — | ⚠️ 无拓扑证据：无法确认服务间依赖关系 |\n",
-                        hypothesisTitleZh(c.hypothesisId()), c.topologyCausalityScore()));
+                sb.append(String.format("| %s | %+.2f | %+.2f | — | — | — | — | ⚠️ 无拓扑证据：无法确认服务间依赖关系 |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        c.topologyCausalityScore(),
+                        c.propagationScore()));
             }
         }
         sb.append("\n");

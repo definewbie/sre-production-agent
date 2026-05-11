@@ -50,6 +50,7 @@ class InvestigationWorkflowTopologyTest {
         assertThat(downstream.propagationPath().services())
                 .containsExactly("payment-service", "order-service");
         assertThat(downstream.topologyCausalityScore()).isGreaterThan(0.0);
+        assertThat(downstream.propagationScore()).isGreaterThan(0.0);
         assertThat(result.eventTrace()).anyMatch(e ->
                 "PROPAGATION_PATH_RESOLVED".equals(e.eventType()));
         assertThat(result.markdownReport()).contains("传播路径");
