@@ -184,12 +184,14 @@ public class LiveScenarioService {
                 }
             }
 
-            // Build final mergedReport AFTER potential fallback evidence addition
-            LiveEvidenceReport mergedReport = new LiveEvidenceReport(
-                    allEvidence.size(), List.copyOf(allEvidence), Map.copyOf(mergedSources), List.copyOf(allWarnings));
-
             // Phase 3: Build IncidentTask
             IncidentTask incident = buildScenarioGIncident(faultMode);
+
+            allEvidence.add(chaosFaultEvidence(incident.id(), faultMode, faultParams, faultInjectedAt));
+
+            // Build final mergedReport AFTER potential fallback/control-plane evidence addition
+            LiveEvidenceReport mergedReport = new LiveEvidenceReport(
+                    allEvidence.size(), List.copyOf(allEvidence), Map.copyOf(mergedSources), List.copyOf(allWarnings));
 
             // Phase 4: Run deterministic RCA
             InvestigationWorkflow workflow = new InvestigationWorkflow();
@@ -370,6 +372,30 @@ public class LiveScenarioService {
         );
     }
 
+    private Evidence chaosFaultEvidence(String incidentId, String faultMode,
+                                        Map<String, Object> faultParams, Instant timestamp) {
+        Map<String, Object> attrs = new LinkedHashMap<>();
+        attrs.put("faultType", faultMode != null && !faultMode.isBlank() ? faultMode : "unknown");
+        attrs.put("faultTargetService", "payment-service");
+        attrs.put("impactedService", "order-service");
+        attrs.put("scenario", "g");
+        if (faultParams != null) {
+            attrs.putAll(faultParams);
+        }
+        return new Evidence(
+                "ev-chaos-fault-" + incidentId,
+                incidentId,
+                "chaos",
+                "chaos_fault_injected",
+                "payment-service",
+                timestamp,
+                "Scenario G injected " + attrs.get("faultType") + " fault into payment-service; "
+                        + "order-service is the expected upstream impact target",
+                Map.copyOf(attrs),
+                1.0
+        );
+    }
+
     private LlmHypothesisProposalResult runLlmProposal(InvestigationResult rcaResult,
                                                          List<Evidence> evidence) {
         try {
@@ -546,6 +572,8 @@ public class LiveScenarioService {
             sb.append("\n");
         }
 
+        appendTopologySummary(sb, rca);
+
         // LLM Proposal (if available)
         if (llmProposal != null) {
             sb.append("## AI 补充假设（仅供参考，不影响 RCA 结论）\n\n");
@@ -582,6 +610,38 @@ public class LiveScenarioService {
         sb.append("*决策方式：确定性规则引擎（LLM 仅做建议，不参与评分）*\n");
 
         return sb.toString();
+    }
+
+    private void appendTopologySummary(StringBuilder sb, InvestigationResult rca) {
+        if (rca.confidenceResults() == null || rca.confidenceResults().isEmpty()) {
+            return;
+        }
+        sb.append("## 拓扑传播分析\n\n");
+        sb.append("Propagation Score 表示拓扑传播路径对根因解释的有界加分，")
+                .append("用于区分“下游根因影响上游”和“本服务自身异常”。\n\n");
+        sb.append("| 假设 | Topology Score | Propagation Score | 传播路径 | Path Source | Path Confidence |\n");
+        sb.append("|---|---:|---:|---|---|---|\n");
+        for (var cr : rca.confidenceResults().stream()
+                .sorted(java.util.Comparator.comparingDouble(
+                        ai.sreagent.core.domain.ConfidenceResult::score).reversed())
+                .toList()) {
+            var path = cr.propagationPath();
+            if (path != null && path.isPresent()) {
+                sb.append("| ").append(cr.hypothesisId())
+                        .append(" | ").append(String.format("%.2f", cr.topologyCausalityScore()))
+                        .append(" | ").append(String.format("%.2f", cr.propagationScore()))
+                        .append(" | ").append(String.join(" → ", path.services()))
+                        .append(" | ").append(path.pathSource())
+                        .append(" | ").append(path.pathConfidence())
+                        .append(" |\n");
+            } else {
+                sb.append("| ").append(cr.hypothesisId())
+                        .append(" | ").append(String.format("%.2f", cr.topologyCausalityScore()))
+                        .append(" | ").append(String.format("%.2f", cr.propagationScore()))
+                        .append(" | - | - | - |\n");
+            }
+        }
+        sb.append("\n");
     }
 
     private String decisionTypeZh(String decisionType) {

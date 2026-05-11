@@ -46,7 +46,10 @@ class LiveScenarioControllerTest {
                         .contentType("application/json")
                         .content("{\"mode\":\"simulation\",\"faultMode\":\"latency\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("COMPLETED"));
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(content().string(containsString("chaos_fault_injected")))
+                .andExpect(content().string(containsString("Propagation Score")))
+                .andExpect(content().string(containsString("CONFIGURED_TOPOLOGY")));
     }
 
     @Test
