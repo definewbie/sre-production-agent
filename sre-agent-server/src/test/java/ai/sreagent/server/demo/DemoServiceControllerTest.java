@@ -22,6 +22,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(DemoServiceController.class)
 class DemoServiceControllerTest {
 
+    private static final String DEMO_TOPOLOGY =
+            "order-service → payment-service; order-service → inventory-service";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -40,7 +43,7 @@ class DemoServiceControllerTest {
                         new DemoServiceStatus("inventory-service",
                                 "http://localhost:18083", "UP", "normal", true)
                 ),
-                "order-service → payment-service → inventory-service"
+                DEMO_TOPOLOGY
         ));
 
         mockMvc.perform(get("/api/demo-services/status"))
@@ -49,7 +52,7 @@ class DemoServiceControllerTest {
                 .andExpect(jsonPath("$.services[0].service").value("order-service"))
                 .andExpect(jsonPath("$.services[1].service").value("payment-service"))
                 .andExpect(jsonPath("$.services[2].service").value("inventory-service"))
-                .andExpect(jsonPath("$.topology").value("order-service → payment-service → inventory-service"));
+                .andExpect(jsonPath("$.topology").value(DEMO_TOPOLOGY));
     }
 
     @Test
@@ -64,7 +67,7 @@ class DemoServiceControllerTest {
                         new DemoServiceStatus("inventory-service",
                                 "http://localhost:18083", "unreachable", "unknown", false)
                 ),
-                "order-service → payment-service → inventory-service"
+                DEMO_TOPOLOGY
         ));
 
         mockMvc.perform(get("/api/demo-services/status"))
@@ -85,7 +88,7 @@ class DemoServiceControllerTest {
                         new DemoServiceStatus("inventory-service",
                                 "http://localhost:18083", "UP", "normal", true)
                 ),
-                "order-service → payment-service → inventory-service"
+                DEMO_TOPOLOGY
         ));
 
         mockMvc.perform(post("/api/demo-services/fault/normal"))
@@ -108,7 +111,7 @@ class DemoServiceControllerTest {
                                 new DemoServiceStatus("inventory-service",
                                         "http://localhost:18083", "UP", "normal", true)
                         ),
-                        "order-service → payment-service → inventory-service"
+                        DEMO_TOPOLOGY
                 ));
 
         mockMvc.perform(post("/api/demo-services/fault/payment-latency"))
@@ -132,7 +135,7 @@ class DemoServiceControllerTest {
                                 new DemoServiceStatus("inventory-service",
                                         "http://localhost:18083", "UP", "normal", true)
                         ),
-                        "order-service → payment-service → inventory-service"
+                        DEMO_TOPOLOGY
                 ));
 
         mockMvc.perform(post("/api/demo-services/fault/payment-error"))
@@ -156,7 +159,7 @@ class DemoServiceControllerTest {
                                 new DemoServiceStatus("inventory-service",
                                         "http://localhost:18083", "UP", "normal", true)
                         ),
-                        "order-service → payment-service → inventory-service"
+                        DEMO_TOPOLOGY
                 ));
 
         mockMvc.perform(post("/api/demo-services/fault/payment-timeout"))
@@ -179,7 +182,7 @@ class DemoServiceControllerTest {
                         new DemoServiceStatus("inventory-service",
                                 "http://localhost:18083", "UP", "normal", true)
                 ),
-                "order-service → payment-service → inventory-service"
+                DEMO_TOPOLOGY
         ));
 
         mockMvc.perform(post("/api/demo-services/fault/reset"))

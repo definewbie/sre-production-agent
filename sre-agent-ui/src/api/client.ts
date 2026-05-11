@@ -711,20 +711,25 @@ function mapDemoService(s: DemoServiceStatus): ServiceHealthView {
   }
 }
 
-/** 解析 topology 字符串 "order-service → payment-service → inventory-service" */
+/** 解析 topology 字符串，支持 "a → b → c" 和 "a → b; a → c" 两种格式 */
 function parseTopology(topoStr: string, services: ServiceHealthView[]): ServiceHealthSummary['topology'] {
-  const parts = topoStr.split(/\s*→\s*/)
-  if (parts.length < 2) return []
   const edges: ServiceHealthSummary['topology'] = []
-  for (let i = 0; i < parts.length - 1; i++) {
-    const fromSvc = services.find(s => s.name === parts[i].trim())
-    const toSvc = services.find(s => s.name === parts[i + 1].trim())
-    const status: ServiceHealthStatus = (fromSvc?.status === 'down' || toSvc?.status === 'down')
-      ? 'down'
-      : (fromSvc?.status === 'degraded' || toSvc?.status === 'degraded')
-        ? 'degraded'
-        : 'healthy'
-    edges.push({ from: parts[i].trim(), to: parts[i + 1].trim(), status })
+  const paths = topoStr.split(/\s*[;,]\s*/).filter(Boolean)
+  for (const path of paths) {
+    const parts = path.split(/\s*→\s*/).map(p => p.trim()).filter(Boolean)
+    if (parts.length < 2) continue
+    for (let i = 0; i < parts.length - 1; i++) {
+      const from = parts[i]
+      const to = parts[i + 1]
+      const fromSvc = services.find(s => s.name === from)
+      const toSvc = services.find(s => s.name === to)
+      const status: ServiceHealthStatus = (fromSvc?.status === 'down' || toSvc?.status === 'down')
+        ? 'down'
+        : (fromSvc?.status === 'degraded' || toSvc?.status === 'degraded')
+          ? 'degraded'
+          : 'healthy'
+      edges.push({ from, to, status })
+    }
   }
   return edges
 }

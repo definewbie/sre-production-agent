@@ -27,7 +27,7 @@ public class DemoServiceClient {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
     private static final String TOPOLOGY =
-            "order-service → payment-service → inventory-service";
+            "order-service → payment-service; order-service → inventory-service";
 
     private final DemoServiceConfig config;
     private final HttpClient httpClient;

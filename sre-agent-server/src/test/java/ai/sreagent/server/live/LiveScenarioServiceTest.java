@@ -25,7 +25,7 @@ class LiveScenarioServiceTest {
                 new DemoServiceStatus("order-service", "http://localhost:18081", "unreachable", "unknown", false),
                 new DemoServiceStatus("payment-service", "http://localhost:18082", "unreachable", "unknown", false),
                 new DemoServiceStatus("inventory-service", "http://localhost:18083", "unreachable", "unknown", false)
-        ), "order-service -> payment-service -> inventory-service"));
+        ), "order-service → payment-service; order-service → inventory-service"));
 
         TopologyProvider topologyProvider = mock(TopologyProvider.class);
         when(topologyProvider.getTopology()).thenReturn(new ServiceTopology(Map.of()));
