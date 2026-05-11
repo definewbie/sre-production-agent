@@ -59,8 +59,6 @@ class ScenarioGKubernetesRcaTest {
                     "payment span took 2500ms", 0.85),
             makeEvidence("ev-k8s-7", "jaeger", "trace_dependency_path", "order-service",
                     "order→payment dependency path", 0.80),
-            makeEvidence("ev-k8s-chaos", "chaos", "chaos_fault_injected", "payment-service",
-                    "Scenario G injected latency fault into payment-service", 1.0),
 
             // Kubernetes: runtime context (healthy pods, no restarts)
             makeEvidence("ev-k8s-8", "kubernetes", "deployment_metadata", "order-service",
@@ -72,17 +70,6 @@ class ScenarioGKubernetesRcaTest {
             makeEvidence("ev-k8s-11", "kubernetes", "k8s_pod_status", "payment-service",
                     "Pod payment-service-xyz Running, restartCount=0", 0.30)
         );
-    }
-
-    private List<Evidence> buildScenarioGWithLatencyChaosAndCrashSymptoms() {
-        List<Evidence> evidence = new ArrayList<>(buildScenarioGWithK8sRuntime());
-        evidence.add(makeEvidence("ev-crash-1", "kubernetes", "container_crash_loop_backoff", "order-service",
-                "order-service pod entered CrashLoopBackOff after downstream payment latency", 0.80));
-        evidence.add(makeEvidence("ev-crash-2", "kubernetes", "pod_restart_count_increased", "order-service",
-                "order-service restart count increased after probe failures", 0.75));
-        evidence.add(makeEvidence("ev-crash-3", "kubernetes", "pod_not_ready", "order-service",
-                "order-service pod temporarily not ready", 0.70));
-        return evidence;
     }
 
     /**
@@ -225,37 +212,6 @@ class ScenarioGKubernetesRcaTest {
         assertThat(crashLoop).isNotNull();
         assertThat(downstream.score())
                 .as("downstream (%.2f) > crash_loop (%.2f)".formatted(downstream.score(), crashLoop.score()))
-                .isGreaterThan(crashLoop.score());
-    }
-
-    @Test
-    void latencyChaosControlPlaneKeepsCrashLoopAsSymptomNotRootCause() {
-        List<Evidence> evidence = buildScenarioGWithLatencyChaosAndCrashSymptoms();
-        IncidentTask incident = new IncidentTask(
-                INC_ID, "PaymentLatencySpike", "order-service", "demo", "warning",
-                Instant.now(), Map.of("scenario", "g"), Map.of());
-
-        PatternRegistry registry = BuiltinPatterns.defaultRegistry();
-        Map<String, DiagnosticPattern> patternMap = new LinkedHashMap<>();
-        registry.all().forEach(p -> patternMap.put(p.id(), p));
-
-        HypothesisEngine hypEngine = new HypothesisEngine();
-        List<Hypothesis> hypotheses = hypEngine.generate(incident, registry.all());
-
-        VerificationEngine verEngine = new VerificationEngine();
-        Map<String, VerificationResult> verMap = verEngine.verifyAll(hypotheses, patternMap, evidence);
-
-        ConfidenceScorer scorer = new ConfidenceScorer();
-        List<ConfidenceResult> confResults = scorer.scoreAll(hypotheses, patternMap, new ArrayList<>(verMap.values()), evidence);
-
-        ConfidenceResult downstream = findConfidence(confResults, hypotheses, "downstream_dependency_latency");
-        ConfidenceResult crashLoop = findConfidence(confResults, hypotheses, "pod_crash_loop");
-
-        assertThat(downstream).isNotNull();
-        assertThat(crashLoop).isNotNull();
-        assertThat(downstream.score())
-                .as("payment latency chaos should outrank derived order-service crash symptoms: downstream %.2f vs crash_loop %.2f"
-                        .formatted(downstream.score(), crashLoop.score()))
                 .isGreaterThan(crashLoop.score());
     }
 

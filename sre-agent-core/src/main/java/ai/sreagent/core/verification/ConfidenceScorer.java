@@ -311,7 +311,6 @@ public class ConfidenceScorer {
 
         // Contradiction penalty
         double contradictionPenalty = verification.contradictions().size() * CONTRADICTION_PENALTY;
-        double derivedSymptomPenalty = derivedSymptomPenalty(hypothesis, pattern, evidence);
 
         // Final score calculation
         double temporalScore = temporalResult != null ? temporalResult.score() : 0.0;
@@ -324,7 +323,6 @@ public class ConfidenceScorer {
                 - weightedCounterCoverage * COUNTER_PENALTY_CAP
                 - missingPenalty
                 - contradictionPenalty
-                - derivedSymptomPenalty
                 + temporalScore
                 + topologyScore;
 
@@ -362,44 +360,6 @@ public class ConfidenceScorer {
 
     private double topologyCausalityScore(DiagnosticPattern pattern, PropagationPath propagationPath) {
         return propagationScore(pattern, propagationPath);
-    }
-
-    private double derivedSymptomPenalty(Hypothesis hypothesis, DiagnosticPattern pattern, List<Evidence> evidence) {
-        if (hypothesis == null || pattern == null || evidence == null
-                || !"pod_crash_loop".equals(pattern.id())) {
-            return 0.0;
-        }
-
-        boolean hasDownstreamLatencyContext = evidence.stream()
-                .map(Evidence::evidenceType)
-                .map(ConfidenceScorer::normalizeEvidenceType)
-                .anyMatch(t -> "downstream_latency_spike".equals(t)
-                        || "dependency_timeout_logs".equals(t));
-        if (!hasDownstreamLatencyContext) {
-            return 0.0;
-        }
-
-        return evidence.stream()
-                .filter(e -> "chaos_fault_injected".equals(e.evidenceType()))
-                .filter(e -> isLatencyFault(e))
-                .filter(e -> isDifferentFaultTarget(e, hypothesis.affectedService()))
-                .findFirst()
-                .map(e -> 0.20)
-                .orElse(0.0);
-    }
-
-    private boolean isLatencyFault(Evidence evidence) {
-        Object faultType = evidence.attributes() != null ? evidence.attributes().get("faultType") : null;
-        if (faultType != null && "latency".equalsIgnoreCase(String.valueOf(faultType))) {
-            return true;
-        }
-        return evidence.content() != null && evidence.content().toLowerCase().contains("latency");
-    }
-
-    private boolean isDifferentFaultTarget(Evidence evidence, String affectedService) {
-        Object target = evidence.attributes() != null ? evidence.attributes().get("faultTargetService") : null;
-        String faultTarget = target != null ? String.valueOf(target) : evidence.service();
-        return faultTarget != null && affectedService != null && !faultTarget.equals(affectedService);
     }
 
     private double propagationScore(DiagnosticPattern pattern, PropagationPath propagationPath) {
