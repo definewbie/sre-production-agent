@@ -112,6 +112,54 @@ public class ServiceTopology {
         return chain;
     }
 
+    /**
+     * Find a dependency path in call direction: caller → ... → dependency.
+     */
+    public PropagationPath findDependencyPath(
+            String caller,
+            String dependency,
+            TopologyEdgeSource source
+    ) {
+        List<String> path = shortestPath(caller, dependency, this::getDownstream);
+        if (path.isEmpty()) {
+            return PropagationPath.NONE;
+        }
+        List<TopologyEdge> edges = buildEdges(path, source, PropagationDirection.UPSTREAM_TO_DOWNSTREAM);
+        return PropagationPath.fromEdges(
+                path,
+                edges,
+                PropagationDirection.UPSTREAM_TO_DOWNSTREAM,
+                source,
+                "Dependency path: " + String.join(" → ", path)
+        );
+    }
+
+    /**
+     * Find a fault-impact path in propagation direction:
+     * failed downstream dependency → ... → impacted upstream caller.
+     */
+    public PropagationPath findImpactPath(
+            String failedDependency,
+            String impactedCaller,
+            TopologyEdgeSource source
+    ) {
+        List<String> callPath = shortestPath(impactedCaller, failedDependency, this::getDownstream);
+        if (callPath.isEmpty()) {
+            return PropagationPath.NONE;
+        }
+        List<String> propagationPath = new ArrayList<>(callPath);
+        Collections.reverse(propagationPath);
+        List<TopologyEdge> edges = buildEdges(
+                propagationPath, source, PropagationDirection.DOWNSTREAM_TO_UPSTREAM_IMPACT);
+        return PropagationPath.fromEdges(
+                propagationPath,
+                edges,
+                PropagationDirection.DOWNSTREAM_TO_UPSTREAM_IMPACT,
+                source,
+                "Impact path: " + String.join(" → ", propagationPath)
+        );
+    }
+
     /** Number of services in the graph. */
     public int size() {
         return services.size();
@@ -121,5 +169,66 @@ public class ServiceTopology {
     public String toString() {
         return "ServiceTopology{services=" + services
                 + ", edges=" + downstream.size() + "}";
+    }
+
+    private List<String> shortestPath(
+            String start,
+            String end,
+            java.util.function.Function<String, Set<String>> neighbors
+    ) {
+        if (start == null || end == null || start.isBlank() || end.isBlank()) {
+            return List.of();
+        }
+        if (start.equals(end)) {
+            return List.of(start);
+        }
+
+        Set<String> visited = new LinkedHashSet<>();
+        Deque<List<String>> queue = new ArrayDeque<>();
+        queue.add(List.of(start));
+
+        while (!queue.isEmpty()) {
+            List<String> path = queue.poll();
+            String current = path.get(path.size() - 1);
+            if (!visited.add(current)) {
+                continue;
+            }
+            for (String next : neighbors.apply(current)) {
+                List<String> candidate = new ArrayList<>(path);
+                candidate.add(next);
+                if (next.equals(end)) {
+                    return candidate;
+                }
+                if (!visited.contains(next)) {
+                    queue.add(candidate);
+                }
+            }
+        }
+        return List.of();
+    }
+
+    private List<TopologyEdge> buildEdges(
+            List<String> path,
+            TopologyEdgeSource source,
+            PropagationDirection direction
+    ) {
+        if (path.size() < 2) {
+            return List.of();
+        }
+        List<TopologyEdge> edges = new ArrayList<>();
+        for (int i = 0; i < path.size() - 1; i++) {
+            String from = path.get(i);
+            String to = path.get(i + 1);
+            edges.add(new TopologyEdge(
+                    from,
+                    to,
+                    source,
+                    TopologyEdge.deriveConfidence(source),
+                    direction,
+                    i + 1,
+                    from + " → " + to
+            ));
+        }
+        return edges;
     }
 }

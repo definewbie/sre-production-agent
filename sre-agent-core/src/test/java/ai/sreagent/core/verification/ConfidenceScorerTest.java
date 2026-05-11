@@ -466,6 +466,8 @@ class ConfidenceScorerTest {
         assertThat(edge.pathLength()).isEqualTo(1);
         assertThat(edge.direction()).isEqualTo(PropagationDirection.UPSTREAM_TO_DOWNSTREAM);
         assertThat(edge.edgeConfidence()).isEqualTo(TopologyEdgeConfidence.MEDIUM);
+        assertThat(result.propagationPath().isPresent()).isTrue();
+        assertThat(result.propagationPath().services()).containsExactly("order-service", "payment-service");
         assertThat(result.topologyCausalityScore()).isEqualTo(0.0);
     }
 
@@ -492,6 +494,7 @@ class ConfidenceScorerTest {
         assertThat(edge).isNotNull();
         assertThat(edge.isPresent()).isFalse();
         assertThat(edge.edgeConfidence()).isEqualTo(TopologyEdgeConfidence.LOW);
+        assertThat(result.propagationPath().isPresent()).isFalse();
         assertThat(result.topologyCausalityScore()).isEqualTo(0.0);
     }
 
@@ -511,6 +514,7 @@ class ConfidenceScorerTest {
         assertThat(r.topologyEdge().isPresent()).isTrue();
         assertThat(r.topologyEdge().toService()).isEqualTo("svc-b");
         assertThat(r.topologyEdge().edgeConfidence()).isEqualTo(TopologyEdgeConfidence.MEDIUM);
+        assertThat(r.propagationPath().pathConfidence()).isEqualTo(TopologyEdgeConfidence.MEDIUM);
         assertThat(r.topologyCausalityScore()).isEqualTo(0.0);
     }
 
@@ -534,6 +538,8 @@ class ConfidenceScorerTest {
 
         assertThat(r.topologyEdge().isPresent()).isTrue();
         assertThat(r.topologyEdge().edgeConfidence()).isEqualTo(TopologyEdgeConfidence.HIGH);
+        assertThat(r.propagationPath().isPresent()).isTrue();
+        assertThat(r.propagationPath().pathLength()).isEqualTo(1);
         assertThat(r.topologyCausalityScore()).isEqualTo(0.10);
     }
 
@@ -553,6 +559,34 @@ class ConfidenceScorerTest {
 
         assertThat(r.topologyEdge().isPresent()).isTrue();
         assertThat(r.topologyCausalityScore()).isEqualTo(0.0);
+    }
+
+    /** Multi-hop propagation paths contribute less than direct paths. */
+    @Test
+    void topologyCausalityScore_multiHopPath_shouldDecayWithPathLength() {
+        ServiceTopology topology = new ServiceTopology(Map.of(
+                "frontend", List.of("order-service"),
+                "order-service", List.of("payment-service"),
+                "payment-service", List.of("gateway"),
+                "gateway", List.of()
+        ));
+        PropagationPath path = topology.findImpactPath(
+                "gateway", "frontend", TopologyEdgeSource.CONFIGURED_TOPOLOGY);
+        Evidence timeout = new Evidence("ev_timeout_multihop", "inc_multihop", "loki",
+                "log_downstream_timeout", "frontend", Instant.now(),
+                "Timeout propagated from gateway", Map.of(), 0.80);
+
+        DiagnosticPattern pattern = registry.get("downstream_dependency_latency").orElseThrow();
+        Hypothesis h = new Hypothesis("hyp_downstream_dependency_latency", "inc_multihop",
+                "downstream_dependency_latency", "Downstream latency",
+                "dependency_latency", "frontend", "gateway");
+        VerificationResult vr = verificationEngine.verify(h, pattern, List.of(timeout));
+        ConfidenceResult r = scorer.score(
+                h, pattern, vr, List.of(timeout), TemporalAlignmentResult.UNKNOWN, path);
+
+        assertThat(r.propagationPath().pathLength()).isEqualTo(3);
+        assertThat(r.propagationPath().pathConfidence()).isEqualTo(TopologyEdgeConfidence.MEDIUM);
+        assertThat(r.topologyCausalityScore()).isEqualTo(0.03);
     }
 
     /** scoreAll() produces multiple results, each with correct topology edge. */

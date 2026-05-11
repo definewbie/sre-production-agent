@@ -161,6 +161,27 @@ public class MarkdownReporter {
         }
         sb.append("\n");
 
+        sb.append("### 传播路径\n\n");
+        sb.append("| 假设 | Path Confidence | Path Length | Services | 说明 |\n");
+        sb.append("|---|---|---:|---|---|\n");
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            PropagationPath path = c.propagationPath();
+            if (path != null && path.isPresent()) {
+                sb.append(String.format("| %s | %s | %d | %s | %s |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        topologyEdgeConfidenceZh(path.pathConfidence()),
+                        path.pathLength(),
+                        String.join(" → ", path.services()),
+                        path.explanation() != null ? path.explanation() : "—"));
+            } else {
+                sb.append(String.format("| %s | — | — | — | ⚠️ 无传播路径 |\n",
+                        hypothesisTitleZh(c.hypothesisId())));
+            }
+        }
+        sb.append("\n");
+
         boolean hasTopology = confidenceResults.stream()
                 .anyMatch(c -> {
                     TopologyEdge e = c.topologyEdge();

@@ -30,6 +30,7 @@ public record ConfidenceResult(
     @JsonProperty("temporal_explanation") String temporalExplanation,
     // ── V.2-RCA-1A.4: topology edge ──
     @JsonProperty("topology_edge") TopologyEdge topologyEdge,
+    @JsonProperty("propagation_path") PropagationPath propagationPath,
     @JsonProperty("topology_causality_score") double topologyCausalityScore,
     @JsonProperty("diagnostic_quality") String diagnosticQuality,
     @JsonProperty("provider_blindness") List<String> providerBlindness
@@ -44,6 +45,6 @@ public record ConfidenceResult(
         this(hypothesisId, score, level, supportingFactors, counterFactors,
                 missingFactors, contradictions, decision, calibrationNotes,
                 0.0, "UNKNOWN", null, null, "",
-                TopologyEdge.NONE, 0.0, "FULL", List.of());
+                TopologyEdge.NONE, PropagationPath.NONE, 0.0, "FULL", List.of());
     }
 }

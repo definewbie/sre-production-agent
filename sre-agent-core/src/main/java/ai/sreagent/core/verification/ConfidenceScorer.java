@@ -146,6 +146,37 @@ public class ConfidenceScorer {
             TemporalAlignmentResult temporalResult,
             TopologyEdge topologyEdge
     ) {
+        return score(hypothesis, pattern, verification, evidence, temporalResult,
+                topologyEdge, PropagationPath.fromEdge(topologyEdge));
+    }
+
+    /**
+     * Score a single hypothesis with temporal alignment and a propagation path.
+     */
+    public ConfidenceResult score(
+            Hypothesis hypothesis,
+            DiagnosticPattern pattern,
+            VerificationResult verification,
+            List<Evidence> evidence,
+            TemporalAlignmentResult temporalResult,
+            PropagationPath propagationPath
+    ) {
+        TopologyEdge edge = propagationPath != null && propagationPath.isPresent()
+                ? propagationPath.edges().get(0)
+                : TopologyEdge.NONE;
+        return score(hypothesis, pattern, verification, evidence, temporalResult,
+                edge, propagationPath);
+    }
+
+    private ConfidenceResult score(
+            Hypothesis hypothesis,
+            DiagnosticPattern pattern,
+            VerificationResult verification,
+            List<Evidence> evidence,
+            TemporalAlignmentResult temporalResult,
+            TopologyEdge topologyEdge,
+            PropagationPath propagationPath
+    ) {
         Map<String, Double> weights = pattern.confidenceWeights();
 
         // Collect unique evidence types present in supporting and counter evidence
@@ -283,7 +314,7 @@ public class ConfidenceScorer {
 
         // Final score calculation
         double temporalScore = temporalResult != null ? temporalResult.score() : 0.0;
-        double topologyScore = topologyCausalityScore(pattern, topologyEdge);
+        double topologyScore = topologyCausalityScore(pattern, propagationPath);
 
         double rawScore = pattern.baseScore()
                 + weightedSupportingCoverage * SUPPORTING_BONUS_CAP
@@ -318,29 +349,30 @@ public class ConfidenceScorer {
                 temporalResult != null ? temporalResult.impactedFirstSeen() : null,
                 temporalResult != null ? temporalResult.explanation() : "",
                 topologyEdge,
+                propagationPath,
                 topologyScore,
                 providerHealth.diagnosticQuality(),
                 providerHealth.blindProviders()
         );
     }
 
-    private double topologyCausalityScore(DiagnosticPattern pattern, TopologyEdge topologyEdge) {
-        if (pattern == null || topologyEdge == null || !topologyEdge.isPresent()) {
+    private double topologyCausalityScore(DiagnosticPattern pattern, PropagationPath propagationPath) {
+        if (pattern == null || propagationPath == null || !propagationPath.isPresent()) {
             return 0.0;
         }
         if (!isTopologySensitivePattern(pattern.id())) {
             return 0.0;
         }
 
-        double confidenceMultiplier = switch (topologyEdge.edgeConfidence()) {
+        double confidenceMultiplier = switch (propagationPath.pathConfidence()) {
             case HIGH -> 1.0;
             case MEDIUM -> 0.70;
             case LOW -> 0.35;
         };
-        double pathMultiplier = topologyEdge.pathLength() <= 1
+        double pathMultiplier = propagationPath.pathLength() <= 1
                 ? 1.0
-                : Math.max(0.40, 1.0 / topologyEdge.pathLength());
-        double directionMultiplier = topologyEdge.direction() == PropagationDirection.UNKNOWN
+                : Math.max(0.40, 1.0 / propagationPath.pathLength());
+        double directionMultiplier = propagationPath.direction() == PropagationDirection.UNKNOWN
                 ? 0.50
                 : 1.0;
 
