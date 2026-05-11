@@ -29,15 +29,26 @@ public class ServiceTopology {
     @JsonProperty("upstream")
     private final Map<String, Set<String>> upstream;
 
+    /** edgeSources.get(A).get(B) = source for dependency edge A → B. */
+    private final Map<String, Map<String, TopologyEdgeSource>> edgeSources;
+
     /**
      * Create a topology from a list of service dependency declarations.
      *
      * @param serviceDeps each entry is [serviceName, [dep1, dep2, ...]]
      */
     public ServiceTopology(Map<String, List<String>> serviceDeps) {
+        this(serviceDeps, TopologyEdgeSource.CONFIGURED_TOPOLOGY);
+    }
+
+    /**
+     * Create a topology from dependency declarations with a shared edge source.
+     */
+    public ServiceTopology(Map<String, List<String>> serviceDeps, TopologyEdgeSource edgeSource) {
         this.services = new LinkedHashSet<>();
         this.downstream = new LinkedHashMap<>();
         this.upstream = new LinkedHashMap<>();
+        this.edgeSources = new LinkedHashMap<>();
 
         for (var entry : serviceDeps.entrySet()) {
             String service = entry.getKey();
@@ -50,6 +61,39 @@ public class ServiceTopology {
                 for (String dep : deps) {
                     services.add(dep);
                     upstream.computeIfAbsent(dep, k -> new LinkedHashSet<>()).add(service);
+                    edgeSources.computeIfAbsent(service, k -> new LinkedHashMap<>())
+                            .put(dep, edgeSource);
+                }
+            }
+        }
+    }
+
+    /**
+     * Create a topology with explicit per-edge source metadata.
+     */
+    public ServiceTopology(Map<String, List<String>> serviceDeps,
+                           Map<String, Map<String, TopologyEdgeSource>> edgeSources) {
+        this.services = new LinkedHashSet<>();
+        this.downstream = new LinkedHashMap<>();
+        this.upstream = new LinkedHashMap<>();
+        this.edgeSources = new LinkedHashMap<>();
+
+        for (var entry : serviceDeps.entrySet()) {
+            String service = entry.getKey();
+            List<String> deps = entry.getValue();
+
+            services.add(service);
+            downstream.computeIfAbsent(service, k -> new LinkedHashSet<>());
+            if (deps != null) {
+                downstream.get(service).addAll(deps);
+                for (String dep : deps) {
+                    services.add(dep);
+                    upstream.computeIfAbsent(dep, k -> new LinkedHashSet<>()).add(service);
+                    TopologyEdgeSource source = Optional.ofNullable(edgeSources.get(service))
+                            .map(m -> m.get(dep))
+                            .orElse(TopologyEdgeSource.CONFIGURED_TOPOLOGY);
+                    this.edgeSources.computeIfAbsent(service, k -> new LinkedHashMap<>())
+                            .put(dep, source);
                 }
             }
         }
@@ -75,6 +119,27 @@ public class ServiceTopology {
     /** All services that call this service (direct upstream). */
     public Set<String> getUpstream(String service) {
         return Collections.unmodifiableSet(upstream.getOrDefault(service, Set.of()));
+    }
+
+    /** All known services in deterministic insertion order. */
+    public Set<String> getServices() {
+        return Collections.unmodifiableSet(services);
+    }
+
+    /** Return a defensive copy of dependency declarations. */
+    public Map<String, List<String>> toDependencyMap() {
+        Map<String, List<String>> copy = new LinkedHashMap<>();
+        for (String service : services) {
+            copy.put(service, List.copyOf(downstream.getOrDefault(service, Set.of())));
+        }
+        return copy;
+    }
+
+    /** Return the source metadata for an edge, if known. */
+    public TopologyEdgeSource getEdgeSource(String caller, String dependency) {
+        return Optional.ofNullable(edgeSources.get(caller))
+                .map(m -> m.get(dependency))
+                .orElse(null);
     }
 
     /**
@@ -135,6 +200,24 @@ public class ServiceTopology {
     }
 
     /**
+     * Find a dependency path using per-edge source metadata.
+     */
+    public PropagationPath findDependencyPath(String caller, String dependency) {
+        List<String> path = shortestPath(caller, dependency, this::getDownstream);
+        if (path.isEmpty()) {
+            return PropagationPath.NONE;
+        }
+        List<TopologyEdge> edges = buildEdges(path, PropagationDirection.UPSTREAM_TO_DOWNSTREAM);
+        return PropagationPath.fromEdges(
+                path,
+                edges,
+                PropagationDirection.UPSTREAM_TO_DOWNSTREAM,
+                strongestSource(edges),
+                "Dependency path: " + String.join(" → ", path)
+        );
+    }
+
+    /**
      * Find a fault-impact path in propagation direction:
      * failed downstream dependency → ... → impacted upstream caller.
      */
@@ -156,6 +239,27 @@ public class ServiceTopology {
                 edges,
                 PropagationDirection.DOWNSTREAM_TO_UPSTREAM_IMPACT,
                 source,
+                "Impact path: " + String.join(" → ", propagationPath)
+        );
+    }
+
+    /**
+     * Find a fault-impact path using per-edge source metadata.
+     */
+    public PropagationPath findImpactPath(String failedDependency, String impactedCaller) {
+        List<String> callPath = shortestPath(impactedCaller, failedDependency, this::getDownstream);
+        if (callPath.isEmpty()) {
+            return PropagationPath.NONE;
+        }
+        List<String> propagationPath = new ArrayList<>(callPath);
+        Collections.reverse(propagationPath);
+        List<TopologyEdge> edges = buildEdges(
+                propagationPath, PropagationDirection.DOWNSTREAM_TO_UPSTREAM_IMPACT);
+        return PropagationPath.fromEdges(
+                propagationPath,
+                edges,
+                PropagationDirection.DOWNSTREAM_TO_UPSTREAM_IMPACT,
+                strongestSource(edges),
                 "Impact path: " + String.join(" → ", propagationPath)
         );
     }
@@ -230,5 +334,56 @@ public class ServiceTopology {
             ));
         }
         return edges;
+    }
+
+    private List<TopologyEdge> buildEdges(
+            List<String> path,
+            PropagationDirection direction
+    ) {
+        if (path.size() < 2) {
+            return List.of();
+        }
+        List<TopologyEdge> edges = new ArrayList<>();
+        for (int i = 0; i < path.size() - 1; i++) {
+            String from = path.get(i);
+            String to = path.get(i + 1);
+            TopologyEdgeSource source = sourceForPathEdge(from, to, direction);
+            edges.add(new TopologyEdge(
+                    from,
+                    to,
+                    source,
+                    TopologyEdge.deriveConfidence(source),
+                    direction,
+                    i + 1,
+                    from + " → " + to
+            ));
+        }
+        return edges;
+    }
+
+    private TopologyEdgeSource sourceForPathEdge(
+            String from,
+            String to,
+            PropagationDirection direction
+    ) {
+        if (direction == PropagationDirection.DOWNSTREAM_TO_UPSTREAM_IMPACT) {
+            TopologyEdgeSource reverse = getEdgeSource(to, from);
+            return reverse != null ? reverse : TopologyEdgeSource.CONFIGURED_TOPOLOGY;
+        }
+        TopologyEdgeSource source = getEdgeSource(from, to);
+        return source != null ? source : TopologyEdgeSource.CONFIGURED_TOPOLOGY;
+    }
+
+    private TopologyEdgeSource strongestSource(List<TopologyEdge> edges) {
+        if (edges.stream().anyMatch(e -> e.edgeSource() == TopologyEdgeSource.TRACE)) {
+            return TopologyEdgeSource.TRACE;
+        }
+        if (edges.stream().anyMatch(e -> e.edgeSource() == TopologyEdgeSource.OBSERVED_DEPENDENCY)) {
+            return TopologyEdgeSource.OBSERVED_DEPENDENCY;
+        }
+        if (edges.stream().anyMatch(e -> e.edgeSource() == TopologyEdgeSource.CONFIGURED_TOPOLOGY)) {
+            return TopologyEdgeSource.CONFIGURED_TOPOLOGY;
+        }
+        return TopologyEdgeSource.STATIC_FALLBACK;
     }
 }

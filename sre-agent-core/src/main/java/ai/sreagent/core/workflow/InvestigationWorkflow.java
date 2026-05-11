@@ -9,6 +9,7 @@ import ai.sreagent.core.hypothesis.HypothesisEngine;
 import ai.sreagent.core.patterns.BuiltinPatterns;
 import ai.sreagent.core.patterns.PatternRegistry;
 import ai.sreagent.core.report.MarkdownReporter;
+import ai.sreagent.core.topology.TopologyBuilder;
 import ai.sreagent.core.verification.ConfidenceScorer;
 import ai.sreagent.core.verification.HypothesisComparator;
 import ai.sreagent.core.verification.TemporalAligner;
@@ -67,6 +68,7 @@ public class InvestigationWorkflow {
 
         // ── V.2-RCA-1A.3: Derive problem window ──
         ProblemWindow problemWindow = ProblemWindow.deriveFromIncident(incident, evidence);
+        ServiceTopology effectiveTopology = new TopologyBuilder().build(topology, evidence);
         traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "PROBLEM_WINDOW_DERIVED",
                 Map.of("source", problemWindow.source(),
                         "problemStart", problemWindow.problemStart() != null ? problemWindow.problemStart().toString() : "none",
@@ -109,7 +111,7 @@ public class InvestigationWorkflow {
         // ── V.2-RCA-1A.4: Resolve propagation paths from configured topology ──
         TopologyPathResolver pathResolver = new TopologyPathResolver();
         Map<String, PropagationPath> propagationPaths =
-                pathResolver.resolveAll(topology, evidence, hypotheses, patternMap);
+                pathResolver.resolveAll(effectiveTopology, evidence, hypotheses, patternMap);
         for (var entry : propagationPaths.entrySet()) {
             traceStore.append(makeEvent(traceStore, incidentId, eventCounter, "PROPAGATION_PATH_RESOLVED",
                     Map.of("hypothesisId", entry.getKey(),

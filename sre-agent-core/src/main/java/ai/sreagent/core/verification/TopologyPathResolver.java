@@ -56,8 +56,7 @@ public class TopologyPathResolver {
             if (candidate.equals(affected)) {
                 continue;
             }
-            PropagationPath path = topology.findImpactPath(
-                    candidate, affected, TopologyEdgeSource.CONFIGURED_TOPOLOGY);
+            PropagationPath path = topology.findImpactPath(candidate, affected);
             if (path.isPresent()) {
                 return path;
             }
