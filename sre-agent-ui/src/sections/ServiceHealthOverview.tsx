@@ -487,8 +487,73 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
               <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 400 }}>Live</span>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', gap: 0, flexWrap: 'nowrap' }}>
-            {svcs.map((svc, i) => {
+          <div style={{ padding: '24px 16px' }}>
+            {(() => {
+              const serviceByName = new Map(svcs.map(svc => [svc.name, svc]))
+              const incoming = new Set(summary.topology.map(edge => edge.to))
+              const rootName = svcs.find(svc => !incoming.has(svc.name))?.name || svcs[0]?.name
+              const rootSvc = rootName ? serviceByName.get(rootName) : undefined
+              const downstreamEdges = summary.topology.filter(edge => edge.from === rootName)
+              const downstreamSvcs = downstreamEdges
+                .map(edge => serviceByName.get(edge.to))
+                .filter((svc): svc is ServiceHealthView => Boolean(svc))
+
+              const renderNode = (svc: ServiceHealthView) => {
+                const isAbnormal = svc.status === 'down' || svc.status === 'degraded'
+                const detailText = isAbnormal
+                  ? (svc.faultEnabled ? 'fault: ' + svc.faultType : (svc.errorRate || 'unreachable'))
+                  : (svc.p95Latency || '正常')
+                return (
+                  <div
+                    className={'topo-node ' + topoNodeClass[svc.status]}
+                    style={{ cursor: 'pointer', minWidth: 150 }}
+                    onClick={() => onServiceClick(svc.name)}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{svc.name}</div>
+                    <div style={{ marginTop: 6 }}>
+                      <span className={statusBadgeClass[svc.status]}>{statusLabel[svc.status]}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: isAbnormal ? 'var(--red)' : 'var(--green)', marginTop: 4 }}>
+                      {detailText}
+                    </div>
+                  </div>
+                )
+              }
+
+              if (rootSvc && downstreamSvcs.length > 1) {
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 260px) 120px minmax(220px, 1fr)', alignItems: 'center', columnGap: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                      {renderNode(rootSvc)}
+                    </div>
+                    <svg width="120" height="170" viewBox="0 0 120 170" aria-hidden="true">
+                      {downstreamEdges.map((edge, index) => {
+                        const targetY = downstreamEdges.length === 2 ? (index === 0 ? 45 : 125) : 85
+                        const edgeColor = topoEdgeColor[edge.status]
+                        return (
+                          <g key={edge.from + edge.to}>
+                            <path
+                              d={`M 0 85 C 45 85, 55 ${targetY}, 104 ${targetY}`}
+                              fill="none"
+                              stroke={edgeColor}
+                              strokeWidth="2"
+                            />
+                            <polygon
+                              points={`104,${targetY - 5} 116,${targetY} 104,${targetY + 5}`}
+                              fill={edgeColor}
+                            />
+                          </g>
+                        )
+                      })}
+                    </svg>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center' }}>
+                      {downstreamSvcs.map(renderNode)}
+                    </div>
+                  </div>
+                )
+              }
+
+              return svcs.map((svc, i) => {
               const isAbnormal = svc.status === 'down' || svc.status === 'degraded'
               const detailText = isAbnormal
                 ? (svc.faultEnabled ? 'fault: ' + svc.faultType : (svc.errorRate || 'unreachable'))
@@ -524,7 +589,8 @@ export default function ServiceHealthOverview({ onServiceClick, onRcaTriggered }
                   })()}
                 </span>
               )
-            })}
+              })
+            })()}
           </div>
         </div>
 
