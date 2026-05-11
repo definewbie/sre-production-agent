@@ -8,7 +8,7 @@
 
 SRE Production Agent 的 RCA 模型不是简单的 pattern matching，而是以 **Problem Window** 为时间边界，以 **Topology Graph** 为上下文，以 **Propagation Path** 识别影响传播，以 **Candidate Root Cause Entity** 为推理对象，再结合 metrics / logs / traces / events 做 **Fault Mode Classification** 和 **Causal Scoring**。
 
-当前系统已完成从 pattern-first 到 topology-first 的第一步重构（Provider Alias 分离、证据类型归一化、Score Breakdown 可观测）。**Problem Window & Temporal Alignment 已于 V.2-RCA-1A.3 落地**；Topology Graph、Propagation Path 仍在设计阶段，尚未在代码中落地。
+当前系统已完成从 pattern-first 到 topology-first 的第一步重构（Provider Alias 分离、证据类型归一化、Score Breakdown 可观测）。**Problem Window & Temporal Alignment 已于 V.2-RCA-1A.3 落地**；V.2-RCA-1A.4 的 Topology Graph 已进入部分实现阶段，包含轻量级 `ServiceTopology`、`TopologyEdge`、配置拓扑加载和 bounded `topologyCausalityScore`，但完整 Propagation Path 计算仍未完成。
 
 ---
 
@@ -79,8 +79,8 @@ flowchart TD
 |------|------|------|----------|
 | Problem Window | Alert startsAt, lookback config | 时间边界 [problemStart, problemEnd] | **已实现** — `ProblemWindow.deriveFromIncident()` + 可配置 lookback/lookahead |
 | Affected Entity | Alert labels, service name | 受影响实体列表 | **部分实现** — 从 alert 提取 service |
-| Topology Graph | Trace data, K8s labels, config | 实体间依赖图 | **设计阶段** — demo-services 有硬编码拓扑 |
-| Propagation Path | Topology + affected entity | 传播路径（从候选根因到受影响实体） | **设计阶段** |
+| Topology Graph | Trace data, K8s labels, config | 实体间依赖图 | **部分实现** — `ServiceTopology` + `TopologyProvider` + configured topology |
+| Propagation Path | Topology + affected entity | 传播路径（从候选根因到受影响实体） | **部分实现** — `TopologyEdge` 上下文已进入报告和 bounded scoring，完整路径计算未完成 |
 | Candidate Root Cause | Propagation path leaf nodes | 候选根因实体列表 | **设计阶段** — 当前直接生成 Pattern |
 | Fault Mode Classification | Evidence + candidate entity | Fault mode 标签 | **部分实现** — DiagnosticPattern 包含 fault mode 语义 |
 | Evidence Corroboration | Multi-source evidence | 跨源佐证评分 | **部分实现** — corroboratingEvidenceTypes 已支持 |
@@ -169,7 +169,7 @@ edgeSource      — trace, observed, configured, static
 edgeConfidence  — high, medium, low
 ```
 
-**当前状态：** demo-services 中存在硬编码拓扑（order-service → payment-service, order-service → inventory-service），但尚无独立的 Topology Graph 数据结构或构建器。trace provider 可产出 span parent-child 关系，但未被结构化消费为拓扑图。
+**当前状态：** 已有轻量级 `ServiceTopology` 数据结构、`TopologyProvider` 配置加载器和 `topology.yaml`，demo-services 拓扑可配置为 `order-service → payment-service / inventory-service`。`LiveEvidenceCollector` 已使用 topology 跳过叶子节点的 downstream 查询，`IncidentService` 已按 topology chain 聚合受影响服务证据，`IncidentDetector` 已用 topology fingerprint 做链路级去重。尚缺独立 `TopologyBuilder`，trace provider 产出的 span parent-child 关系还没有统一构建成 topology graph。
 
 ---
 
@@ -197,7 +197,7 @@ crash loop            → service availability drop
 
 **方向性：** 异常传播方向与调用方向相反。被调用方异常 → 调用方受影响。这是 RCA 推理的核心规则。
 
-**当前状态：** 传播模型未在代码中实现。VerificationEngine 中的 contradiction rules（如 `downstream_latency_spike` 与 `error_rate_spike` 的关系）隐式编码了部分传播逻辑，但缺少显式的 Propagation Path 抽象。
+**当前状态：** 已有 `TopologyEdge` 作为单跳传播上下文，并在 `ConfidenceResult` / Markdown report 中展示 edge source、edge confidence、direction、path length。`ConfidenceScorer` 对 `downstream_dependency_latency` 这类依赖传播假设引入 bounded `topologyCausalityScore`。但系统仍缺少完整的 `PropagationPath` 抽象和多跳路径计算；VerificationEngine 中的 contradiction rules 仍隐式承担部分传播语义。
 
 ---
 
@@ -346,7 +346,7 @@ CrashLoop 是 local fault，可以没有 upstream/downstream path。
 此时 topologyCausalityScore 可以为 0 或使用 pod→node→cluster 的 host 拓扑。
 ```
 
-**当前状态：** 拓扑模型未实现。无 Topology Graph、无路径计算、无 edge confidence。
+**当前状态：** 拓扑模型已部分实现。`ServiceTopology` 表达 service dependency graph，`TopologyEdge` 表达单条 RCA 相关依赖边，支持 `edgeSource`、`edgeConfidence`、`direction`、`pathLength` 和解释文本。`ConfidenceScorer` 可从 trace / service_dependency_match / observed dependency evidence 解析 `TopologyEdge`，并对依赖传播类假设给出 bounded `topologyCausalityScore`。尚未实现独立 `TopologyBuilder`、多跳 `PropagationPath` 和 graph-level path confidence。
 
 ---
 
@@ -493,7 +493,7 @@ counterSignals:
 ```
 finalScore =
     temporalAlignmentScore
-  + topologyCausalityScore
+    + topologyCausalityScore
   + entityAnomalyScore
   + propagationScore
   + faultModeEvidenceScore
@@ -543,12 +543,14 @@ ambiguityPenalty (0-0.10):
 rawScore = baseScore
     + weightedSupportingCoverage × 0.60     // 对应 faultModeEvidenceScore
     + weightedCorroboratingCoverage × 0.10  // 对应 multiSourceCorroborationScore（部分）
+    + temporalAlignmentScore                // V.2-RCA-1A.3 bounded [-0.15, +0.15]
+    + topologyCausalityScore                // V.2-RCA-1A.4 bounded [0.00, +0.10]
     - weightedCounterCoverage × 0.30        // 对应 counterEvidencePenalty
     - missingPenalty                        // 对应 entityAnomalyScore（反向）
     - contradictionPenalty                  // 对应 propagationScore（隐式）
 ```
 
-**缺失维度：** `temporalAlignmentScore`、`topologyCausalityScore`、`entityAnomalyScore`（正向）、`propagationScore`（显式）、`ambiguityPenalty`。
+**缺失维度：** `entityAnomalyScore`（正向）、`propagationScore`（显式、多跳）、`ambiguityPenalty`。`topologyCausalityScore` 当前只对依赖传播类假设提供小幅 bounded bonus，还不是完整 topology-aware causal scoring。
 
 ---
 
@@ -810,10 +812,11 @@ V.2-RCA-1A.3 ✅:  Problem Window & Temporal Alignment
                   - 集成到 ConfidenceScorer 评分公式
                   - 语义边界说明（V2_RCA_1A_3_TEMPORAL_SEMANTICS_NOTES.md）
 
-V.2-RCA-1A.4:     Propagation Path Quality / Edge Confidence
-                  - Topology Graph 数据结构
-                  - edgeSource 优先级系统
-                  - topologyCausalityScore 实现
+V.2-RCA-1A.4 🔧:  Topology Graph & Propagation Path Quality
+                  - ServiceTopology / TopologyEdge 数据结构（部分已实现）
+                  - edgeSource / edgeConfidence 优先级系统（部分已实现）
+                  - bounded topologyCausalityScore（部分已实现）
+                  - PropagationPath 多跳路径计算（待实现）
 
 V.2-RCA-1A.5:     Fault Mode Evidence Contract
                   - FaultMode 枚举 + FaultModeClassifier
@@ -893,17 +896,16 @@ temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
 |------|------|
 | Fault mode classification | DiagnosticPattern 隐式承载 fault mode 语义，但无独立 FaultMode 枚举/分类器 |
 | Entity 建模 | Evidence.service 字段存在，但无 affectedEntity/candidateEntity 一级抽象 |
-| Topology context | EvidenceCausalRole.TOPOLOGY_CONTEXT 已定义，demo-services 有硬编码拓扑，但无结构化 Topology Graph |
-| Causal scoring dimensions | ConfidenceScorer v2 覆盖 faultModeEvidence + counterPenalty + corroborating + temporal，缺少 topology/propagation |
+| Topology context | `ServiceTopology` / `TopologyProvider` / `TopologyEdge` 已存在，configured topology 可加载，trace/observed evidence 可解析为 edge |
+| Causal scoring dimensions | ConfidenceScorer v2 覆盖 faultModeEvidence + counterPenalty + corroborating + temporal + bounded topology，缺少显式 propagation |
 | Score Breakdown 前端展示 | ScoreBreakdown 数据结构已产出，前端 RCA 详情页已展示 |
 
 ### Missing ❌
 
 | 能力 | 说明 |
 |------|------|
-| Topology Graph 构建器 | 无 TopologyBuilder 类 |
-| Propagation Path 计算 | 无传播路径抽象 |
-| topologyCausalityScore | 拓扑评分未实现 |
+| Topology Graph 构建器 | 无统一 TopologyBuilder 类；configured topology 已有 provider，trace topology 尚未结构化合并 |
+| Propagation Path 计算 | 无多跳传播路径抽象 |
 | propagationScore | 传播评分未实现（仅在 contradiction rules 中隐式存在） |
 | entityAnomalyScore（正向） | 当前仅通过 missingPenalty 反向表达 |
 | ambiguityPenalty | 竞争假设仅通过 gap 比较，无显式惩罚 |
@@ -921,12 +923,12 @@ temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
 
 ### Next Step
 
-建议进入 **V.2-RCA-1B：Topology Graph & Propagation Path**。
+建议继续完成 **V.2-RCA-1A.4：Topology Graph & Propagation Path Quality**。
 
 理由：
 1. Topology Graph 是 propagation path 和 topologyCausalityScore 的前提
-2. 实现量可控（~3 个类：TopologyGraph 数据模型、TopologyBuilder 构建器、与现有 demo-services 对接）
-3. 可以独立落地并跑通全量测试
+2. 当前已具备 `ServiceTopology` / `TopologyEdge` 雏形，下一步应补齐多跳 `PropagationPath`
+3. 可以独立落地并跑通全量测试，然后再进入 1A.5 Fault Mode Evidence Contract
 
 ---
 

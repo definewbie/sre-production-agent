@@ -64,6 +64,9 @@ public class ConfidenceScorer {
     /** Maximum bonus from corroborating evidence (optional — no penalty when absent) */
     private static final double CORROBORATING_BONUS_CAP = 0.10;
 
+    /** Maximum bounded bonus from topology causality for dependency-propagation hypotheses. */
+    private static final double TOPOLOGY_CAUSALITY_BONUS_CAP = 0.10;
+
     private static final Set<String> PROVIDER_ALIAS_PREFIXES = Set.of("metric_", "log_", "trace_");
     private static final List<String> OBSERVABILITY_PROVIDERS = List.of("metric", "log", "trace");
 
@@ -280,6 +283,7 @@ public class ConfidenceScorer {
 
         // Final score calculation
         double temporalScore = temporalResult != null ? temporalResult.score() : 0.0;
+        double topologyScore = topologyCausalityScore(pattern, topologyEdge);
 
         double rawScore = pattern.baseScore()
                 + weightedSupportingCoverage * SUPPORTING_BONUS_CAP
@@ -287,7 +291,8 @@ public class ConfidenceScorer {
                 - weightedCounterCoverage * COUNTER_PENALTY_CAP
                 - missingPenalty
                 - contradictionPenalty
-                + temporalScore;
+                + temporalScore
+                + topologyScore;
 
         double cappedScore = providerHealth.blindProviders().size() >= 2
                 ? Math.min(rawScore, DEGRADED_CONFIDENCE_CAP)
@@ -313,9 +318,41 @@ public class ConfidenceScorer {
                 temporalResult != null ? temporalResult.impactedFirstSeen() : null,
                 temporalResult != null ? temporalResult.explanation() : "",
                 topologyEdge,
+                topologyScore,
                 providerHealth.diagnosticQuality(),
                 providerHealth.blindProviders()
         );
+    }
+
+    private double topologyCausalityScore(DiagnosticPattern pattern, TopologyEdge topologyEdge) {
+        if (pattern == null || topologyEdge == null || !topologyEdge.isPresent()) {
+            return 0.0;
+        }
+        if (!isTopologySensitivePattern(pattern.id())) {
+            return 0.0;
+        }
+
+        double confidenceMultiplier = switch (topologyEdge.edgeConfidence()) {
+            case HIGH -> 1.0;
+            case MEDIUM -> 0.70;
+            case LOW -> 0.35;
+        };
+        double pathMultiplier = topologyEdge.pathLength() <= 1
+                ? 1.0
+                : Math.max(0.40, 1.0 / topologyEdge.pathLength());
+        double directionMultiplier = topologyEdge.direction() == PropagationDirection.UNKNOWN
+                ? 0.50
+                : 1.0;
+
+        double score = TOPOLOGY_CAUSALITY_BONUS_CAP
+                * confidenceMultiplier
+                * pathMultiplier
+                * directionMultiplier;
+        return Math.round(score * 100.0) / 100.0;
+    }
+
+    private boolean isTopologySensitivePattern(String patternId) {
+        return "downstream_dependency_latency".equals(patternId);
     }
 
     private ProviderHealth assessProviderHealth(List<Evidence> evidence) {
@@ -427,7 +464,7 @@ public class ConfidenceScorer {
             TopologyEdgeSource edgeSrc = switch (src) {
                 case "trace" -> TopologyEdgeSource.TRACE;
                 case "metric", "log", "prometheus", "loki" -> TopologyEdgeSource.OBSERVED_DEPENDENCY;
-                case "k8s", "kubernetes", "config" -> TopologyEdgeSource.CONFIGURED_TOPOLOGY;
+                case "k8s", "kubernetes", "config", "topology" -> TopologyEdgeSource.CONFIGURED_TOPOLOGY;
                 default -> TopologyEdgeSource.STATIC_FALLBACK;
             };
             return buildEdge(
@@ -488,6 +525,13 @@ public class ConfidenceScorer {
                 return after.substring(0, spaceIdx).replaceAll("[^a-zA-Z0-9_-]", "");
             }
             return after.replaceAll("[^a-zA-Z0-9_-]", "");
+        }
+
+        java.util.regex.Matcher dependsMatcher = java.util.regex.Pattern
+                .compile("(?i)depends\\s+on\\s+([a-zA-Z0-9_-]+)")
+                .matcher(content);
+        if (dependsMatcher.find()) {
+            return dependsMatcher.group(1);
         }
 
         // Try to find service name from evidence.service that differs from the source

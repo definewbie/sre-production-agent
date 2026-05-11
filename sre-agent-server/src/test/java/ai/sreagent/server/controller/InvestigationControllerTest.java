@@ -44,12 +44,12 @@ class InvestigationControllerTest {
     void postScenarioEReturns200() throws Exception {
         mockMvc.perform(post("/api/investigations/scenario-e"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.decisionType").value("insufficient_evidence"))
-                .andExpect(jsonPath("$.selectedHypothesisId").value("hyp_deployment_regression"))
-                .andExpect(jsonPath("$.scoreGap").value(closeTo(0.02, 0.01)))
-                .andExpect(jsonPath("$.confidenceScore").value(closeTo(0.36, 0.01)))
+                .andExpect(jsonPath("$.decisionType").value("uncertain_requires_more_evidence"))
+                .andExpect(jsonPath("$.selectedHypothesisId").value("hyp_downstream_dependency_latency"))
+                .andExpect(jsonPath("$.scoreGap").value(closeTo(0.05, 0.01)))
+                .andExpect(jsonPath("$.confidenceScore").value(closeTo(0.41, 0.01)))
                 .andExpect(jsonPath("$.scores.hyp_deployment_regression").value(closeTo(0.36, 0.01)))
-                .andExpect(jsonPath("$.scores.hyp_downstream_dependency_latency").value(closeTo(0.34, 0.01)))
+                .andExpect(jsonPath("$.scores.hyp_downstream_dependency_latency").value(closeTo(0.41, 0.01)))
                 .andExpect(jsonPath("$.competingHypotheses").isEmpty())
                 .andExpect(jsonPath("$.reportUrl").value(containsString("/report")))
                 .andExpect(jsonPath("$.traceUrl").value(containsString("/trace")));
@@ -69,7 +69,7 @@ class InvestigationControllerTest {
         mockMvc.perform(get("/api/investigations/" + incidentId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.incidentId").value(incidentId))
-                .andExpect(jsonPath("$.decisionType").value("insufficient_evidence"));
+                .andExpect(jsonPath("$.decisionType").value("uncertain_requires_more_evidence"));
     }
 
     @Test

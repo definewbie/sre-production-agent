@@ -76,7 +76,7 @@ class ConfidenceScorerTest {
     }
 
     @Test
-    void downstreamDependencyLatency_shouldScore23() {
+    void downstreamDependencyLatency_withTopology_shouldScore30() {
         DiagnosticPattern pattern = registry.get("downstream_dependency_latency").orElseThrow();
         Hypothesis hypothesis = new Hypothesis(
                 "hyp_downstream_dependency_latency", "inc_test", "downstream_dependency_latency",
@@ -87,7 +87,8 @@ class ConfidenceScorerTest {
 
         ConfidenceResult result = scorer.score(hypothesis, pattern, vr, scenarioEEvidence);
 
-        assertThat(result.score()).isCloseTo(0.23, withPercentage(5.0));
+        assertThat(result.score()).isCloseTo(0.30, withPercentage(5.0));
+        assertThat(result.topologyCausalityScore()).isGreaterThan(0.0);
         assertThat(result.decision()).isEqualTo("insufficient_evidence");
         assertThat(result.supportingFactors()).isNotEmpty();
         assertThat(result.counterFactors()).isNotEmpty();
@@ -464,7 +465,8 @@ class ConfidenceScorerTest {
         assertThat(edge.toService()).contains("payment-service");
         assertThat(edge.pathLength()).isEqualTo(1);
         assertThat(edge.direction()).isEqualTo(PropagationDirection.UPSTREAM_TO_DOWNSTREAM);
-        assertThat(edge.edgeConfidence()).isEqualTo(TopologyEdgeConfidence.LOW);
+        assertThat(edge.edgeConfidence()).isEqualTo(TopologyEdgeConfidence.MEDIUM);
+        assertThat(result.topologyCausalityScore()).isEqualTo(0.0);
     }
 
     /** No topology evidence → TopologyEdge.NONE. */
@@ -490,9 +492,10 @@ class ConfidenceScorerTest {
         assertThat(edge).isNotNull();
         assertThat(edge.isPresent()).isFalse();
         assertThat(edge.edgeConfidence()).isEqualTo(TopologyEdgeConfidence.LOW);
+        assertThat(result.topologyCausalityScore()).isEqualTo(0.0);
     }
 
-    /** Edge source → confidence tier mapping: topology source → HIGH. */
+    /** Edge source → confidence tier mapping: configured topology source → MEDIUM. */
     @Test
     void topologyEdge_confidenceTiers_areCorrect() {
         Evidence topoEvidence = new Evidence("ev_topo", "inc_tier", "topology",
@@ -506,7 +509,50 @@ class ConfidenceScorerTest {
         ConfidenceResult r = scorer.score(h, pattern, vr, List.of(topoEvidence));
 
         assertThat(r.topologyEdge().isPresent()).isTrue();
-        assertThat(r.topologyEdge().edgeConfidence()).isEqualTo(TopologyEdgeConfidence.LOW);
+        assertThat(r.topologyEdge().toService()).isEqualTo("svc-b");
+        assertThat(r.topologyEdge().edgeConfidence()).isEqualTo(TopologyEdgeConfidence.MEDIUM);
+        assertThat(r.topologyCausalityScore()).isEqualTo(0.0);
+    }
+
+    /** Dependency-propagation hypotheses receive a bounded topology bonus. */
+    @Test
+    void topologyCausalityScore_downstreamPattern_shouldReceiveBoundedBonus() {
+        Evidence traceTopology = new Evidence("ev_trace_topo", "inc_toposcore", "trace",
+                "trace_dependency_path", "order-service", Instant.now(),
+                "order-service → payment-service", Map.of(), 0.90);
+        Evidence timeout = new Evidence("ev_timeout", "inc_toposcore", "loki",
+                "log_downstream_timeout", "order-service", Instant.now(),
+                "Timeout calling payment-service", Map.of(), 0.80);
+
+        DiagnosticPattern pattern = registry.get("downstream_dependency_latency").orElseThrow();
+        Hypothesis h = new Hypothesis("hyp_downstream_dependency_latency", "inc_toposcore",
+                "downstream_dependency_latency", "Downstream latency",
+                "dependency_latency", "order-service", "payment-service");
+        List<Evidence> evidence = List.of(traceTopology, timeout);
+        VerificationResult vr = verificationEngine.verify(h, pattern, evidence);
+        ConfidenceResult r = scorer.score(h, pattern, vr, evidence);
+
+        assertThat(r.topologyEdge().isPresent()).isTrue();
+        assertThat(r.topologyEdge().edgeConfidence()).isEqualTo(TopologyEdgeConfidence.HIGH);
+        assertThat(r.topologyCausalityScore()).isEqualTo(0.10);
+    }
+
+    /** Non-topology-sensitive hypotheses keep topology context but do not get topology score. */
+    @Test
+    void topologyCausalityScore_deploymentPattern_shouldRemainNeutral() {
+        Evidence traceTopology = new Evidence("ev_trace_topo_deploy", "inc_toponeutral", "trace",
+                "trace_dependency_path", "order-service", Instant.now(),
+                "order-service → payment-service", Map.of(), 0.90);
+
+        DiagnosticPattern pattern = registry.get("deployment_regression").orElseThrow();
+        Hypothesis h = new Hypothesis("hyp_deployment_regression", "inc_toponeutral",
+                "deployment_regression", "Deployment regression",
+                "change_regression", "order-service", "deployment");
+        VerificationResult vr = verificationEngine.verify(h, pattern, List.of(traceTopology));
+        ConfidenceResult r = scorer.score(h, pattern, vr, List.of(traceTopology));
+
+        assertThat(r.topologyEdge().isPresent()).isTrue();
+        assertThat(r.topologyCausalityScore()).isEqualTo(0.0);
     }
 
     /** scoreAll() produces multiple results, each with correct topology edge. */

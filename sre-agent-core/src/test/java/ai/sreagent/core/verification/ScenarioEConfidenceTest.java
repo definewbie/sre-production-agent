@@ -93,17 +93,18 @@ class ScenarioEConfidenceTest {
     }
 
     @Test
-    void downstreamDependencyLatency_shouldScore23() {
+    void downstreamDependencyLatency_withTopology_shouldScore30() {
         ConfidenceResult result = findConfidence("hyp_downstream_dependency_latency");
-        assertThat(result.score()).isCloseTo(0.23, withPercentage(5.0));
+        assertThat(result.score()).isCloseTo(0.30, withPercentage(5.0));
+        assertThat(result.topologyCausalityScore()).isGreaterThan(0.0);
     }
 
     @Test
-    void scoreGap_shouldBe02() {
+    void scoreGap_shouldBe05() {
         HypothesisComparator comparator = new HypothesisComparator();
         HypothesisComparison comparison = comparator.compare(incident, confidences, verifications, evidence);
 
-        assertThat(comparison.scoreGap()).isCloseTo(0.02, withPercentage(10.0));
+        assertThat(comparison.scoreGap()).isCloseTo(0.05, withPercentage(10.0));
     }
 
     @Test
@@ -120,7 +121,7 @@ class ScenarioEConfidenceTest {
         HypothesisComparator comparator = new HypothesisComparator();
         HypothesisComparison comparison = comparator.compare(incident, confidences, verifications, evidence);
 
-        assertThat(comparison.leadingHypothesisId()).isEqualTo("hyp_deployment_regression");
+        assertThat(comparison.leadingHypothesisId()).isEqualTo("hyp_downstream_dependency_latency");
     }
 
     @Test
