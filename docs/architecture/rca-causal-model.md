@@ -4,6 +4,10 @@
 **状态：** 设计文档，非实现完成报告  
 **最后更新：** 2026-05-09
 
+> 后续设计补充：  
+> - [RCA Causal Reasoning V2 Design](./rca-causal-reasoning-v2-design.md)  
+> - [RCA Causal Reasoning V2 Scenario Derivations](./rca-causal-reasoning-v2-scenarios.md)
+
 ## 摘要
 
 SRE Production Agent 的 RCA 模型不是简单的 pattern matching，而是以 **Problem Window** 为时间边界，以 **Topology Graph** 为上下文，以 **Propagation Path** 识别影响传播，以 **Candidate Root Cause Entity** 为推理对象，再结合 metrics / logs / traces / events 做 **Fault Mode Classification** 和 **Causal Scoring**。
