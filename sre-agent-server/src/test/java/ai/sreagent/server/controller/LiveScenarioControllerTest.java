@@ -76,6 +76,20 @@ class LiveScenarioControllerTest {
     }
 
     @Test
+    void getScenarioDetailByIdReturnsResult() throws Exception {
+        String body = mockMvc.perform(get("/api/live-scenario/simulate"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        String scenarioId = objectMapper
+                .readTree(body).get("scenarioId").asText();
+
+        mockMvc.perform(get("/api/live-scenario/detail/" + scenarioId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.scenarioId").value(scenarioId));
+    }
+
+    @Test
     void getUnknownScenarioIdReturns404() throws Exception {
         mockMvc.perform(get("/api/live-scenario/nonexistent-id"))
                 .andExpect(status().isNotFound());

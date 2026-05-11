@@ -1058,9 +1058,13 @@ export async function getEvidenceDrilldownView(): Promise<{ data: EvidenceDrilld
   return { data: view, error: null }
 }
 
-/** Get evidence drilldown for a specific RCA Run by scenarioId. */
+/** Get evidence drilldown for a specific RCA run by incidentId or scenarioId. */
 export async function getEvidenceDrilldownForRun(runId: string): Promise<{ data: EvidenceDrilldownView | null; error: string | null }> {
-  const result = await request<Record<string, unknown>>('/api/live-scenario/' + encodeURIComponent(runId))
+  const encodedRunId = encodeURIComponent(runId)
+  let result = await request<Record<string, unknown>>('/api/incidents/' + encodedRunId + '/rca')
+  if (result.error) {
+    result = await request<Record<string, unknown>>('/api/live-scenario/detail/' + encodedRunId)
+  }
   if (result.error) return { data: null, error: result.error }
   if (!result.data) return { data: null, error: null }
   const view = mapEvidenceDrilldownView(result.data)

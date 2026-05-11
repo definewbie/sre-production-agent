@@ -112,11 +112,13 @@ public class LiveScenarioService {
                 if (reachableCount == 0) {
                     log.warn("Pre-flight check failed: no demo services reachable. " +
                             "Aborting live investigation to avoid RCA with zero evidence.");
-                    return LiveScenarioResult.failed(scenarioId,
+                    LiveScenarioResult failed = LiveScenarioResult.failed(scenarioId,
                             "Scenario G: Payment Latency → Order Error Spike",
                             "Demo services 不可达（order/payment/inventory 均无响应）。" +
                             "请先部署 demo services 到 K8s（scripts/demo-services/deploy-demo-services.sh），" +
                             "然后再发起实时排查。如无 K8s 环境，可使用 simulation 模式。");
+                    resultStore.put(scenarioId, failed);
+                    return failed;
                 }
                 if (reachableCount < preflight.services().size()) {
                     log.warn("Pre-flight check: {}/{} demo services reachable. " +
@@ -247,8 +249,10 @@ public class LiveScenarioService {
             if (!isSimulation) {
                 try { demoClient.setAllFaultConfig(Map.of("mode", "normal")); } catch (Exception ignored) {}
             }
-            return LiveScenarioResult.failed(scenarioId,
+            LiveScenarioResult failed = LiveScenarioResult.failed(scenarioId,
                     "Scenario G: Payment Latency → Order Error Spike", e.getMessage());
+            resultStore.put(scenarioId, failed);
+            return failed;
         }
     }
 

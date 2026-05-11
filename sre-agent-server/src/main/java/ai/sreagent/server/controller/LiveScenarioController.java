@@ -79,6 +79,15 @@ public class LiveScenarioController {
     }
 
     /**
+     * Get a specific scenario result by ID.
+     * GET /api/live-scenario/detail/{scenarioId}
+     */
+    @GetMapping("/detail/{scenarioId}")
+    public ResponseEntity<LiveScenarioResult> getResultDetail(@PathVariable String scenarioId) {
+        return getResult(scenarioId);
+    }
+
+    /**
      * List all scenario results.
      * GET /api/live-scenario
      */
