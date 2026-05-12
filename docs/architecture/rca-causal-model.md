@@ -1,18 +1,49 @@
 # RCA Causal Model
 
-**版本：** V.2-RCA-1A.2 Design Doc  
+**版本：** V.2-RCA Causal Model Overview  
 **状态：** 设计文档，非实现完成报告  
-**最后更新：** 2026-05-09
+**最后更新：** 2026-05-12
 
 > 后续设计补充：  
 > - [RCA Causal Reasoning V2 Design](./rca-causal-reasoning-v2-design.md)  
 > - [RCA Causal Reasoning V2 Scenario Derivations](./rca-causal-reasoning-v2-scenarios.md)
+> - [RCA Causal Algorithm V2](./rca-causal-algorithm-v2.md)
+> - [RCA Causal Design Review](./rca-causal-design-review.md)
+> - [RCA Product Output Contract](./rca-product-output-contract.md)
+> - [RCA Golden Fixture Contract](./rca-golden-fixture-contract.md)
+> - [RCA Interaction PRD](../prd/rca_interaction_prd.md)
+> - [RCA Interaction Prototype HTML](../prd/rca_interaction_prototype.html)
 
 ## 摘要
 
-SRE Production Agent 的 RCA 模型不是简单的 pattern matching，而是以 **Problem Window** 为时间边界，以 **Topology Graph** 为上下文，以 **Propagation Path** 识别影响传播，以 **Candidate Root Cause Entity** 为推理对象，再结合 metrics / logs / traces / events 做 **Fault Mode Classification** 和 **Causal Scoring**。
+SRE Production Agent 的 RCA 模型不是简单的 pattern matching，也不应该由一个手工调权重的 `ConfidenceScorer` 直接裁决根因。V2 的目标模型是以 **Problem Window** 为时间边界，以 **Topology Graph** 为上下文，以 **Candidate Root Cause Entity** 为推理对象，把 telemetry / events / actions / topology 统一成可验证的因果声明，再用硬性因果规则限制结论上限。
 
-当前系统已完成从 pattern-first 到 topology-first 的第一步重构（Provider Alias 分离、证据类型归一化、Score Breakdown 可观测）。**Problem Window & Temporal Alignment 已于 V.2-RCA-1A.3 落地**；V.2-RCA-1A.4 的 Topology Graph 已进入部分实现阶段，包含轻量级 `ServiceTopology`、`TopologyEdge`、`PropagationPath`、配置拓扑加载和 bounded `topologyCausalityScore`。当前仍缺少的是把 live topology 自动注入 core workflow 的完整闭环，以及更细粒度的显式 `propagationScore`。
+新的总原则是：
+
+```text
+hard causal guards first
+numeric confidence second
+LLM/RAG/GraphRAG may propose and enrich
+deterministic causal engine validates and decides
+```
+
+因此，`ConfidenceScorer` 的长期定位应从“根因裁判”降级为 `ConfidenceCalibrator`：它只在 evidence contract、causal guard、provider trust 已经给出结论上限之后，负责排序、归一化和解释置信度。
+
+当前系统已完成从 pattern-first 到 topology-first 的第一步重构（Provider Alias 分离、证据类型归一化、Score Breakdown 可观测）。**Problem Window & Temporal Alignment 已于 V.2-RCA-1A.3 落地**；V.2-RCA-1A.4 的 Topology Graph 已进入部分实现阶段，包含轻量级 `ServiceTopology`、`TopologyEdge`、`PropagationPath`、配置拓扑加载和 bounded `topologyCausalityScore`。但新的 V2 总纲将后续方向从“继续给 ConfidenceScorer 加权重”调整为“先实现 evidence contract / causal guard / causal claim / verification fixtures”。
+
+## 文档职责
+
+| 文档 | 职责 |
+|---|---|
+| 本文档 | RCA 因果模型总纲：说明方向、核心概念、当前实现差距、演进路线。 |
+| [RCA Causal Reasoning V2 Design](./rca-causal-reasoning-v2-design.md) | 定义领域模型：Entity、ObservationEvent、ActionEvent、TopologyEdge、CausalClaim、EvidenceTrust、EvidenceContract。 |
+| [RCA Causal Algorithm V2](./rca-causal-algorithm-v2.md) | 定义执行算法：candidate 生成、causal role 分类、hard guard、decision cap、confidence calibration、LLM/GraphRAG 边界、验证策略。 |
+| [RCA Causal Reasoning V2 Scenario Derivations](./rca-causal-reasoning-v2-scenarios.md) | 定义场景推导和后续 golden fixtures：每个场景要断言 leading claim、decision cap、evidence roles、missing evidence、counter-signal、diagnostic quality。 |
+| [RCA Causal Design Review](./rca-causal-design-review.md) | 从 SRE/RCA 产品视角评估四篇文档，给出产品契约、架构风险、实现路线和下一步优先级。 |
+| [RCA Product Output Contract](./rca-product-output-contract.md) | 定义 `RcaResult`、`CausalClaim`、`diagnosticQuality`、next probes、mitigation 和报告/UI 输出契约。 |
+| [RCA Golden Fixture Contract](./rca-golden-fixture-contract.md) | 定义 scenarios 如何转成可执行 golden fixtures，以及 P0 最小测试集。 |
+| [RCA Interaction PRD](../prd/rca_interaction_prd.md) | 对照 Dynatrace / Datadog / BigPanda / Resolve AI 的产品形态，定义 RCA 交互模型和当前 UI 演进方向。 |
+| [RCA Interaction Prototype HTML](../prd/rca_interaction_prototype.html) | 静态 HTML 原型，用于评审 incident feed、RCA 工作台、claim cards、timeline、AI assistant 等目标交互。 |
 
 ---
 
@@ -47,50 +78,53 @@ Pattern 不应被否定，而应**下沉到 fault mode evidence contract**。Pat
 
 ## 新模型总览
 
-### Pipeline
+### Target Pipeline
 
 ```
 Alert / Incident
-  → Problem Window
-  → Affected Entity Identification
-  → Topology Graph Construction
-  → Propagation Path Analysis
+  → Evidence / Action / Topology Normalization
+  → Problem Correlation and Incident Normalization
+  → Topology-Time Graph Construction
   → Candidate Root Cause Entity Generation
-  → Fault Mode Classification
-  → Evidence Corroboration
-  → Causal Scoring
-  → Hypothesis Comparison
-  → RCA Decision
+  → Candidate Fault Mode Generation
+  → Causal Role Classification
+  → Evidence Contract Evaluation
+  → Hard Causal Guard / Decision Cap
+  → Causal Claim Generation
+  → Confidence Calibration
+  → RCA Decision and Explanation
 ```
 
 ```mermaid
 flowchart TD
-  A[Alert / Incident] --> B[Problem Window]
-  B --> C[Affected Entity Identification]
-  C --> D[Topology Graph Construction]
-  D --> E[Propagation Path Analysis]
-  E --> F[Candidate Root Cause Entity]
-  F --> G[Fault Mode Classification]
-  G --> H[Evidence Corroboration]
-  H --> I[Causal Scoring]
-  I --> J[Hypothesis Comparison]
-  J --> K[RCA Decision]
+  A[Alert / Incident] --> B[Evidence / Action / Topology Normalization]
+  B --> C[Problem Correlation and Incident Normalization]
+  C --> D[Topology-Time Graph Construction]
+  D --> E[Candidate Root Cause Entity Generation]
+  E --> F[Candidate Fault Mode Generation]
+  F --> G[Causal Role Classification]
+  G --> H[Evidence Contract Evaluation]
+  H --> I[Hard Causal Guard / Decision Cap]
+  I --> J[Causal Claim Generation]
+  J --> K[Confidence Calibration]
+  K --> L[RCA Decision and Explanation]
 ```
 
 ### Pipeline 阶段说明
 
 | 阶段 | 输入 | 输出 | 当前状态 |
 |------|------|------|----------|
-| Problem Window | Alert startsAt, lookback config | 时间边界 [problemStart, problemEnd] | **已实现** — `ProblemWindow.deriveFromIncident()` + 可配置 lookback/lookahead |
-| Affected Entity | Alert labels, service name | 受影响实体列表 | **部分实现** — 从 alert 提取 service |
-| Topology Graph | Trace data, K8s labels, config | 实体间依赖图 | **部分实现** — `ServiceTopology` + `TopologyProvider` + configured topology |
-| Propagation Path | Topology + affected entity | 传播路径（从候选根因到受影响实体） | **部分实现** — `PropagationPath` 支持多跳 dependency / impact path，已进入报告和 path-aware scoring |
-| Candidate Root Cause | Propagation path leaf nodes | 候选根因实体列表 | **设计阶段** — 当前直接生成 Pattern |
-| Fault Mode Classification | Evidence + candidate entity | Fault mode 标签 | **部分实现** — DiagnosticPattern 包含 fault mode 语义 |
-| Evidence Corroboration | Multi-source evidence | 跨源佐证评分 | **部分实现** — corroboratingEvidenceTypes 已支持 |
-| Causal Scoring | 所有维度 | 0-1 评分 | **部分实现** — ConfidenceScorer v2 已支持多维度加权 |
-| Hypothesis Comparison | 所有候选评分 | 领先假设 + 竞争假设 | **已实现** — HypothesisComparator |
-| RCA Decision | Comparison + rules | 最终决策类型 | **已实现** — InvestigationDecision |
+| Evidence / Action / Topology Normalization | Prometheus/Loki/Trace/K8s/Alertmanager/CI/CD/CloudTrail 等原始输入 | `ObservationEvent[]` / `ActionEvent[]` / `TopologyEdge[]` | **部分实现** — 已有 `Evidence`，但 Observation/Action/Topology 仍未完全分层 |
+| Problem Correlation and Incident Normalization | alerts + normalized facts + topology | 一个可更新的 `Problem` / `IncidentFingerprint` | **部分实现** — 已有 sustained alert 和 topology fingerprint，缺完整 lifecycle |
+| Topology-Time Graph | trace/config/k8s owner refs/cloud/service catalog | 带时间有效性的 topology subgraph | **部分实现** — `ServiceTopology` / `TopologyProvider` / `PropagationPath` 已有雏形 |
+| Candidate Root Cause Entity | affected entities + graph + actions | 候选根因实体 | **设计阶段** — 当前仍偏 pattern-first |
+| Candidate Fault Mode | candidate entity type + contracts | 候选 fault mode | **部分实现** — `DiagnosticPattern` 隐式承载 fault mode |
+| Causal Role Classification | events + candidate + topology + time + trust | `PRIMARY` / `SYMPTOM` / `COUNTER` / `CONTROL_PLANE` 等角色 | **设计阶段** |
+| Evidence Contract Evaluation | causal roles + fault mode contract | contract result / missing evidence / counter-signal | **设计阶段** |
+| Hard Causal Guard / Decision Cap | contract result + provider trust | `allowedDecision` / `maxConfidence` | **设计阶段** |
+| Causal Claim | candidate + relation + evidence | `CausalClaim` | **设计阶段** |
+| Confidence Calibration | allowed claims + evidence strength + historical prior | calibrated confidence | **部分实现** — 当前 `ConfidenceScorer` 只是过渡实现 |
+| RCA Decision and Explanation | ranked claims | final decision + explanation + next probes | **部分实现** — `HypothesisComparator` / report 已有，但未接入 decision cap |
 
 ---
 
@@ -116,7 +150,7 @@ lookaheadWindow — 向前观测窗口（如 5min）
 3. 判断 deploy/change event 是否在合理窗口内
 4. 防止把无关时间段的 evidence 误纳入 RCA
 
-**当前状态：** `ProblemWindow` 值对象已实现（`domain/ProblemWindow.java`）。通过 `deriveFromIncident()` 从 incident 推导窗口（默认 lookback=5min, lookahead=10min），支持 alert/evidence_fallback/unknown 三种来源。`TemporalAligner` 已接入 `ConfidenceScorer`，`temporalAlignmentScore` 范围 [-0.15, +0.15] 作为评分公式中的一个加权维度。
+**当前状态：** `ProblemWindow` 值对象已实现（`domain/ProblemWindow.java`）。通过 `deriveFromIncident()` 从 incident 推导窗口（默认 lookback=5min, lookahead=10min），支持 alert/evidence_fallback/unknown 三种来源。`TemporalAligner` 已接入过渡版 `ConfidenceScorer`。目标模型中，时间对齐应先作为 temporal guard 的输入，再作为 confidence calibration 的辅助维度。
 
 ---
 
@@ -490,58 +524,99 @@ counterSignals:
 
 ---
 
-## Causal Scoring
+## Causal Decision and Confidence Calibration
 
-### 统一评分公式（设计目标）
+V2 不再把“统一加权公式”作为根因裁决的设计目标。新的目标是：
 
-```
-finalScore =
-    temporalAlignmentScore
-    + topologyCausalityScore
-  + entityAnomalyScore
-  + propagationScore
-  + faultModeEvidenceScore
-  + multiSourceCorroborationScore
-  - counterEvidencePenalty
-  - ambiguityPenalty
+```text
+causal guard decides what is allowed
+confidence calibrator ranks allowed claims
 ```
 
-### 各维度解释
+也就是说，系统先回答：
 
+```text
+这个 hypothesis 在证据边界内最高能到什么 decision？
 ```
-temporalAlignmentScore (0-0.15):
-  证据是否在 Problem Window 内，以及异常先后顺序是否支持因果关系
 
-topologyCausalityScore (0-0.20):
-  candidate 是否位于 affected entity 的依赖路径上
+再回答：
 
-entityAnomalyScore (0-0.20):
-  candidate entity 自身是否存在异常（severity + coverage）
+```text
+在允许范围内，它的置信度应该是多少？
+```
 
-propagationScore (0-0.15):
-  异常是否沿 topology 传播到 affected entity
+### Hard Causal Guards
 
-faultModeEvidenceScore (0-0.20):
-  证据是否符合 fault mode contract（当前 ConfidenceScorer 的 supporting coverage 维度）
+Hard guard 是因果边界，不是普通分数项。
 
-multiSourceCorroborationScore (0-0.10):
-  metric / log / trace / alert / k8s 是否交叉支持（来源多样性）
+| Guard | 作用 |
+|---|---|
+| Primary evidence guard | 某类故障必须具备能证明该故障的核心证据。 |
+| Topology guard | 依赖传播类故障必须存在 topology path 或 observed dependency。 |
+| Explicit action guard | deployment/config/flag/reboot 等回归类故障必须有显式动作。 |
+| Temporal guard | 候选根因异常/动作必须早于或同窗于影响症状。 |
+| Counter-signal guard | 健康信号、rollback 无效、候选正常等反证会降低或拒绝候选。 |
+| Provider trust guard | 区分“没看到问题”和“看不到问题”。 |
 
-counterEvidencePenalty (0-0.30):
-  是否存在更强反证
+### Decision Cap
 
-ambiguityPenalty (0-0.10):
-  多个候选接近时降低唯一根因置信度
+Guard 的输出是 decision cap，而不是分数：
+
+| Allowed decision | Max confidence | 语义 |
+|---|---:|---|
+| `NOT_ROOT_CAUSE` | 0.00 | 反证或边界条件排除候选。 |
+| `UNCERTAIN_REQUIRES_MORE_EVIDENCE` | 0.49 | 候选可能相关，但缺少必要证据。 |
+| `POSSIBLE_ROOT_CAUSE` | 0.69 | 有合理证据，但不足以强裁决。 |
+| `PROBABLE_ROOT_CAUSE` | 0.84 | 主要证据、时间、拓扑大体成立。 |
+| `LIKELY_ROOT_CAUSE` | 0.95 | 多源证据强一致，关键反证已排除。 |
+
+示例：
+
+```text
+restart_count + pod_not_ready
+  without crash reason / exit code / startup failure log
+  => pod_crash_loop maxDecision = UNCERTAIN_REQUIRES_MORE_EVIDENCE
+
+deployment action
+  without change-specific runtime evidence
+  => deployment_regression maxDecision = POSSIBLE_ROOT_CAUSE
+
+downstream latency
+  without topology path or observed dependency
+  => downstream_dependency_latency maxDecision = UNCERTAIN_REQUIRES_MORE_EVIDENCE
+```
+
+### Confidence Calibration
+
+只有通过 guard 的候选才进入 confidence calibration：
+
+```text
+contractResult = EvidenceContractEvaluator.evaluate(...)
+allowedDecision = contractResult.allowedDecision
+
+confidence = ConfidenceCalibrator.calibrate(
+    primaryEvidenceStrength,
+    secondaryEvidenceStrength,
+    propagationStrength,
+    temporalStrength,
+    actionContextStrength,
+    counterEvidenceStrength,
+    providerTrust,
+    historicalPrior
+)
+
+confidence = min(confidence, allowedDecision.maxConfidence)
 ```
 
 ### 关键原则
 
 > 不按 evidence 数量刷分；  
-> 按语义维度和来源多样性评分。
+> 不让经验权重越过 hard guard；  
+> 宁可输出 uncertain + next probe，也不要给弱证据高置信根因。
 
 ### 当前实现
 
-当前 `ConfidenceScorer` 的公式实际覆盖了设计目标中的部分维度：
+当前 `ConfidenceScorer` 是过渡实现，仍然以经验权重公式把 coverage、temporal、topology、counter evidence 合并为一个分数：
 
 ```java
 rawScore = baseScore
@@ -556,30 +631,43 @@ rawScore = baseScore
 
 **缺失维度：** `entityAnomalyScore`（正向）、`propagationScore`（显式、多跳）、`ambiguityPenalty`。`topologyCausalityScore` 当前只对依赖传播类假设提供小幅 bounded bonus，还不是完整 topology-aware causal scoring。
 
+更重要的是，它缺少 hard guard / decision cap，所以仍可能被弱症状、证据数量、provider blind spot 影响。目标定位是逐步收敛为 `ConfidenceCalibrator`：
+
+1. 输入已经归类好的 `CausalRole`、`CausalClaim`、provider trust 和 evidence contract 结果。
+2. 尊重 decision guard 产生的 `maxDecision` / `maxConfidence`。
+3. 在允许的候选之间做稳定排序和置信度表达。
+4. 不用经验权重把弱症状堆成高置信根因。
+
+目标形态：
+
+```text
+contractResult = EvidenceContractEvaluator.evaluate(...)
+allowedDecision = contractResult.allowedDecision
+confidence = ConfidenceCalibrator.calibrate(contractResult, providerTrust, history)
+confidence = min(confidence, allowedDecision.maxConfidence)
+```
+
 ---
 
 ## Decision Rules
 
-### 决策规则（设计目标）
+### 决策规则（目标模型）
 
 ```
-if no topology path AND no strong local fault:
-    → INSUFFICIENT_EVIDENCE
+guardResult = EvidenceContractEvaluator.evaluate(...)
+allowedDecision = guardResult.allowedDecision
 
-if topScore >= 0.75 AND gap >= 0.10 AND hasTopology AND hasPropagation:
-    → LIKELY_ROOT_CAUSE
+if allowedDecision == NOT_ROOT_CAUSE:
+    → reject candidate
 
-if topScore >= 0.60 AND hasFaultModeEvidence AND (hasTopology OR isLocalFault):
-    → PROBABLE_ROOT_CAUSE
+if allowedDecision == UNCERTAIN_REQUIRES_MORE_EVIDENCE:
+    → produce missing evidence + next probes
 
-if topScore >= 0.45 AND gap < 0.10:
+if multiple candidates have compatible evidence and no decisive gap:
     → COMPETING_HYPOTHESES
 
-if topScore >= 0.45:
-    → UNCERTAIN / NEEDS_MORE_EVIDENCE
-
 else:
-    → INSUFFICIENT_EVIDENCE
+    → calibrate confidence within allowedDecision.maxConfidence
 ```
 
 ### 当前实现（HypothesisComparator）
@@ -592,7 +680,9 @@ else:
 | `uncertain_requires_more` | top1 ≥ 0.40 |
 | `insufficient_evidence` | top1 < 0.40 |
 
-**差异分析：** 当前规则仅依赖分数阈值，未纳入 topology/propagation/isLocalFault 条件。设计目标中的 0.75→0.60→0.45 三级阈值比当前的 0.80→0.60→0.40 更细化，且多了 `hasTopology`/`hasPropagation` 作为必要条件。
+**差异分析：** 当前规则仅依赖分数阈值，未纳入 primary evidence、explicit action、provider trust、topology guard、temporal guard 和 counter-signal guard。新目标不是继续微调 0.80/0.60/0.40 这类阈值，而是在分数之前先计算 `allowedDecision`。
+
+新的 V2 目标不再是简单替换阈值，而是让 `HypothesisComparator` 接收 `allowedDecision` / `maxConfidence` / `CausalClaim`，避免纯分数越过因果边界。
 
 ### 关键设计原则
 
@@ -612,13 +702,13 @@ local fault 可以不依赖 service-to-service topology。
 | timeout | downstream/external dependency | **Yes** | timeout logs, span timeout | gateway timeout | network error |
 | resource_pressure | pod/node | **No** (local) | CPU/memory high, throttling | latency/error increase | deployment regression |
 | crash_loop | pod | **No** (local) | CrashLoopBackOff, OOMKilled | availability drop | deployment regression, conf error |
-| deployment_regression | deployment | **No** (change event) | deploy event, post-deploy error | latency/error increase | stronger runtime cause |
+| deployment_regression | deployment/config/flag | **No** (explicit action required) | explicit action + post-action anomaly + change-specific runtime evidence | service error/latency after action | no action, anomaly predates action, rollback no improvement, stronger runtime cause |
 | configuration_error | deployment/config | **No** (change event) | config change, error after change | service misbehavior | runtime resource issue |
 | network_error | node/network | **No** (infra) | connection refused, DNS failure | service unreachable | application-level error |
 
 ---
 
-## Score Breakdown 示例
+## Decision Cap / Confidence 示例
 
 ### 示例 1：payment-service latency（理想场景）
 
@@ -628,32 +718,40 @@ candidateRootCauseEntity: payment-service
 propagationPath: order-service → payment-service
 faultMode: LATENCY_DEGRADATION
 
-scoreBreakdown:
-  temporalAlignmentScore:          +0.08
-  topologyCausalityScore:          +0.20
-  entityAnomalyScore:              +0.20
-  propagationScore:                +0.15
-  faultModeEvidenceScore:          +0.18
-  multiSourceCorroborationScore:   +0.10
-  counterEvidencePenalty:           0.00
-  ambiguityPenalty:                -0.03
-finalScore: 0.88
-decision: LIKELY_ROOT_CAUSE
+guardResult:
+  primaryEvidence: pass
+  topologyPath: pass
+  temporalOrder: pass
+  counterSignal: none
+  providerTrust: normal
+
+allowedDecision: LIKELY_ROOT_CAUSE
+maxConfidence: 0.95
+calibratedConfidence: 0.88
+
+claim:
+  payment-service latency LIKELY_CAUSED order-service timeout
 ```
 
 ### 示例 2：deployment regression vs downstream latency 竞争
 
 ```
-deployment_regression: 0.64
-downstream_latency:    0.58
-gap: 0.06
+deployment_regression:
+  allowedDecision: POSSIBLE_ROOT_CAUSE
+  reason: explicit deploy action exists, but change-specific runtime evidence is weak
+
+downstream_latency:
+  allowedDecision: PROBABLE_ROOT_CAUSE
+  reason: topology path + dependency latency evidence + impacted timeout
+
 decision: COMPETING_HYPOTHESES
 ```
 
 说明：
 
 > 系统不应强行唯一根因；  
-> 当 deploy event 与 downstream latency 同时存在且分数接近时，应保留竞争假设。
+> 当 deploy event 与 downstream latency 同时存在且证据边界都没有完全排除对方时，应保留竞争假设；  
+> deploy action 不能单独把 deployment_regression 推到 probable/likely。
 
 ### 示例 3：当前系统实际产出（Scenario E，2026-05-09 生产验证）
 
@@ -668,13 +766,13 @@ gap: 0.07
 decision: competing_hypotheses
 ```
 
-当前系统在无 topology/propagation/temporal 维度的情况下，通过 evidence type coverage 模型仍能给出合理的竞争假设判决。加入因果维度后，`downstream_dependency_latency` 的拓扑传播路径将显著提升其分数，而非仅靠 evidence coverage 微弱领先。
+当前系统在无完整 topology/propagation/temporal guard 的情况下，通过 evidence type coverage 模型仍能给出合理的竞争假设判决。目标模型中，`downstream_dependency_latency` 应先通过 topology path、primary latency evidence、temporal order 和 counter-signal guard，再进入 confidence calibration；不应仅靠 evidence coverage 微弱领先。
 
 ---
 
 ## LLM 的位置：Online Investigator + Deterministic Decision Boundary + Offline Knowledge Evolution
 
-本系统不会把 LLM 排除在 RCA 过程之外。LLM 很适合做 online investigator：规划调查路径、选择 probe、提出候选根因、解释证据、指出 missing evidence。但生产 RCA 的最终结论必须经过 evidence verification、topology-aware causal scoring、hypothesis comparison 和 event trace 审计。因此，**LLM 是 investigator 和 hypothesis proposer，不是无约束的 judge**。
+本系统不会把 LLM 排除在 RCA 过程之外。LLM 很适合做 online investigator：规划调查路径、选择 probe、提出候选根因、解释证据、指出 missing evidence。但生产 RCA 的最终结论必须经过 evidence verification、evidence contract、causal guard、provider trust、hypothesis comparison 和 event trace 审计。因此，**LLM 是 investigator 和 hypothesis proposer，不是无约束的 judge**。
 
 > `LLM participates in online investigation, but deterministic RCA engine owns final decision authority.`  
 > LLM 负责提出和解释；RCA 引擎负责验证和裁决。  
@@ -690,9 +788,9 @@ decision: competing_hypotheses
 │  → 输出：investigation_plan, hypothesis   │
 ├──────────────────────────────────────────┤
 │  Layer 2: Deterministic RCA Decision      │
-│  验证 evidence / 计算 causal score        │
-│  比较 hypotheses / 生成 final decision    │
-│  → 输出：score, decision, event trace     │
+│  验证 evidence / causal guard / cap       │
+│  生成 claim / 校准 confidence / decision  │
+│  → 输出：claim, confidence, event trace   │
 ├──────────────────────────────────────────┤
 │  Layer 3: LLM Offline Knowledge Evolution │
 │  复盘 / Gap 分析 / candidate 生成         │
@@ -741,15 +839,17 @@ production_pattern_registry
 | 验证 evidence 是否真实存在 | VerificationEngine |
 | 验证 evidence 是否在 problem window 内 | 时间边界校验 |
 | 验证 topology path 是否存在 | 拓扑路径验证 |
-| 计算 causal score | ConfidenceScorer 确定性公式 |
-| 比较 hypotheses | HypothesisComparator 规则引擎 |
+| 评估 evidence contract | EvidenceContractEvaluator（目标模型） |
+| 计算 decision cap | CausalGuardEngine（目标模型） |
+| 校准 confidence | ConfidenceCalibrator（由当前 ConfidenceScorer 演进） |
+| 比较 hypotheses | HypothesisComparator / CausalClaimRanker |
 | 生成 final decision | InvestigationDecision |
 | 记录 event trace | EventTraceStore 审计日志 |
 
 **关键表述：**
 
 > LLM proposes. RCA Engine verifies and decides.  
-> LLM 提出假设、解释证据；RCA 引擎验证真伪、计算分数、做出裁决。
+> LLM 提出假设、解释证据；RCA 引擎验证真伪、计算 decision cap、校准 confidence、做出裁决。
 
 ---
 
@@ -799,49 +899,82 @@ LLM 用于复盘、知识候选生成和回归测试建议。
 - `LlmReportSynthesizer` — 生成叙述性总结（不改 decision/scores）
 - `LlmHypothesisProposer` — 在 inconclusive 时建议新假设（状态 UNVERIFIED_PROPOSAL，进入 verification pipeline 而非直接采纳）
 - `MockLlmClient` / `OpenAiCompatibleLlmClient` — 可插拔的 LLM 客户端
-- LLM 产出的 hypothesis 经过 VerificationEngine 验证后才参与 scoring，而非直接成为结论
+- LLM 产出的 hypothesis 经过 deterministic validator / causal guard 验证后才可能成为 `CausalClaim`，而非直接成为结论
 
 Layer 2（Deterministic RCA Decision Engine）完全由确定性代码实现，不使用 LLM。三层之间通过明确的 API 契约隔离：Layer 1 产出 hypothesis/probe，Layer 2 验证和评分，Layer 3 消费 Layer 2 的结果做离线分析。
+
+### RAG / GraphRAG / 图数据库的位置
+
+RAG、GraphRAG 和图数据库不是同一个东西：
+
+| 能力 | 适合做什么 | 不应该做什么 |
+|---|---|---|
+| RAG | 检索 runbook、postmortem、服务文档、错误解释 | 证明实时因果关系 |
+| GraphRAG | 检索服务、依赖、owner、历史事故、runbook 的关联上下文 | 绕过当前 telemetry/action evidence 提高 final confidence |
+| 图数据库 | 存储和查询实体关系、多跳拓扑、共同依赖、影响面、历史复发 | 存储原始 metrics/logs/traces 或替代 causal guard |
+
+推荐路径：
+
+```text
+第一阶段：in-memory typed graph + deterministic causal guard
+第二阶段：RAG 辅助 runbook / postmortem / next probe
+第三阶段：GraphRAG 辅助候选扩展、历史相似性、上下文解释
+第四阶段：当拓扑和历史关系足够复杂时，再引入图数据库
+```
+
+关键边界：
+
+> Knowledge layer can propose and enrich.  
+> Causal engine must validate and decide.
 
 ---
 
 ## 分阶段实现路线
 
 ```
-V.2-RCA-1A.2 ✅:  Causal Model Design Doc（本文档）
+Phase 0 ✅/🔧:     Design Alignment and Golden Fixtures
+                  - 总纲 / design / algorithm / scenarios 文档对齐
+                  - 把 scenarios 转为 golden fixture contract
+                  - 明确 soundness / completeness / calibration 验证策略
+                  - 不改变生产行为
 
-V.2-RCA-1A.3 ✅:  Problem Window & Temporal Alignment
-                  - ProblemWindow 数据结构
-                  - temporalAlignmentScore 实现
-                  - 集成到 ConfidenceScorer 评分公式
-                  - 语义边界说明（V2_RCA_1A_3_TEMPORAL_SEMANTICS_NOTES.md）
-
-V.2-RCA-1A.4 🔧:  Topology Graph & Propagation Path Quality
-                  - ServiceTopology / TopologyEdge 数据结构（部分已实现）
-                  - edgeSource / edgeConfidence 优先级系统（部分已实现）
-                  - PropagationPath 多跳路径计算（部分已实现）
-                  - bounded topologyCausalityScore（部分已实现）
-                  - live topology → core workflow 自动注入（待实现）
-
-V.2-RCA-1A.5:     Fault Mode Evidence Contract
-                  - FaultMode 枚举 + FaultModeClassifier
+Phase 1:          Evidence Contract + Hard Guard
                   - FaultModeEvidenceContract 结构化定义
-                  - directSignals / propagationSignals / counterSignals 分类
+                  - EvidenceContractEvaluator
+                  - CausalGuardEngine
+                  - allowedDecision / maxConfidence
+                  - 先覆盖 crash_loop / deployment_regression / downstream_dependency_latency
 
-V.2-RCA-1A.6:     Regression Scenario Matrix
-                  - 覆盖所有 fault mode × topology/noTopology 组合
-                  - 覆盖 competing hypotheses 场景
-                  - 覆盖 insufficient evidence 边界
+Phase 2:          Causal Role Classifier + CausalClaim
+                  - ObservationEvent / ActionEvent / EvidenceTrust 归一化
+                  - CausalRoleAssignment
+                  - CausalClaim 输出
+                  - ConfidenceScorer 降级为 ConfidenceCalibrator
 
-V.2-RCA-1B:       LLM RCA Critic / CausalGapReport
-                  - LLM 分析 RCA 质量
-                  - 自动识别因果维度缺失
-                  - 生成 CausalGapReport
+Phase 3:          Topology-Time Graph
+                  - in-memory typed graph
+                  - configured topology + trace topology + k8s owner refs 合并
+                  - 多跳路径 / 共同依赖 / impact radius
+                  - edge validity window
 
-V.2-RCA-1C:       Diagnostic Knowledge Candidate Generator
-                  - LLM 从 gap 中生成新 fault mode candidate
-                  - 建议新 evidence contract
-                  - 人工审核 pipeline
+Phase 4:          Incident Lifecycle and Normalization
+                  - DETECTING / OPEN / UPDATED / MERGED / SPLIT / RESOLVED / REOPENED
+                  - dynamic time window
+                  - topology component + causal relation fingerprint
+                  - 避免同一链路多次 RCA
+
+Phase 5:          LLM/RAG/GraphRAG Advisory Layer
+                  - LlmCausalProposal 结构化输出
+                  - LLM proposal validator
+                  - RAG for runbooks/postmortems
+                  - GraphRAG for context/candidate recall
+                  - ablation 验证不得绕过 causal guard
+
+Phase 6:          Historical Replay and Calibration
+                  - golden fixtures
+                  - chaos/synthetic replay
+                  - historical incident replay
+                  - false high-confidence rate / Brier score / calibration error
 ```
 
 ---
@@ -870,7 +1003,7 @@ temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
 
 - **当前阶段（V.2-RCA-1A.3）不引入 fault-mode-specific temporal rules**——TemporalAligner 对所有证据类型一视同仁。
 - **V.2-RCA-1A.5（Fault Mode Evidence Contract）将细化**：runtime anomaly 要求 candidateFirstSeen 在 lookback 范围内；deployment/change event 允许更远的 temporal distance。
-- **scoring 公式不变**：temporalScore 权重上限 0.15 是设计选择，防止「时间顺序完美但无实质 evidence 的假设」得分过高。
+- **过渡期 scoring 公式可保持兼容**：temporalScore 仍可作为小权重校准维度；目标模型中它首先参与 temporal guard，再作为 confidence calibration 的输入，不能单独制造高置信根因。
 
 ---
 
@@ -883,16 +1016,16 @@ temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
 | Evidence type 归一化（alias → core） | `ConfidenceScorer.ALIAS_TO_CORE` |
 | 比率型覆盖评分（ratio-based v2） | `ConfidenceScorer.score()` |
 | 佐证证据类型（加分不扣分） | `DiagnosticPattern.corroboratingEvidenceTypes` |
-| 确定性决策规则 | `HypothesisComparator` |
+| 确定性分数比较规则（过渡实现） | `HypothesisComparator` |
 | Problem Window 时间边界 | `ProblemWindow.deriveFromIncident()` |
-| Temporal Alignment 评分 | `TemporalAligner` → `ConfidenceScorer` |
+| Temporal Alignment 评分（过渡实现） | `TemporalAligner` → `ConfidenceScorer` |
 | 10 步工作流 pipeline | `InvestigationWorkflow` |
 | Event trace 审计日志 | `EventTraceStore` |
 | Markdown report 生成 | `MarkdownReporter` |
 | LLM online investigator + offline knowledge evolution 集成 | `sre-agent-llm` 模块（Layer 1 + Layer 3 实验性实现） |
 | 多 provider 证据采集 | k8s/prometheus/loki/alertmanager/trace providers |
 | Agent 能力上下文注入 | `HermesAgentCapabilitiesProvider` |
-| 完整回归测试矩阵 | ScenarioE/F + 边界测试 + 全量 132/132 |
+| 既有回归测试矩阵 | ScenarioE/F + 边界测试 + 全量测试 |
 | Score Breakdown Markdown 格式化 | `LlmGradeFormatter` |
 
 ### Partially Implemented 🔧
@@ -902,7 +1035,7 @@ temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
 | Fault mode classification | DiagnosticPattern 隐式承载 fault mode 语义，但无独立 FaultMode 枚举/分类器 |
 | Entity 建模 | Evidence.service 字段存在，但无 affectedEntity/candidateEntity 一级抽象 |
 | Topology context | `ServiceTopology` / `TopologyProvider` / `TopologyEdge` / `PropagationPath` 已存在，configured topology 可加载，trace/observed evidence 可解析为 edge |
-| Causal scoring dimensions | ConfidenceScorer v2 覆盖 faultModeEvidence + counterPenalty + corroborating + temporal + bounded topology，缺少显式 propagation |
+| Causal scoring dimensions | ConfidenceScorer v2 覆盖 faultModeEvidence + counterPenalty + corroborating + temporal + bounded topology，但仍是过渡性经验权重 |
 | Score Breakdown 前端展示 | ScoreBreakdown 数据结构已产出，前端 RCA 详情页已展示 |
 
 ### Missing ❌
@@ -910,10 +1043,15 @@ temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
 | 能力 | 说明 |
 |------|------|
 | Topology Graph 构建器 | 无统一 TopologyBuilder 类；configured topology 已有 provider，trace topology 尚未结构化合并 |
-| live topology → core workflow | `ServiceTopology` 尚未作为 workflow 输入自动传入 ConfidenceScorer |
-| propagationScore | 独立传播评分未实现（当前通过 topologyCausalityScore + contradiction rules 部分表达） |
-| entityAnomalyScore（正向） | 当前仅通过 missingPenalty 反向表达 |
-| ambiguityPenalty | 竞争假设仅通过 gap 比较，无显式惩罚 |
+| ObservationEvent / ActionEvent 分层 | 当前 Evidence 同时承载 observation/action/context，尚未拆分 |
+| EvidenceTrust / provider health | no_signal 与 provider blindness 尚未结构化进入因果裁决 |
+| CausalRoleClassifier | 尚未按 candidate/fault mode 将 evidence 归类为 primary/symptom/counter/control-plane |
+| EvidenceContractEvaluator | FaultModeEvidenceContract 尚未结构化执行 |
+| CausalGuardEngine | 缺少 allowedDecision / maxConfidence / hard cap |
+| CausalClaim | 尚未输出可审计的 cause/effect relation、missing evidence、counter-signal |
+| ConfidenceCalibrator | 当前 ConfidenceScorer 尚未降级为 guard 后的校准器 |
+| Golden fixtures | scenarios 尚未转换为可执行 fixture |
+| Historical replay / calibration | 尚无 Brier score、calibration error、false high-confidence rate 评估 |
 | CausalGapReport | 无离线分析 |
 | FaultModeEvidenceContract 结构化 | 当前在 DiagnosticPattern 中扁平化表达 |
 
@@ -922,18 +1060,20 @@ temporalScore ∈ [-0.15, +0.15]  — 天然是小权重调整维度
 | 风险 | 缓解 |
 |------|------|
 | 过度设计 | 本阶段不写代码，仅固化设计文档；后续每个阶段控制 scope（≤ 3 个类） |
-| topology 数据不足 | 优先使用 trace provider 已有数据；无拓扑场景下降级为 pattern-only scoring（已支持） |
-| 历史测试大面积失效 | 新维度逐步加入评分公式，每次只引入一个维度，全量测试通过后再引入下一个 |
-| LLM 越界 | 三层架构强制隔离：Layer 1 产出 hypothesis/probe → Layer 2 验证/评分/决策 → Layer 3 消费结果做离线分析。LLM 不可跨层写入 final_decision/final_score/registry |
+| topology 数据不足 | 允许降级为 `UNCERTAIN_REQUIRES_MORE_EVIDENCE`，不要用 pattern-only 高置信替代 topology proof |
+| 历史测试大面积失效 | 先把 scenarios 转 golden fixtures，锁定 decision cap，再逐步接入实现 |
+| LLM 越界 | LLM 只输出 `UNVERIFIED_PROPOSAL` / probe / explanation；Layer 2 通过 causal guard 验证 |
+| GraphRAG 过度影响裁决 | GraphRAG 只提升 candidate recall 和上下文解释；不得绕过当前 telemetry/action evidence |
+| 置信度误校准 | 用 historical replay / chaos / golden fixtures 评估 false high-confidence rate 和 calibration error |
 
 ### Next Step
 
-建议继续完成 **V.2-RCA-1A.4：Topology Graph & Propagation Path Quality**。
+建议先完成 **Phase 0：Design Alignment and Golden Fixtures**，而不是立即继续改生产代码。
 
 理由：
-1. Topology Graph 是 propagation path 和 topologyCausalityScore 的前提
-2. 当前已具备 `ServiceTopology` / `TopologyEdge` / `PropagationPath` 雏形，下一步应补齐 live topology 到 core workflow 的自动注入
-3. 可以独立落地并跑通全量测试，然后再进入 1A.5 Fault Mode Evidence Contract
+1. 新设计已经从 score-first 改为 decision-cap-first，需要先把总纲、design、algorithm、scenarios 对齐
+2. 需要把 scenarios 转成 golden fixture contract，明确每个场景的 leading claim、allowedDecision、evidence roles、missing evidence、counter-signal 和 diagnostic quality
+3. 只有 fixture 锁定后，后续实现 EvidenceContractEvaluator / CausalGuardEngine / CausalClaim 才不会再次变成针对某个 E2E 场景的硬编码
 
 ---
 

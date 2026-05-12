@@ -29,6 +29,21 @@ raw evidence
 
 This document defines that target model.
 
+Algorithm companion:
+
+- [RCA Causal Algorithm V2](./rca-causal-algorithm-v2.md)
+
+The companion algorithm document is normative for execution order:
+
+```text
+hard causal guards first
+numeric confidence second
+LLM/RAG/GraphRAG may propose and enrich
+deterministic causal engine validates and decides
+```
+
+This design document defines the domain model. The algorithm document defines how those models are evaluated.
+
 ## Design Goals
 
 1. Avoid scenario-specific rules in `ConfidenceScorer`.
@@ -38,6 +53,7 @@ This document defines that target model.
 5. Require explicit deployment/change actions for `deployment_regression`; do not infer deployment regression from generic Kubernetes runtime events.
 6. Keep deterministic RCA as the decision engine; LLM and GraphRAG may propose, explain, and retrieve context but must not invent evidence or override scores.
 7. Make the model extensible to new providers: CloudTrail, GitHub Deployments, ArgoCD, Spinnaker, AWS ASG, EC2, systemd, CMDB, service catalog, feature flags.
+8. Move confidence scoring away from hand-tuned global weights and toward evidence contracts, causal guards, and calibrated confidence.
 
 ## Non-Goals
 
@@ -244,16 +260,21 @@ faultMode: DEPLOYMENT_REGRESSION
 requiredActions:
   - DEPLOYMENT | ROLLBACK | CONFIG_CHANGE | FEATURE_FLAG_CHANGE on candidate entity
 primaryEvidence:
-  - explicit deployment action inside problem window
   - anomaly starts after action
+  - error/latency/log signature is specific to the changed service, version, config, or flag
+  - rollback or mitigation improves the same symptom, if available
 secondaryEvidence:
   - new image/version/commit
   - deployment rollout status changed
+  - changed dependency/config surface matches the failing path
 counterEvidence:
   - no action in window
   - anomaly predates action
+  - unchanged services show the same symptom through a shared dependency
+  - rollback does not improve the symptom
 decisionGuards:
   - no explicit action event => cannot be probable_root_cause
+  - explicit action alone is required context, not sufficient primary evidence
 ```
 
 `downstream_dependency_latency` example:
@@ -289,7 +310,9 @@ CausalClaim
   causeEntityId: string
   effectEntityId: string
   relation:
-    CAUSED | LIKELY_CAUSED | MAY_HAVE_CAUSED | COMMON_CAUSE | CAUSED_BY_EXTERNAL | UNRELATED
+    CAUSED | LIKELY_CAUSED | MAY_HAVE_CAUSED | COMMON_CAUSE |
+    CAUSED_BY_EXTERNAL | EXPLAINS_AS_SYMPTOM | ACTION_EXPLAINS_OBSERVATION |
+    INSUFFICIENT_EVIDENCE | UNRELATED
   faultMode: string?
   confidence: double
   evidenceIds: list<string>
@@ -297,6 +320,60 @@ CausalClaim
   temporalRelation: BEFORE | SAME_WINDOW | AFTER | UNKNOWN
   explanation: string
 ```
+
+Relationship semantics:
+
+| Relation | Meaning |
+|---|---|
+| `CAUSED` | Strong deterministic evidence supports cause before effect, with topology/action consistency and counter-signals resolved. |
+| `LIKELY_CAUSED` | Primary evidence and topology/time mostly support the claim, but one dimension is degraded or incomplete. |
+| `MAY_HAVE_CAUSED` | Plausible relation that needs additional probes before it should drive remediation. |
+| `COMMON_CAUSE` | Multiple affected entities are better explained by a shared dependency, node, zone, deployment wave, or external provider. |
+| `CAUSED_BY_EXTERNAL` | The cause is outside the owned service graph, such as SaaS API, payment gateway, DNS, cloud provider, or database. |
+| `EXPLAINS_AS_SYMPTOM` | The event is explained as an effect of another candidate, such as restarts after dependency latency or pod replacement after operator action. |
+| `ACTION_EXPLAINS_OBSERVATION` | A control-plane action explains an observation without implying application defect, such as manual pod deletion. |
+| `INSUFFICIENT_EVIDENCE` | The graph relation is plausible but required primary evidence, provider health, or time ordering is missing. |
+| `UNRELATED` | Topology, time, ownership, or counter-signals argue against relation. |
+
+## Evidence Trust Model
+
+RCA should not treat all evidence as equally reliable. A missing log from a blind Loki provider is different from no matching log when Loki is healthy and the query window is complete.
+
+```text
+EvidenceTrust
+  sourceKind: PROMETHEUS | LOKI | TRACE | KUBERNETES | CLOUDTRAIL | GIT | ...
+  providerStatus: HEALTHY | DEGRADED | BLIND | UNKNOWN
+  sourceReliability: HIGH | MEDIUM | LOW
+  freshness: duration
+  ingestionDelay: duration?
+  queryWindowCoverage: double       # 0.0-1.0
+  samplingRate: double?             # traces/log sampling if known
+  clockSkew: duration?
+  entityMappingConfidence: HIGH | MEDIUM | LOW
+  rawCompleteness: COMPLETE | PARTIAL | SUMMARY_ONLY
+```
+
+Trust affects interpretation, not just numeric scoring:
+
+1. `NO_SIGNAL` from a `BLIND` provider is an observability gap, not counter evidence.
+2. `NO_SIGNAL` from a healthy provider with full query coverage may become counter evidence.
+3. Trace evidence with low sampling rate can support topology, but should be weaker for absence claims.
+4. K8s events without audit logs can describe what happened, but often cannot prove who or what initiated it.
+5. CloudTrail/GitHub/ArgoCD actions are high-value action evidence, but still need runtime symptoms to prove user impact.
+
+Suggested confidence composition:
+
+```text
+effectiveEvidenceStrength =
+  signalStrength
+  * sourceReliabilityFactor
+  * providerHealthFactor
+  * queryCoverageFactor
+  * freshnessFactor
+  * entityMappingFactor
+```
+
+This does not replace evidence contracts. It only calibrates verified evidence after the causal role is known.
 
 Example:
 
@@ -350,7 +427,54 @@ Problem
   affectedEntities
   events
   topologySubgraph
+  lifecycleState
+  fingerprint
 ```
+
+### Incident Lifecycle and Normalization
+
+Alert streams should be normalized into problem instances before RCA runs. A single service chain may produce several alerts, but it should usually produce one RCA investigation.
+
+```text
+ProblemLifecycleState
+  DETECTING      # signals are accumulating, sustain threshold not met
+  OPEN           # incident/problem is active and RCA can run
+  UPDATED        # new evidence or affected entities were added
+  MERGED         # another problem was absorbed into this one
+  SPLIT          # one problem was separated into independent root causes
+  MITIGATED      # symptoms improved but final resolution is not confirmed
+  RESOLVED       # symptoms cleared for the close window
+  REOPENED       # same fingerprint recurred before recurrence TTL
+```
+
+Normalization should use a dynamic window rather than a fixed one-minute bucket:
+
+1. Start with alert rule evaluation interval and `for` duration.
+2. Extend by provider ingestion delay and trace/log sampling latency.
+3. Extend by topology propagation latency for multi-hop paths.
+4. Bound with configurable min/max windows to avoid infinite merging.
+5. Reopen or link as recurrence when the same fingerprint returns after resolution.
+
+The fingerprint should include:
+
+```text
+IncidentFingerprint
+  environment
+  topologyConnectedComponentId
+  candidateRootCauseEntityId?
+  dominantFaultMode?
+  actionChangeId?
+  sharedExternalDependencyId?
+  normalizedTimeWindow
+```
+
+Merge/split rules:
+
+1. Merge alerts in the same topology component and overlapping dynamic window when causal claims are compatible.
+2. Merge sibling service alerts when a shared dependency, node, zone, or action explains them better than independent roots.
+3. Split when candidate causes are disjoint, topology components do not connect, or counter-signals reject common cause.
+4. Do not trigger a new RCA run for every alert update; update the open problem and rerank hypotheses.
+5. Run RCA when sustained symptoms pass threshold, when a high-confidence action arrives, or when new primary evidence changes the leading claim.
 
 ### Phase 3: Generate Candidate Cause Entities
 
@@ -369,14 +493,14 @@ This is the key shift from pattern-first to entity-first.
 For each event, classify role per candidate entity and fault mode:
 
 ```text
-role = f(event, candidateEntity, impactedEntity, topologyPath, temporalRelation, actionContext)
+role = f(event, candidateEntity, impactedEntity, topologyPath, temporalRelation, actionContext, providerTrust)
 ```
 
 Examples:
 
 1. `pod_restart_count_increased` on impacted service after downstream latency is `SYMPTOM`.
 2. `container_crash_loop_backoff` on candidate service before service errors is `PRIMARY_CAUSE_EVIDENCE`.
-3. `deploy action` on candidate service before errors is `CONTROL_PLANE` plus possible `PRIMARY_CAUSE_EVIDENCE`.
+3. `deploy action` on candidate service before errors is `REQUIRED_ACTION_CONTEXT` / `CONTROL_PLANE`; it is not sufficient primary evidence by itself.
 4. `manual pod delete` is `ACTION_CONTEXT`; it may explain restarts without application bug.
 
 ### Phase 5: Apply Evidence Contracts
@@ -399,6 +523,79 @@ if primaryEvidence missing:
 ```
 
 This prevents weak symptoms from becoming a high-confidence root cause.
+
+### Phase 5.5: Causal Decision Before Numeric Confidence
+
+The RCA engine should decide what kind of claim is allowed before assigning a final confidence number.
+
+```text
+contractResult =
+  evaluateRequiredActions()
+  + evaluatePrimaryEvidence()
+  + evaluateTopologyAndTime()
+  + evaluateCounterSignals()
+  + evaluateProviderTrust()
+
+allowedDecision =
+  LIKELY_ROOT_CAUSE | PROBABLE_ROOT_CAUSE | POSSIBLE_ROOT_CAUSE |
+  COMPETING_HYPOTHESES | UNCERTAIN_REQUIRES_MORE_EVIDENCE | NOT_ROOT_CAUSE
+```
+
+Only after `allowedDecision` is known should a numeric confidence be calculated. This prevents hand-tuned weights from overpowering hard causal guards.
+
+Suggested decision caps:
+
+| Allowed decision | Max confidence |
+|---|---|
+| `NOT_ROOT_CAUSE` | 0.00 |
+| `UNCERTAIN_REQUIRES_MORE_EVIDENCE` | 0.49 |
+| `POSSIBLE_ROOT_CAUSE` | 0.69 |
+| `PROBABLE_ROOT_CAUSE` | 0.84 |
+| `LIKELY_ROOT_CAUSE` | 0.95 |
+
+These caps are calibration boundaries, not a claim that the exact numbers are permanently correct. Historical replay and golden fixtures should calibrate them.
+
+## Role of ConfidenceScorer
+
+With this design, a `ConfidenceScorer` is still useful, but its role changes.
+
+Current-style scoring:
+
+```text
+finalScore = base + coverageWeight + temporalWeight + topologyWeight - missingPenalty
+```
+
+is acceptable as a transitional implementation, but it should not be the source of truth for causality. The target role is:
+
+1. Normalize and calibrate confidence after evidence contracts are evaluated.
+2. Aggregate already-classified evidence roles, not infer roles from flat evidence type lists.
+3. Respect hard caps from decision guards, such as missing primary evidence or missing topology path.
+4. Include provider trust and diagnostic quality in the final confidence explanation.
+5. Produce stable ordering among allowed hypotheses, not override causal impossibility.
+
+Target scoring shape:
+
+```text
+allowedDecision = EvidenceContractEvaluator.evaluate(...)
+
+if allowedDecision == NOT_ROOT_CAUSE:
+  confidence = 0
+else:
+  confidence = ConfidenceCalibrator.calibrate(
+      primaryEvidenceStrength,
+      secondaryEvidenceStrength,
+      propagationStrength,
+      temporalStrength,
+      actionContextStrength,
+      counterEvidenceStrength,
+      providerTrust,
+      historicalPrior
+  )
+
+confidence = min(confidence, allowedDecision.maxConfidence)
+```
+
+Long term, the numeric calibrator can be rule-based, statistically calibrated from historical incidents, or partially learned. The causal guards should remain explicit and reviewable.
 
 ### Phase 6: Rank and Explain
 
@@ -544,6 +741,8 @@ Decision guard:
 
 ```text
 no explicit ActionEvent => deployment_regression maxDecision = uncertain
+explicit ActionEvent only => deployment_regression maxDecision = possible_root_cause
+explicit ActionEvent + post-action anomaly + change-specific runtime evidence => can become probable_root_cause
 ```
 
 ## LLM and GraphRAG Role
@@ -575,13 +774,49 @@ UNVERIFIED_PROPOSAL
 
 It can create candidate hypotheses or probe suggestions, but verified evidence and final scoring remain deterministic.
 
+LLM proposals should be validated through a structured contract:
+
+```text
+LlmCausalProposal
+  proposedEntityId
+  proposedFaultMode
+  proposedRelation
+  citedEvidenceIds
+  reasoningSummary
+  missingEvidence
+  suggestedProbes
+  confidenceHint: LOW | MEDIUM | HIGH
+```
+
+The `confidenceHint` may prioritize probes, but it must not become final confidence. The deterministic causal guard engine validates the proposal against primary evidence, topology, explicit action, temporal order, counter-signals, and provider trust.
+
+## Verification Strategy
+
+The algorithm cannot be proven always correct because production telemetry is incomplete. The target correctness properties are:
+
+1. **Soundness:** the engine must not produce a stronger claim than evidence allows.
+2. **Conditional completeness:** when required evidence and assumptions are present, the expected root cause should rank first.
+3. **Calibration:** confidence bands should match long-term accuracy.
+
+Required validation artifacts:
+
+1. Hard guard unit tests.
+2. Golden scenario fixtures derived from [RCA Causal Reasoning V2 Scenario Derivations](./rca-causal-reasoning-v2-scenarios.md).
+3. Historical incident replay.
+4. Provider blindness tests.
+5. LLM adversarial proposal tests.
+6. GraphRAG ablation tests.
+
+The most important early metric is zero guard violations: no result may exceed its evidence-based decision cap.
+
 ## Migration Plan
 
 ### Phase A: Documentation and Test Fixtures
 
 1. Document causal roles and evidence contracts.
 2. Add scenario fixtures for K8s, EC2, deployment, operator action, and downstream propagation.
-3. No production behavior change.
+3. Add verification expectations: leading claim, decision caps, evidence roles, missing evidence, counter-signals, provider trust, and diagnostic quality.
+4. No production behavior change.
 
 ### Phase B: Domain Model
 
@@ -631,4 +866,3 @@ Do not let it mutate final decisions.
 3. Should each fault mode define max decision levels when required evidence is missing?
 4. How should multi-root incidents be represented?
 5. Should incident normalization use connected component only, or causal relation labels like common external cause vs direct cause?
-

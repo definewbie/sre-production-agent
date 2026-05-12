@@ -14,6 +14,58 @@ Each scenario follows the same reasoning structure:
 signals -> entities -> topology -> actions -> causal roles -> candidate ranking -> expected result
 ```
 
+These scenarios should later become golden fixtures for the verification strategy in [RCA Causal Algorithm V2](./rca-causal-algorithm-v2.md). Each fixture should assert the leading claim, allowed decision caps, evidence roles, missing evidence, counter-signals, and diagnostic quality.
+
+Fixture schema:
+
+- [RCA Golden Fixture Contract](./rca-golden-fixture-contract.md)
+
+## Golden Fixture Contract
+
+When these scenarios become executable tests, each scenario should be represented with the same structure:
+
+```text
+input:
+  problemWindow
+  topology
+  observations
+  actions
+  providerHealth
+  optionalKnowledgeContext
+
+expected:
+  leadingClaim
+  allowedDecisionByCandidate
+  causalRelationByCandidate
+  evidenceRoles
+  missingRequiredEvidence
+  counterSignals
+  diagnosticQuality
+  expectedNextProbes
+```
+
+The fixture should test the decision-cap model:
+
+```text
+hard causal guards first
+numeric confidence second
+```
+
+That means an implementation fails the scenario if it gives a candidate a stronger decision than its evidence cap, even when its numeric score is high.
+
+Common decision caps:
+
+| Condition | Expected cap |
+|---|---|
+| Missing primary evidence | `UNCERTAIN_REQUIRES_MORE_EVIDENCE` |
+| Missing topology path for dependency fault | `UNCERTAIN_REQUIRES_MORE_EVIDENCE` |
+| Missing explicit action for deployment regression | `UNCERTAIN_REQUIRES_MORE_EVIDENCE` |
+| Explicit deploy action only, no change-specific runtime evidence | `POSSIBLE_ROOT_CAUSE` |
+| Strong counter-signal proves candidate healthy | `NOT_ROOT_CAUSE` or reduced cap |
+| Provider blind for required evidence | degraded diagnostic quality, not negative proof |
+
+LLM/GraphRAG fixtures should assert that proposals remain `UNVERIFIED_PROPOSAL` until deterministic guards validate them with current evidence.
+
 ## Scenario 1: Downstream Payment Latency Causes Order Errors
 
 ### Setup
@@ -48,6 +100,20 @@ observations:
 1. payment-service DOWNSTREAM_DEPENDENCY_LATENCY
 2. order-service SERVICE_INTERNAL_ERROR
 3. order-service POD_CRASH_LOOP only if primary crash evidence exists
+```
+
+### Fixture Expectations
+
+```text
+leadingClaim:
+  payment-service DOWNSTREAM_DEPENDENCY_LATENCY LIKELY_CAUSED order-service timeout
+
+allowedDecisionByCandidate:
+  payment-service DOWNSTREAM_DEPENDENCY_LATENCY: LIKELY_ROOT_CAUSE
+  order-service POD_CRASH_LOOP: UNCERTAIN_REQUIRES_MORE_EVIDENCE unless primary crash evidence exists
+
+diagnosticQuality:
+  NORMAL if Prometheus, trace, and logs are healthy
 ```
 
 ### Why This Is Not Hard-Coded
@@ -94,6 +160,23 @@ observations:
 payment-service DOWNSTREAM_DEPENDENCY_LATENCY > order-service POD_CRASH_LOOP
 ```
 
+### Fixture Expectations
+
+```text
+leadingClaim:
+  payment-service latency LIKELY_CAUSED order-service timeout/probe impact
+
+allowedDecisionByCandidate:
+  payment-service DOWNSTREAM_DEPENDENCY_LATENCY: PROBABLE_ROOT_CAUSE or LIKELY_ROOT_CAUSE depending on trace/log corroboration
+  order-service POD_CRASH_LOOP: UNCERTAIN_REQUIRES_MORE_EVIDENCE
+
+evidenceRoles:
+  order restart/probe failure: SYMPTOM or IMPACT
+
+missingRequiredEvidence:
+  order-service crash reason / exit code / startup failure log
+```
+
 ### Decision Guard
 
 `pod_crash_loop` cannot become probable/likely root cause from restart/not_ready alone. It needs primary crash evidence:
@@ -137,6 +220,20 @@ observations:
 
 ```text
 order-service POD_CRASH_LOOP > payment-service DOWNSTREAM_DEPENDENCY_LATENCY
+```
+
+### Fixture Expectations
+
+```text
+leadingClaim:
+  order-service pod CRASH_LOOP LIKELY_CAUSED order-service availability drop
+
+allowedDecisionByCandidate:
+  order-service POD_CRASH_LOOP: LIKELY_ROOT_CAUSE
+  payment-service DOWNSTREAM_DEPENDENCY_LATENCY: NOT_ROOT_CAUSE or POSSIBLE_ROOT_CAUSE depending on any weak latency signals
+
+counterSignals:
+  payment-service healthy
 ```
 
 ### Why This Is Correct
@@ -270,9 +367,10 @@ observations:
 
 | Signal | Entity | Role |
 |---|---|---|
-| Deployment action | order-service deployment | PRIMARY_CAUSE_EVIDENCE / CONTROL_PLANE |
+| Deployment action | order-service deployment | REQUIRED_ACTION_CONTEXT / CONTROL_PLANE |
 | Error starts after deploy | order-service | PRIMARY_CAUSE_EVIDENCE |
-| Exception logs | order-service | SECONDARY_CAUSE_EVIDENCE |
+| Exception logs in changed code/config path | order-service | PRIMARY_CAUSE_EVIDENCE or SECONDARY_CAUSE_EVIDENCE depending on specificity |
+| New image/config/flag matches failing behavior | deployment/config entity | SECONDARY_CAUSE_EVIDENCE |
 | Payment healthy | payment-service | COUNTER_SIGNAL against dependency latency |
 
 ### Expected Ranking
@@ -281,9 +379,24 @@ observations:
 order-service DEPLOYMENT_REGRESSION > downstream_dependency_latency
 ```
 
+### Fixture Expectations
+
+```text
+leadingClaim:
+  order-service DEPLOYMENT_REGRESSION PROBABLE_ROOT_CAUSE or LIKELY_ROOT_CAUSE
+
+allowedDecisionByCandidate:
+  order-service DEPLOYMENT_REGRESSION: requires explicit action + post-action anomaly + change-specific runtime evidence
+
+guard:
+  deployment action alone is REQUIRED_ACTION_CONTEXT, not sufficient primary evidence
+```
+
 ### Key Rule
 
 Deployment regression requires explicit action evidence. It should not be inferred only from Kubernetes deployment metadata.
+
+The deploy action is required context, not sufficient proof by itself. A deploy becomes a strong root-cause candidate only when runtime symptoms start after the action and specific evidence ties the new version/config/flag to the failing path.
 
 ## Scenario 8: Kubernetes Rollout Metadata Without Explicit Deploy Action
 
@@ -309,6 +422,16 @@ observations:
 
 ```text
 deployment_regression maxDecision = uncertain
+```
+
+### Fixture Expectations
+
+```text
+allowedDecisionByCandidate:
+  deployment_regression: UNCERTAIN_REQUIRES_MORE_EVIDENCE
+
+missingRequiredEvidence:
+  explicit DEPLOYMENT / CONFIG_CHANGE / FEATURE_FLAG_CHANGE ActionEvent
 ```
 
 ### Why This Matters
@@ -543,6 +666,16 @@ competing_hypotheses or uncertain_requires_more_evidence
 next probe: collect trace topology / dependency graph
 ```
 
+### Fixture Expectations
+
+```text
+allowedDecisionByCandidate:
+  payment-service DOWNSTREAM_DEPENDENCY_LATENCY: UNCERTAIN_REQUIRES_MORE_EVIDENCE
+
+missingRequiredEvidence:
+  topology path or observed dependency edge
+```
+
 ## Scenario 16: Multi-Hop Dependency Propagation
 
 ### Setup
@@ -686,6 +819,137 @@ next probes:
 
 It must not directly change final RCA until probes produce verified evidence.
 
+## Scenario 21: Deploy Action Near Alert But Dependency Is Root Cause
+
+### Setup
+
+```text
+action:
+  order-service deployed at 10:00
+
+topology:
+  order-service CALLS payment-service
+
+observations:
+  payment-service latency starts at 09:58
+  order-service timeout starts at 10:02
+  order-service deployment succeeds with no new exception signature
+  rollback of order-service does not improve timeout
+```
+
+### Causal Role Classification
+
+| Signal | Entity | Role |
+|---|---|---|
+| Order deploy action | order-service deployment | CONTROL_PLANE / REQUIRED_ACTION_CONTEXT for deployment regression |
+| Payment latency before order symptoms | payment-service | PRIMARY_CAUSE_EVIDENCE for downstream dependency latency |
+| Order timeouts | order-service | IMPACT |
+| Rollback no improvement | order-service deployment | COUNTER_SIGNAL against deployment regression |
+
+### Expected Ranking
+
+```text
+payment-service DOWNSTREAM_DEPENDENCY_LATENCY > order-service DEPLOYMENT_REGRESSION
+```
+
+### Why This Matters
+
+This prevents "recent deploy equals root cause." Deployment action is necessary for deployment regression, but not sufficient.
+
+## Scenario 22: Flapping Alerts Below Sustain Threshold
+
+### Setup
+
+```text
+alerts:
+  order-service latency alert fires for 20s
+  clears for 40s
+  fires again for 20s
+
+alert rule:
+  evaluation interval = 30s
+  for duration = 2m
+
+observations:
+  no sustained error budget impact
+  no corroborating logs/traces
+```
+
+### Expected Behavior
+
+The system may collect observations, but should remain in:
+
+```text
+ProblemLifecycleState = DETECTING
+```
+
+It should not trigger a full RCA run until sustained symptoms pass the configured threshold or high-confidence primary evidence arrives.
+
+## Scenario 23: Same Chain Alerts Update One Open Problem
+
+### Setup
+
+```text
+topology:
+  order-service CALLS payment-service
+
+timeline:
+  10:00 payment-service latency alert opens
+  10:01 order-service timeout alert opens
+  10:02 order-service restart/probe alert opens
+```
+
+### Expected Behavior
+
+One open problem is updated three times:
+
+```text
+OPEN -> UPDATED -> UPDATED
+```
+
+The RCA engine reranks hypotheses inside the same problem. It should not create three independent RCA runs.
+
+## Scenario 24: Provider Blindness Changes Missing Evidence Semantics
+
+### Setup
+
+```text
+providers:
+  Prometheus healthy
+  Loki blind
+  Jaeger sampled at 5%
+
+observations:
+  Prometheus dependency latency spike
+  no Loki timeout logs
+  sparse trace samples
+```
+
+### Expected Behavior
+
+1. Missing Loki logs are observability degradation, not counter evidence.
+2. Sparse traces can support an observed path if present, but cannot prove absence of a path.
+3. Report includes diagnostic quality and next probes.
+
+```text
+diagnosticQuality = DEGRADED
+providerBlindness = [LOKI]
+```
+
+### Fixture Expectations
+
+```text
+counterSignals:
+  no Loki logs: none, because Loki is blind
+
+diagnosticQuality:
+  DEGRADED
+
+expectedNextProbes:
+  restore Loki ingestion or query alternate logs
+  verify trace sampling before using absence of traces as counter evidence
+```
+
 ## Scenario Matrix
 
 | Scenario | Root cause entity | Key guard |
@@ -710,6 +974,10 @@ It must not directly change final RCA until probes produce verified evidence.
 | Same incident alerts | same candidate | normalize to one problem |
 | Recurrence | linked new incident | recurrence relation |
 | LLM proposal | unverified | probes required before scoring |
+| Deploy near alert but dependency root | dependency | deploy action alone is not sufficient |
+| Flapping below sustain | none/open detecting | do not trigger full RCA before sustain threshold |
+| Same chain updates | same candidate | update one open problem, do not duplicate RCA |
+| Provider blindness semantics | uncertain/degraded | no_signal meaning depends on provider trust |
 
 ## Design Conclusions
 
@@ -718,4 +986,4 @@ It must not directly change final RCA until probes produce verified evidence.
 3. EC2 and Kubernetes can share the same RCA model if both map into `Entity`, `ObservationEvent`, `ActionEvent`, and `TopologyEdge`.
 4. Deployment regression must be based on explicit action evidence, not guessed from runtime metadata.
 5. LLM/GraphRAG should expand investigation context and propose probes, but deterministic evidence contracts and causal role classification should decide final RCA.
-
+6. Numeric confidence should be a calibrated summary after causal guards, not the mechanism that decides whether weak evidence can become a root cause.
