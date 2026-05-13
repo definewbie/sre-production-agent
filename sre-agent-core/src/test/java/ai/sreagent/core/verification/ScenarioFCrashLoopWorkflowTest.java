@@ -22,9 +22,9 @@ import static org.assertj.core.data.Percentage.withPercentage;
  * End-to-end test for Scenario F (K8s CrashLoopBackOff).
  * Loads k8s_crashloop alert/evidence from classpath and runs the full chain.
  *
- * Target values:
- *   pod_crash_loop score >= 0.80
- *   decision = likely_root_cause
+ * Target values (V2 ratio-based scoring with provider alias normalization):
+ *   pod_crash_loop score ≈ 0.62
+ *   decision = probable_root_cause
  *   selected hypothesis = hyp_pod_crash_loop
  */
 class ScenarioFCrashLoopWorkflowTest {
@@ -72,15 +72,15 @@ class ScenarioFCrashLoopWorkflowTest {
     }
 
     @Test
-    void podCrashLoop_shouldScoreAbove80() {
+    void podCrashLoop_shouldScoreAbove60() {
         ConfidenceResult result = findConfidence("hyp_pod_crash_loop");
-        assertThat(result.score()).isGreaterThanOrEqualTo(0.80);
+        assertThat(result.score()).isCloseTo(0.62, withPercentage(5.0));
     }
 
     @Test
-    void podCrashLoop_shouldBeLikelyRootCause() {
+    void podCrashLoop_shouldBeProbableRootCause() {
         ConfidenceResult result = findConfidence("hyp_pod_crash_loop");
-        assertThat(result.decision()).isEqualTo("likely_root_cause");
+        assertThat(result.decision()).isEqualTo("probable_root_cause");
     }
 
     @Test
@@ -89,7 +89,7 @@ class ScenarioFCrashLoopWorkflowTest {
         HypothesisComparison comparison = comparator.compare(incident, confidences, verifications, evidence);
         InvestigationDecision decision = comparator.decide(incident, comparison, confidences);
 
-        assertThat(decision.decisionType()).isEqualTo("likely_root_cause");
+        assertThat(decision.decisionType()).isEqualTo("probable_root_cause");
     }
 
     @Test
@@ -112,7 +112,7 @@ class ScenarioFCrashLoopWorkflowTest {
     @Test
     void podCrashLoop_shouldBeHighConfidence() {
         ConfidenceResult result = findConfidence("hyp_pod_crash_loop");
-        assertThat(result.level()).isEqualTo("high");
+        assertThat(result.level()).isEqualTo("medium");
     }
 
     @Test

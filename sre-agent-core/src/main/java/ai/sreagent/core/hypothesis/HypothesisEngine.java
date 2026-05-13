@@ -41,6 +41,18 @@ public class HypothesisEngine {
                 "kubernetes_crash_loop",
                 "容器在 Kubernetes 中反复崩溃或重启"
         ));
+        TEMPLATES.put("liveness_probe_timeout", new HypothesisTemplate(
+                "hyp_liveness_probe_timeout",
+                "K8s 存活探针超时导致 Pod 重启",
+                "liveness_probe_timeout",
+                "Pod restarts triggered by K8s liveness probe timeout (application healthy but probe too aggressive)"
+        ));
+        TEMPLATES.put("service_internal_error", new HypothesisTemplate(
+                "hyp_service_internal_error",
+                "应用内部错误导致5xx响应（无部署、无下游故障）",
+                "service_internal_error",
+                "应用代码自身返回5xx错误，无外部触发因素（无部署、无下游故障、无资源压力）"
+        ));
     }
 
     /**

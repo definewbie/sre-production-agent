@@ -1,0 +1,815 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RCA Incident Cockpit Prototype</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --surface: #ffffff;
+      --surface-soft: #f9fbfd;
+      --line: #dce4ef;
+      --line-soft: #edf1f6;
+      --text: #24324a;
+      --muted: #66748a;
+      --faint: #8a96a8;
+      --title: #101828;
+      --blue: #2563eb;
+      --green: #059669;
+      --amber: #b45309;
+      --red: #dc2626;
+      --purple: #6d28d9;
+      --shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+    }
+
+    .rail {
+      background: #111827;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px 12px;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #111827;
+      display: grid;
+      place-items: center;
+      font-weight: 820;
+      margin-bottom: 14px;
+    }
+
+    .rail-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      color: #cbd5e1;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+    }
+
+    .rail-btn.active {
+      background: #273346;
+      color: #ffffff;
+    }
+
+    .main {
+      padding: 22px;
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .title-block h1 {
+      color: var(--title);
+      font-size: 26px;
+      line-height: 1.2;
+      margin: 0 0 4px;
+      font-weight: 780;
+    }
+
+    .title-block p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-weight: 680;
+      font-size: 13px;
+    }
+
+    button.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr) 340px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .panel-title {
+      margin: 0;
+      color: var(--title);
+      font-size: 14px;
+      font-weight: 780;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .incident-list {
+      display: grid;
+    }
+
+    .incident-item {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #fff;
+    }
+
+    .incident-item.active {
+      background: #f7faff;
+      box-shadow: inset 3px 0 0 var(--blue);
+    }
+
+    .item-title {
+      color: var(--title);
+      font-size: 14px;
+      line-height: 1.35;
+      font-weight: 760;
+      margin-bottom: 9px;
+    }
+
+    .item-meta {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .inline {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .badge.red { color: #b91c1c; background: #fee2e2; border-color: #fecaca; }
+    .badge.amber { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+    .badge.green { color: #047857; background: #d1fae5; border-color: #a7f3d0; }
+    .badge.blue { color: #1d4ed8; background: #dbeafe; border-color: #bfdbfe; }
+    .badge.purple { color: #5b21b6; background: #ede9fe; border-color: #ddd6fe; }
+    .badge.gray { color: #4b5563; background: #f3f4f6; border-color: #e5e7eb; }
+
+    .detail {
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero {
+      padding: 18px 18px 16px;
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    .hero h2 {
+      color: var(--title);
+      font-size: 24px;
+      line-height: 1.25;
+      margin: 0 0 8px;
+      font-weight: 820;
+    }
+
+    .hero p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 760px;
+      margin: 0;
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface-soft);
+    }
+
+    .decision-cell {
+      padding: 12px;
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .decision-cell:last-child { border-right: none; }
+
+    .label {
+      color: var(--faint);
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .value {
+      color: var(--title);
+      font-size: 15px;
+      line-height: 1.35;
+      font-weight: 760;
+    }
+
+    .story {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .story-card {
+      border: 1px solid var(--line-soft);
+      background: #fff;
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 132px;
+    }
+
+    .story-kicker {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      margin-bottom: 9px;
+    }
+
+    .story-title {
+      color: var(--title);
+      font-size: 17px;
+      line-height: 1.25;
+      font-weight: 800;
+      margin-bottom: 7px;
+    }
+
+    .story-body {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .root-card {
+      padding: 16px;
+    }
+
+    .root-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .path {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      padding: 14px;
+      background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+      display: grid;
+      gap: 10px;
+    }
+
+    .path-step {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .dot {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 780;
+      margin-top: 1px;
+    }
+
+    .dot.blue { background: var(--blue); }
+    .dot.amber { background: var(--amber); }
+    .dot.red { background: var(--red); }
+
+    .step-title {
+      color: var(--title);
+      font-size: 14px;
+      font-weight: 780;
+      margin-bottom: 3px;
+    }
+
+    .step-body {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .evidence-summary {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+    }
+
+    .evidence-summary h3 {
+      color: var(--title);
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+
+    .check-list {
+      display: grid;
+      gap: 9px;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .check-mark {
+      color: var(--green);
+      font-weight: 820;
+    }
+
+    .timeline {
+      padding: 8px 16px 16px;
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 58px 92px minmax(0, 1fr);
+      gap: 12px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .event:last-child { border-bottom: none; }
+
+    .time {
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .lane {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .event h3 {
+      color: var(--title);
+      font-size: 13px;
+      line-height: 1.35;
+      margin: 0 0 3px;
+    }
+
+    .event p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    .side {
+      display: grid;
+      gap: 16px;
+      position: sticky;
+      top: 18px;
+    }
+
+    .side-section {
+      padding: 15px;
+    }
+
+    .side-section h2 {
+      color: var(--title);
+      font-size: 14px;
+      margin: 0 0 12px;
+      font-weight: 780;
+    }
+
+    .action-stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .action {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      padding: 11px;
+    }
+
+    .action h3 {
+      margin: 0 0 5px;
+      color: var(--title);
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .action p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .assistant-note {
+      border: 1px solid #dbeafe;
+      background: #f8fbff;
+      border-radius: 8px;
+      padding: 12px;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .small-table {
+      display: grid;
+      gap: 9px;
+      font-size: 13px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .row .key { color: var(--faint); }
+    .row .val { color: var(--text); font-weight: 650; }
+
+    details {
+      padding: 14px 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    summary {
+      color: var(--title);
+      font-weight: 760;
+      cursor: pointer;
+    }
+
+    @media (max-width: 1320px) {
+      .workspace {
+        grid-template-columns: 320px minmax(0, 1fr);
+      }
+
+      .side {
+        grid-column: 1 / -1;
+        position: static;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .workspace,
+      .root-grid,
+      .story,
+      .side {
+        grid-template-columns: 1fr;
+      }
+
+      .decision {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .decision {
+        grid-template-columns: 1fr;
+      }
+
+      .decision-cell {
+        border-right: none;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .event {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <nav class="rail">
+      <div class="logo">S</div>
+      <div class="rail-btn active">●</div>
+      <div class="rail-btn">◇</div>
+      <div class="rail-btn">↗</div>
+      <div class="rail-btn">≡</div>
+      <div class="rail-btn">?</div>
+    </nav>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="title-block">
+          <h1>Incident Cockpit</h1>
+          <p>聚合告警、影响、根因判断和处置动作，而不是展示一次次 RCA run。</p>
+        </div>
+        <div class="toolbar">
+          <button>Share update</button>
+          <button>Open runbook</button>
+          <button class="primary">Assign owner</button>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <aside class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Active problems</h2>
+            <span class="badge amber">3 open</span>
+          </div>
+          <div class="incident-list">
+            <div class="incident-item active">
+              <div class="item-title">Checkout timing out after payment latency spike</div>
+              <div class="item-meta">
+                <div class="inline"><span class="badge red">SEV2</span><span>18m active</span><span>checkout</span></div>
+                <div>Likely owner: payments</div>
+                <div>Next: mitigate payment path</div>
+              </div>
+            </div>
+            <div class="incident-item">
+              <div class="item-title">Inventory reserve errors during checkout surge</div>
+              <div class="item-meta">
+                <div class="inline"><span class="badge amber">SEV3</span><span>11m active</span><span>reserve</span></div>
+                <div>State: competing explanations</div>
+                <div>Next: compare inventory vs traffic pressure</div>
+              </div>
+            </div>
+            <div class="incident-item">
+              <div class="item-title">Loki ingestion degraded for order-service logs</div>
+              <div class="item-meta">
+                <div class="inline"><span class="badge amber">SEV3</span><span>diagnostic risk</span></div>
+                <div>Likely owner: platform</div>
+                <div>Next: repair log pipeline</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="detail">
+          <article class="panel hero">
+            <div class="hero-top">
+              <div>
+                <h2>Checkout timing out after payment-service latency spike</h2>
+                <p>Current evidence points to payment-service as the best starting point. The user-visible failure is order-service checkout timeout; payment mitigation should be validated by checkout recovery.</p>
+              </div>
+              <span class="badge blue">Probable RCA</span>
+            </div>
+            <div class="decision">
+              <div class="decision-cell">
+                <div class="label">Impact</div>
+                <div class="value">Checkout 5xx, SLO burn</div>
+              </div>
+              <div class="decision-cell">
+                <div class="label">Likely owner</div>
+                <div class="value">payments team</div>
+              </div>
+              <div class="decision-cell">
+                <div class="label">Confidence language</div>
+                <div class="value">Probable, not final</div>
+              </div>
+              <div class="decision-cell">
+                <div class="label">Diagnostic quality</div>
+                <div class="value">Normal</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="story">
+              <div class="story-card">
+                <div class="story-kicker">Likely starting point</div>
+                <div class="story-title">payment-service latency</div>
+                <div class="story-body">Latency rose before checkout failures and appears on failing checkout traces.</div>
+              </div>
+              <div class="story-card">
+                <div class="story-kicker">First visible failure</div>
+                <div class="story-title">order-service timeout</div>
+                <div class="story-body">Checkout requests wait on payment and then return 5xx to callers.</div>
+              </div>
+              <div class="story-card">
+                <div class="story-kicker">Customer impact</div>
+                <div class="story-title">checkout degraded</div>
+                <div class="story-body">SLO burn is active. Inventory is affected downstream but is not the best starting point.</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel root-card">
+            <div class="panel-header" style="padding: 0 0 14px; border-bottom: 0;">
+              <h2 class="panel-title">Why the system starts with payment-service</h2>
+              <span class="badge green">trace + metric + topology</span>
+            </div>
+            <div class="root-grid">
+              <div class="path">
+                <div class="path-step">
+                  <div class="dot blue">1</div>
+                  <div>
+                    <div class="step-title">payment-service slows down</div>
+                    <div class="step-body">p95 latency rises from 120ms to 2.4s at 23:18.</div>
+                  </div>
+                </div>
+                <div class="path-step">
+                  <div class="dot amber">2</div>
+                  <div>
+                    <div class="step-title">order-service waits on payment</div>
+                    <div class="step-body">Failing checkout traces spend most time in payment call.</div>
+                  </div>
+                </div>
+                <div class="path-step">
+                  <div class="dot red">3</div>
+                  <div>
+                    <div class="step-title">checkout becomes user-visible failure</div>
+                    <div class="step-body">5xx and SLO burn start after downstream latency appears.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="evidence-summary">
+                <h3>Evidence summary</h3>
+                <div class="check-list">
+                  <div class="check"><span class="check-mark">✓</span><span>Payment latency begins before checkout timeout.</span></div>
+                  <div class="check"><span class="check-mark">✓</span><span>Trace path confirms order-service depends on payment-service.</span></div>
+                  <div class="check"><span class="check-mark">✓</span><span>No order-service deploy is known in the problem window.</span></div>
+                  <div class="check"><span class="check-mark">✓</span><span>Pod restart evidence is late and lacks crash primary proof.</span></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Timeline</h2>
+              <span class="muted">changes, symptoms, impact, actions</span>
+            </div>
+            <div class="timeline">
+              <div class="event">
+                <div class="time">23:16</div>
+                <div class="lane">Change</div>
+                <div>
+                  <h3>No order-service deploy found</h3>
+                  <p>Deployment regression is not promoted without an explicit action source.</p>
+                </div>
+              </div>
+              <div class="event">
+                <div class="time">23:18</div>
+                <div class="lane">Signal</div>
+                <div>
+                  <h3>payment-service latency spike begins</h3>
+                  <p>Prometheus and trace latency agree on the timing and service.</p>
+                </div>
+              </div>
+              <div class="event">
+                <div class="time">23:19</div>
+                <div class="lane">Failure</div>
+                <div>
+                  <h3>order-service checkout timeout starts</h3>
+                  <p>Timeouts line up with downstream payment call duration.</p>
+                </div>
+              </div>
+              <div class="event">
+                <div class="time">23:20</div>
+                <div class="lane">Impact</div>
+                <div>
+                  <h3>Checkout 5xx and SLO burn</h3>
+                  <p>User-facing impact drives SEV2 response.</p>
+                </div>
+              </div>
+              <div class="event">
+                <div class="time">23:23</div>
+                <div class="lane">Action</div>
+                <div>
+                  <h3>Payments team assigned</h3>
+                  <p>Mitigation should be validated through checkout recovery, not payment metrics alone.</p>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <details>
+              <summary>RCA internals for engineers debugging the model</summary>
+              <p>Raw evidence, causal guards, provider trust, score breakdown, and query-level diagnostics live here. They are intentionally below the incident narrative.</p>
+            </details>
+          </article>
+        </section>
+
+        <aside class="side">
+          <section class="panel side-section">
+            <h2>Recommended next actions</h2>
+            <div class="action-stack">
+              <div class="action">
+                <h3>Mitigate payment path</h3>
+                <p>Scale, reroute, or disable the slow path. Watch checkout 5xx for recovery.</p>
+              </div>
+              <div class="action">
+                <h3>Check payment changes</h3>
+                <p>Review deploy, config, feature flag, and external provider changes before 23:18.</p>
+              </div>
+              <div class="action">
+                <h3>Keep crash-loop as watch item</h3>
+                <p>Promote only if OOMKilled, exit code, or startup failure evidence appears.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel side-section">
+            <h2>AI incident assistant</h2>
+            <div class="assistant-note">Draft update: Checkout is degraded. Evidence currently points to payment-service latency as the likely starting point. Payments is mitigating; validation will use order-service checkout 5xx and latency.</div>
+            <div class="assistant-note">Suggested probe: query payment-service deploy and feature flag history from 23:08 to 23:18.</div>
+            <span class="badge gray">Assistant output is advisory</span>
+          </section>
+
+          <section class="panel side-section">
+            <h2>Ownership and escalation</h2>
+            <div class="small-table">
+              <div class="row"><div class="key">Primary</div><div class="val">payments team</div></div>
+              <div class="row"><div class="key">Impacted</div><div class="val">checkout team</div></div>
+              <div class="row"><div class="key">Escalate</div><div class="val">No recovery 10m after payment mitigation</div></div>
+              <div class="row"><div class="key">Runbook</div><div class="val">payment-latency-response</div></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -37,10 +37,10 @@ class HypothesisEngineTest {
     }
 
     @Test
-    void shouldGenerateFourHypotheses() {
+    void shouldGenerateFiveHypotheses() {
         List<Hypothesis> hypotheses = engine.generate(incident, registry.all());
 
-        assertThat(hypotheses).hasSize(4);
+        assertThat(hypotheses).hasSize(5);
     }
 
     @Test
@@ -55,7 +55,8 @@ class HypothesisEngineTest {
                 "deployment_regression",
                 "downstream_dependency_latency",
                 "pod_oom_killed",
-                "pod_crash_loop"
+                "pod_crash_loop",
+                "service_internal_error"
         );
     }
 
@@ -71,7 +72,8 @@ class HypothesisEngineTest {
                 "hyp_deployment_regression",
                 "hyp_downstream_dependency_latency",
                 "hyp_pod_oom_killed",
-                "hyp_pod_crash_loop"
+                "hyp_pod_crash_loop",
+                "hyp_service_internal_error"
         );
     }
 
@@ -100,6 +102,7 @@ class HypothesisEngineTest {
                 .containsEntry("deployment_regression", "change_regression")
                 .containsEntry("downstream_dependency_latency", "dependency_latency")
                 .containsEntry("pod_oom_killed", "resource_pressure")
-                .containsEntry("pod_crash_loop", "kubernetes_crash_loop");
+                .containsEntry("pod_crash_loop", "kubernetes_crash_loop")
+                .containsEntry("service_internal_error", "service_internal_error");
     }
 }

@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  getEvidenceDrilldownView,
-  simulateLiveScenario,
+  getEvidenceDrilldownForRun,
+  getIncidents,
   EvidenceDrilldownView,
   EvidenceItemView,
   SourceSummaryView,
   EvidenceStrength,
   EvidenceSource,
   SourceStatus,
+  type IncidentRcaResultView,
 } from '../api/client'
 
 /* ── Badge helpers ── */
@@ -187,6 +188,25 @@ export default function EvidenceDrilldownPanel() {
   const [activeTab, setActiveTab] = useState<TabId>('matrix')
   const [detailItem, setDetailItem] = useState<EvidenceItemView | null>(null)
 
+  // V.2-UI-6.2: Run selector
+  const [selectedRunId, setSelectedRunId] = useState<string>('')
+  const [runs, setRuns] = useState<IncidentRcaResultView[]>([])
+  const [runsLoading, setRunsLoading] = useState(true)
+
+  // Fetch available RCA runs on mount
+  useEffect(() => {
+    (async () => {
+      const result = await getIncidents()
+      if (result.data) {
+        const completed = result.data.filter(r =>
+          r.status === 'COMPLETED' || r.status === 'NO_EVIDENCE_FOUND'
+        )
+        setRuns(completed)
+      }
+      setRunsLoading(false)
+    })()
+  }, [])
+
   // Raw evidence filters
   const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [typeFilter, setTypeFilter] = useState<string>('all')
@@ -196,17 +216,11 @@ export default function EvidenceDrilldownPanel() {
   const PAGE_SIZE = 25
 
   const loadData = useCallback(async () => {
+    if (!selectedRunId) return
     setLoading(true)
     setError(null)
-    // First try to get evidence from latest run
-    let result = await getEvidenceDrilldownView()
-    // If no prior run (404), run a simulation first then retry
-    if (result.error && result.error.includes('404')) {
-      const sim = await simulateLiveScenario(false)
-      if (!sim.error) {
-        result = await getEvidenceDrilldownView()
-      }
-    }
+    // V.2-UI-6.2: Load evidence for the selected RCA Run
+    const result = await getEvidenceDrilldownForRun(selectedRunId)
     if (result.error) {
       setError(result.error)
       setData(null)
@@ -214,7 +228,7 @@ export default function EvidenceDrilldownPanel() {
       setData(result.data)
     }
     setLoading(false)
-  }, [])
+  }, [selectedRunId])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -236,6 +250,59 @@ export default function EvidenceDrilldownPanel() {
   const uniqueTypes = data
     ? [...new Set(data.rawEvidence.map(e => e.evidenceType))].sort()
     : []
+
+  /* ── No run selected (default view) ── */
+  if (!selectedRunId) {
+    return (
+      <div>
+        <div className="breadcrumb" style={{ marginBottom: 4 }}>证据明细</div>
+        <h1 className="page-title">4 证据明细（Evidence Drill-down）</h1>
+        <div style={{ padding: 40, textAlign: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>🔍</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--title)', marginBottom: 8 }}>
+            请选择一个 RCA Run 查看证据
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20 }}>
+            选择一次已完成的 RCA 分析，查看其证据明细
+          </div>
+          {runsLoading ? (
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>加载运行列表...</div>
+          ) : runs.length === 0 ? (
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+              暂无可用的 RCA Run，请先在「RCA 分析」页面运行一次分析
+            </div>
+          ) : (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <select
+                value={selectedRunId}
+                onChange={e => {
+                  const id = e.target.value
+                  setSelectedRunId(id)
+                  if (id) { setData(null); setError(null) }
+                }}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  fontSize: 14,
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
+                  minWidth: 280,
+                }}
+              >
+                <option value="">-- 选择一个 RCA Run --</option>
+                {runs.map(r => (
+                  <option key={r.incidentId} value={r.incidentId}>
+                    {r.incidentId} — {r.service || '未知服务'} ({r.status === 'COMPLETED' ? '已完成' : '无证据'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   /* ── Loading ── */
   if (loading) {
@@ -260,16 +327,19 @@ export default function EvidenceDrilldownPanel() {
     )
   }
 
-  /* ── Empty (no latest run) ── */
+  /* ── Empty (selected run has no evidence) ── */
   if (!data) {
     return (
       <div style={{ padding: 40, textAlign: 'center' }}>
         <div style={{ fontSize: 40, marginBottom: 16, opacity: 0.3 }}>📋</div>
         <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--title)', marginBottom: 8 }}>
-          暂无 RCA 证据
+          该 RCA Run 暂无证据数据
         </div>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-          请先在 RCA 分析页运行一次实时 RCA 分析
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+          当前 Run ({selectedRunId}) 未返回证据明细，可能该 Run 状态为 NO_EVIDENCE_FOUND
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+          请尝试切换其他 RCA Run，或重新运行一次 RCA 分析
         </div>
         <button className="btn btn-primary btn-sm" onClick={loadData}>刷新</button>
       </div>
@@ -287,13 +357,38 @@ export default function EvidenceDrilldownPanel() {
     <div>
       {/* Breadcrumb */}
       <div className="breadcrumb" style={{ marginBottom: 4 }}>
-        证据明细 ＞ 所有证据
+        证据明细 ＞ {selectedRunId ? `Run: ${selectedRunId}` : '所有证据'}
       </div>
 
       {/* Page Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <h1 className="page-title">4 证据明细（Evidence Drill-down）</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* V.2-UI-6.2: Run switcher */}
+          <select
+            value={selectedRunId}
+            onChange={e => {
+              const id = e.target.value
+              setSelectedRunId(id)
+              if (id) { setData(null); setError(null) }
+            }}
+            style={{
+              padding: '4px 12px',
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              fontSize: 12,
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              minWidth: 200,
+            }}
+          >
+            <option value="">切换 Run...</option>
+            {runs.map(r => (
+              <option key={r.incidentId} value={r.incidentId}>
+                {r.incidentId} — {r.service || '未知服务'}
+              </option>
+            ))}
+          </select>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             {data.collectedAt ? '采集时间: ' + data.collectedAt.replace('T', ' ').replace('Z', '') : ''}
           </span>

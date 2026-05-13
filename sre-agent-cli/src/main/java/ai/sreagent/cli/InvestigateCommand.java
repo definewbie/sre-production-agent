@@ -111,7 +111,8 @@ public class InvestigateCommand implements Runnable {
 
             // 9. Generate report
             MarkdownReporter reporter = new MarkdownReporter();
-            String report = reporter.generate(incident, hypotheses, verResults, confResults, comparison, decision, evidence);
+            ProblemWindow problemWindow = ProblemWindow.deriveFromIncident(incident, evidence);
+            String report = reporter.generate(incident, hypotheses, verResults, confResults, comparison, decision, evidence, problemWindow);
 
             // 10. Write report
             Path outPath = Path.of(outputPath);

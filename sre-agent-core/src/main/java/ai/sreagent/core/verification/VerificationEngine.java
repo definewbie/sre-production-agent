@@ -30,9 +30,13 @@ public class VerificationEngine {
             DiagnosticPattern pattern,
             List<Evidence> evidence
     ) {
+        // Normalize provider aliases (metric_*, log_*, trace_*) to core types
+        // so that coverage checks and contradiction rules compare against the
+        // same type namespace as the pattern's core evidence types.
         Set<String> evidenceTypes = evidence.stream()
                 .map(Evidence::evidenceType)
                 .filter(t -> !IGNORED_TYPES.contains(t))
+                .map(ConfidenceScorer::normalizeEvidenceType)
                 .collect(Collectors.toSet());
 
         List<String> supportingIds = evidence.stream()
@@ -48,7 +52,7 @@ public class VerificationEngine {
                 .toList();
 
         Set<String> coveredTypes = new HashSet<>();
-        evidence.forEach(e -> coveredTypes.add(e.evidenceType()));
+        evidence.forEach(e -> coveredTypes.add(ConfidenceScorer.normalizeEvidenceType(e.evidenceType())));
 
         List<String> missingEvidence = pattern.evidenceRequirements().stream()
                 .filter(req -> !coveredTypes.contains(req))
@@ -125,9 +129,7 @@ public class VerificationEngine {
                             "Timeout logs existed before the deployment, so the deployment may not be the only cause."
                     );
                 }
-                if (evidenceTypes.contains("downstream_latency_spike")
-                        || evidenceTypes.contains("metric_downstream_latency_spike")
-                        || evidenceTypes.contains("trace_downstream_span_slow")) {
+                if (evidenceTypes.contains("downstream_latency_spike")) {
                     contradictions.add(
                             "Downstream payment-service latency also increased, so dependency latency remains a competing explanation."
                     );
@@ -135,7 +137,7 @@ public class VerificationEngine {
             }
             case "downstream_dependency_latency" -> {
                 if (evidenceTypes.contains("downstream_5xx_absent")
-                        || evidenceTypes.contains("log_http_5xx")) {
+                        || evidenceTypes.contains("http_5xx_logs_present")) {
                     contradictions.add(
                             "payment-service 5xx did not increase, so downstream failure is not fully confirmed."
                     );

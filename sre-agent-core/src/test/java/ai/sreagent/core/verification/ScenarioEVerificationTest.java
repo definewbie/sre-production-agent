@@ -59,8 +59,8 @@ class ScenarioEVerificationTest {
     }
 
     @Test
-    void shouldGenerateFourHypotheses() {
-        assertThat(hypotheses).hasSize(4);
+    void shouldGenerateFiveHypotheses() {
+        assertThat(hypotheses).hasSize(5);
     }
 
     @Test

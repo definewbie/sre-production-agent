@@ -16,5 +16,6 @@ public record DiagnosticPattern(
     @JsonProperty("supporting_evidence_types") List<String> supportingEvidenceTypes,
     @JsonProperty("counter_evidence_types") List<String> counterEvidenceTypes,
     @JsonProperty("confidence_weights") Map<String, Double> confidenceWeights,
-    @JsonProperty("base_score") double baseScore
+    @JsonProperty("base_score") double baseScore,
+    @JsonProperty("corroborating_evidence_types") List<String> corroboratingEvidenceTypes
 ) {}

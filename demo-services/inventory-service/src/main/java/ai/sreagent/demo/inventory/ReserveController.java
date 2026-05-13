@@ -39,13 +39,13 @@ public class ReserveController {
 
             // Apply error injection
             if (!"normal".equals(mode) && ThreadLocalRandom.current().nextDouble() < config.errorRate()) {
-                log.warn("[inventory] [reserve] reserveId={} injected-error errorRate={}", reserveId, config.errorRate());
+                log.error("[inventory] [reserve] reserveId={} injected-error errorRate={}", reserveId, config.errorRate());
                 return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                         .body(errorBody(reserveId, "injected error", mode));
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.warn("[inventory] [reserve] reserveId={} interrupted", reserveId);
+            log.error("[inventory] [reserve] reserveId={} interrupted", reserveId);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(errorBody(reserveId, "interrupted", mode));
         }

@@ -1,0 +1,24 @@
+# Service Topology Configuration
+# Defines the service dependency graph for demo-services.
+# Used by TopologyProvider to build ServiceTopology model.
+#
+# Format:
+#   services:
+#     <service-name>:
+#       dependsOn: [<downstream-service>, ...]
+#       description: <human-readable description>
+
+services:
+  order-service:
+    dependsOn:
+      - payment-service
+      - inventory-service
+    description: "下单结账入口，调用 payment / inventory"
+
+  payment-service:
+    dependsOn: []
+    description: "支付服务，叶子节点"
+
+  inventory-service:
+    dependsOn: []
+    description: "库存扣减服务，叶子节点"

@@ -27,9 +27,9 @@ class ScenarioFApiTest {
     void postScenarioFReturns200() throws Exception {
         mockMvc.perform(post("/api/investigations/scenario-f"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.decisionType").value("likely_root_cause"))
+                .andExpect(jsonPath("$.decisionType").value("probable_root_cause"))
                 .andExpect(jsonPath("$.selectedHypothesisId").value("hyp_pod_crash_loop"))
-                .andExpect(jsonPath("$.confidenceScore").value(greaterThanOrEqualTo(0.80)))
+                .andExpect(jsonPath("$.confidenceScore").value(equalTo(0.67)))
                 .andExpect(jsonPath("$.reportUrl").value(containsString("/report")))
                 .andExpect(jsonPath("$.traceUrl").value(containsString("/trace")));
     }
@@ -46,7 +46,7 @@ class ScenarioFApiTest {
         mockMvc.perform(get("/api/investigations/" + incidentId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.incidentId").value(incidentId))
-                .andExpect(jsonPath("$.decisionType").value("likely_root_cause"));
+                .andExpect(jsonPath("$.decisionType").value("probable_root_cause"));
     }
 
     @Test

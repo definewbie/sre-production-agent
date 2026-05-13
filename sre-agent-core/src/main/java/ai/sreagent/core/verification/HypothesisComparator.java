@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
  * Decision policy (incident-level):
  *   - likely_root_cause:           top1 >= 0.80 and gap >= 0.15
  *   - probable_root_cause:         top1 >= 0.60 and gap >= 0.10
- *   - competing_hypotheses:        top1 >= 0.50 and top2 >= 0.50 and gap < 0.10
+ *   - competing_hypotheses:        top1 >= 0.40 and top2 >= 0.40 and gap < 0.10
  *   - uncertain_requires_more:     top1 >= 0.40
  *   - insufficient_evidence:       top1 < 0.40
  *
@@ -45,11 +45,11 @@ public class HypothesisComparator {
                 ? Math.round((top1.score() - top2.score()) * 100.0) / 100.0
                 : 1.0;
 
-        // Identify competing hypotheses (score >= 0.50 and gap < 0.10 with leader)
+        // Identify competing hypotheses (score >= 0.40 and gap < 0.10 with leader)
         List<String> competingIds = new ArrayList<>();
-        if (top2 != null && top1.score() >= 0.50 && top2.score() >= 0.50 && scoreGap < 0.10) {
+        if (top2 != null && top1.score() >= 0.40 && top2.score() >= 0.40 && scoreGap < 0.10) {
             for (int i = 1; i < sorted.size(); i++) {
-                if (sorted.get(i).score() >= 0.50) {
+                if (sorted.get(i).score() >= 0.40) {
                     competingIds.add(sorted.get(i).hypothesisId());
                 }
             }

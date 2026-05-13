@@ -84,11 +84,13 @@ public final class EvidenceTaxonomyRegistry {
         register("downstream_5xx_absent",          EvidenceCategory.METRIC,     EvidenceSignal.HTTP_5XX,               EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("service_dependency_match",       EvidenceCategory.TOPOLOGY,   EvidenceSignal.SERVICE_DEPENDENCY,     EvidenceSourceKind.STATIC,     EvidenceCausalRole.TOPOLOGY_CONTEXT);
         register("kubernetes_event_oomkilled",     EvidenceCategory.KUBERNETES, EvidenceSignal.OOM,                    EvidenceSourceKind.KUBERNETES, EvidenceCausalRole.CAUSE_CANDIDATE);
+        register("liveness_probe_failure",          EvidenceCategory.KUBERNETES, EvidenceSignal.LIVENESS_PROBE_FAILURE,   EvidenceSourceKind.KUBERNETES, EvidenceCausalRole.CAUSE_CANDIDATE);
         register("memory_usage_near_limit",        EvidenceCategory.METRIC,     EvidenceSignal.MEMORY_PRESSURE,        EvidenceSourceKind.STATIC,     EvidenceCausalRole.SYMPTOM);
         register("no_restart_observed",            EvidenceCategory.KUBERNETES, EvidenceSignal.RESTART,                EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("memory_usage_normal",            EvidenceCategory.METRIC,     EvidenceSignal.MEMORY_PRESSURE,        EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("pod_ready",                      EvidenceCategory.KUBERNETES, EvidenceSignal.POD_NOT_READY,          EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
         register("container_running_normal",       EvidenceCategory.KUBERNETES, EvidenceSignal.CRASH_LOOP,             EvidenceSourceKind.STATIC,     EvidenceCausalRole.COUNTER_SIGNAL);
+        register("chaos_fault_injected",           EvidenceCategory.RUNTIME,    EvidenceSignal.UNKNOWN,                EvidenceSourceKind.STATIC,     EvidenceCausalRole.CONTEXT);
     }
 
     private static void register(

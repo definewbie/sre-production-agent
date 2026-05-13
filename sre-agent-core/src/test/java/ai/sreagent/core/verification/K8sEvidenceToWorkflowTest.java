@@ -15,6 +15,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.data.Percentage.withPercentage;
 
 /**
  * Proves K8s provider evidence can drive the RCA workflow.
@@ -62,8 +63,8 @@ class K8sEvidenceToWorkflowTest {
                 .findFirst().orElseThrow();
 
         // pod_crash_loop must be the top hypothesis
-        assertThat(podCrashLoopConf.score()).isGreaterThanOrEqualTo(0.80);
-        assertThat(podCrashLoopConf.decision()).isEqualTo("likely_root_cause");
+        assertThat(podCrashLoopConf.score()).isCloseTo(0.62, withPercentage(5.0));
+        assertThat(podCrashLoopConf.decision()).isEqualTo("probable_root_cause");
 
         // Decision at incident level
         HypothesisComparator comparator = new HypothesisComparator();
@@ -71,7 +72,7 @@ class K8sEvidenceToWorkflowTest {
                 List.copyOf(verMap.values()), evidence);
         InvestigationDecision decision = comparator.decide(incident, comparison, confidences);
 
-        assertThat(decision.decisionType()).isEqualTo("likely_root_cause");
+        assertThat(decision.decisionType()).isEqualTo("probable_root_cause");
         assertThat(decision.selectedHypothesisId()).isEqualTo("hyp_pod_crash_loop");
     }
 

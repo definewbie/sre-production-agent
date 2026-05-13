@@ -16,12 +16,14 @@ import ai.sreagent.core.workflow.InvestigationResult;
 import ai.sreagent.core.workflow.InvestigationWorkflow;
 import ai.sreagent.server.live.LiveEvidenceCollector;
 import ai.sreagent.server.live.LiveEvidenceReport;
+import ai.sreagent.server.topology.TopologyProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -45,11 +47,15 @@ public class IncidentService {
     private final String prometheusUrl;
     private final String lokiUrl;
     private final String jaegerUrl;
+    private final TopologyProvider topologyProvider;
+    private final Duration normalizationWindow;
 
     /** In-memory store for incident records (alert-driven RCA results). */
     private final ConcurrentHashMap<String, IncidentRecord> incidentStore = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<IncidentFingerprint, String> normalizedIncidentIndex = new ConcurrentHashMap<>();
 
-    public IncidentService(Environment env) {
+    public IncidentService(Environment env, TopologyProvider topologyProvider) {
+        this.topologyProvider = topologyProvider;
         String alertmanagerUrl = env.getProperty(
                 "sre-agent.observability.alertmanager-url", "http://localhost:9093");
         this.alertClient = new HttpAlertmanagerClient(AlertmanagerClientConfig.of(alertmanagerUrl));
@@ -64,6 +70,9 @@ public class IncidentService {
                 "sre-agent.observability.loki-url", "http://localhost:3100");
         this.jaegerUrl = env.getProperty(
                 "sre-agent.observability.trace-url", "http://localhost:16686");
+        this.normalizationWindow = Duration.ofSeconds(env.getProperty(
+                "sre-agent.incident.normalization-window-seconds",
+                Integer.class, Math.toIntExact(IncidentFingerprint.DEFAULT_WINDOW.toSeconds())));
         log.info("IncidentService initialized: alertmanager={}, prometheus={}, loki={}, jaeger={}",
                 alertmanagerUrl, prometheusUrl, lokiUrl, jaegerUrl);
     }
@@ -144,11 +153,20 @@ public class IncidentService {
         // 3. Map to IncidentTask
         IncidentTask incidentTask = incidentMapper.map(alert);
         String incidentId = incidentTask.id();
+        IncidentFingerprint fingerprint = IncidentFingerprint.from(
+                incidentTask.service(), topologyProvider.getTopology(), normalizationWindow);
+        Optional<IncidentRcaResultView> existing = findExistingNormalizedIncident(fingerprint);
+        if (existing.isPresent()) {
+            log.info("Alert normalized into existing incident: alertName={}, service={}, incidentId={}, fingerprint={}",
+                    alert.alertName(), alert.service(), existing.get().incidentId(), fingerprint);
+            return existing.get();
+        }
 
         // Store running state
         IncidentRcaResultView runningView = IncidentRcaResultView.running(
                 incidentId, incidentTask.alertName(), incidentTask.service(), incidentTask.severity());
         incidentStore.put(incidentId, new IncidentRecord(incidentTask, alert, runningView, null, null));
+        normalizedIncidentIndex.put(fingerprint, incidentId);
 
         try {
             // 4. Collect evidence from all live sources
@@ -158,7 +176,9 @@ public class IncidentService {
 
             LiveEvidenceCollector liveCollector = new LiveEvidenceCollector(
                     prometheusUrl, lokiUrl, jaegerUrl, false);
-            LiveEvidenceReport liveReport = liveCollector.collect(service, namespace, lookback);
+            liveCollector.setTopology(topologyProvider.getTopology());
+            LiveEvidenceReport liveReport = liveCollector.collect(service, namespace, lookback,
+                    alert.startsAt());
 
             List<Evidence> allEvidence = new ArrayList<>(liveReport.allEvidence());
 
@@ -170,8 +190,12 @@ public class IncidentService {
             log.info("Evidence collected: {} from live sources, {} from alertmanager, total={}",
                     liveReport.totalEvidenceCount(), alertEvidence.size(), allEvidence.size());
 
+            // Bug #4: Liveness probe failure reclassification
+            addLivenessProbeFailureEvidence(allEvidence, null, incidentId, service, namespace);
+
             // 6. Run RCA
-            InvestigationResult rcaResult = workflow.runFromMemory(incidentTask, allEvidence);
+            InvestigationResult rcaResult = workflow.runFromMemory(
+                    incidentTask, allEvidence, topologyProvider.getTopology());
 
             long durationMs = System.currentTimeMillis() - startTime;
 
@@ -194,11 +218,189 @@ public class IncidentService {
         }
     }
 
+    // ── Direct RCA (Chaos / Lab Demo) ─────────────────────────────
+
+    /**
+     * Trigger RCA directly from a chaos experiment (no Alertmanager dependency).
+     * Creates a synthetic incident and runs the full evidence collection + workflow.
+     */
+    public IncidentRcaResultView triggerRcaDirect(
+            String incidentId,
+            String targetService,
+            String faultType,
+            String experimentName,
+            String namespace,
+            String severity
+    ) {
+        return triggerRcaDirect(incidentId, targetService, faultType, experimentName,
+                namespace, severity, targetService);
+    }
+
+    /**
+     * Trigger RCA from a chaos experiment where the impacted service may differ
+     * from the injected fault target.
+     */
+    public IncidentRcaResultView triggerRcaDirect(
+            String incidentId,
+            String targetService,
+            String faultType,
+            String experimentName,
+            String namespace,
+            String severity,
+            String faultTargetService
+    ) {
+        long startTime = System.currentTimeMillis();
+        String actualFaultTarget = faultTargetService != null && !faultTargetService.isBlank()
+                ? faultTargetService : targetService;
+        String safeFaultType = faultType != null && !faultType.isBlank() ? faultType : "unknown";
+        String alertName = "混沌实验: " + actualFaultTarget + " " + safeFaultType;
+        IncidentFingerprint fingerprint = IncidentFingerprint.from(
+                actualFaultTarget, topologyProvider.getTopology(), normalizationWindow);
+        Optional<IncidentRcaResultView> existing = findExistingNormalizedIncident(fingerprint);
+        if (existing.isPresent()) {
+            log.info("Chaos RCA normalized into existing incident: faultTarget={}, impactedService={}, incidentId={}, fingerprint={}",
+                    actualFaultTarget, targetService, existing.get().incidentId(), fingerprint);
+            return existing.get();
+        }
+
+        IncidentTask incidentTask = new IncidentTask(
+                incidentId,
+                alertName,
+                targetService,
+                namespace != null ? namespace : "demo",
+                severity != null ? severity : "warning",
+                Instant.now(),
+                Map.of("faultType", safeFaultType, "source", "chaos",
+                        "faultTargetService", actualFaultTarget,
+                        "experimentName", experimentName != null ? experimentName : alertName),
+                Map.of("description", "混沌实验注入故障: " + safeFaultType + " on " + actualFaultTarget)
+        );
+
+        // Store running state
+        IncidentRcaResultView runningView = IncidentRcaResultView.running(
+                incidentId, incidentTask.alertName(), incidentTask.service(), incidentTask.severity(), "chaos");
+        incidentStore.put(incidentId, new IncidentRecord(incidentTask, null, runningView, null, null));
+        normalizedIncidentIndex.put(fingerprint, incidentId);
+
+        log.info("Triggering direct RCA from chaos: incidentId={}, impactedService={}, faultTarget={}, faultType={}",
+                incidentId, targetService, actualFaultTarget, safeFaultType);
+
+        try {
+            // Collect evidence from all live sources
+            String service = incidentTask.service();
+            String ns = incidentTask.namespace();
+            Duration lookback = Duration.ofMinutes(5);
+
+            LiveEvidenceCollector liveCollector = new LiveEvidenceCollector(
+                    prometheusUrl, lokiUrl, jaegerUrl, false);
+            liveCollector.setTopology(topologyProvider.getTopology());
+
+            // Collect evidence from the primary affected service
+            LiveEvidenceReport liveReport = liveCollector.collect(service, ns, lookback,
+                    incidentTask.startedAt());
+            List<Evidence> allEvidence = new ArrayList<>(liveReport.allEvidence());
+
+            allEvidence.add(chaosFaultEvidence(incidentId, actualFaultTarget, safeFaultType,
+                    experimentName, incidentTask.startedAt()));
+
+            // Also collect from the injected fault target and services affected by it
+            // (chain-aware evidence aggregation — captures blast radius)
+            Set<String> affectedNodes = new LinkedHashSet<>();
+            affectedNodes.add(actualFaultTarget);
+            affectedNodes.addAll(topologyProvider.getTopology().findAffectedNodes(actualFaultTarget));
+            affectedNodes.addAll(topologyProvider.getTopology().findAffectedNodes(service));
+            for (String node : affectedNodes) {
+                if (node.equals(service)) continue; // Already collected
+                try {
+                    LiveEvidenceReport nodeReport = liveCollector.collect(
+                            node, ns, lookback, incidentTask.startedAt());
+                    allEvidence.addAll(nodeReport.allEvidence());
+                    log.info("Chain evidence from {}: {} items", node, nodeReport.totalEvidenceCount());
+                } catch (Exception e) {
+                    log.warn("Failed to collect chain evidence from {}: {}", node, e.getMessage());
+                }
+            }
+
+            // Also collect Alertmanager evidence (might have alerts from chaos)
+            try {
+                List<Evidence> alertEvidence = evidenceMapper.map(
+                        List.of(), incidentId, service, ns);
+                // Don't fail if Alertmanager is empty — chaos doesn't rely on it
+                log.info("Alertmanager evidence count for direct RCA: {}", alertEvidence.size());
+            } catch (Exception e) {
+                log.warn("Alertmanager evidence collection skipped (not required for chaos RCA): {}",
+                        e.getMessage());
+            }
+
+            log.info("Chaos RCA evidence collected: {} items from live sources, total={}",
+                    liveReport.totalEvidenceCount(), allEvidence.size());
+
+            // Bug #4: Liveness probe failure reclassification
+            // When latency fault + restart evidence coexist, the pod restart is
+            // likely caused by K8s liveness probe timeout, not application crash.
+            addLivenessProbeFailureEvidence(allEvidence, safeFaultType, incidentId, service, ns);
+
+            // Run RCA
+            InvestigationResult rcaResult = workflow.runFromMemory(
+                    incidentTask, allEvidence, topologyProvider.getTopology());
+
+            long durationMs = System.currentTimeMillis() - startTime;
+
+            IncidentRcaResultView resultView = IncidentRcaResultView.completed(rcaResult, durationMs, "chaos");
+            incidentStore.put(incidentId, new IncidentRecord(incidentTask, null, resultView, rcaResult, liveReport));
+
+            log.info("Chaos RCA completed: incidentId={}, decision={}, confidence={}, duration={}ms",
+                    incidentId, rcaResult.decision().decisionType(),
+                    String.format("%.2f", rcaResult.decision().confidenceScore()), durationMs);
+
+            return resultView;
+
+        } catch (Exception e) {
+            log.error("Chaos RCA failed: incidentId={}", incidentId, e);
+            IncidentRcaResultView failedView = IncidentRcaResultView.failed(
+                    incidentId, incidentTask.alertName(), incidentTask.service(), e.getMessage(), "chaos");
+            incidentStore.put(incidentId, new IncidentRecord(incidentTask, null, failedView, null, null));
+            return failedView;
+        }
+    }
+
     // ── Incident Queries ──────────────────────────────────────────
 
     public Optional<IncidentRcaResultView> getIncident(String incidentId) {
         IncidentRecord record = incidentStore.get(incidentId);
         return Optional.ofNullable(record).map(r -> r.resultView);
+    }
+
+    private Optional<IncidentRcaResultView> findExistingNormalizedIncident(IncidentFingerprint fingerprint) {
+        String existingIncidentId = normalizedIncidentIndex.get(fingerprint);
+        if (existingIncidentId == null) {
+            return Optional.empty();
+        }
+        IncidentRecord existing = incidentStore.get(existingIncidentId);
+        if (existing == null) {
+            normalizedIncidentIndex.remove(fingerprint);
+            return Optional.empty();
+        }
+        return Optional.of(existing.resultView);
+    }
+
+    private Evidence chaosFaultEvidence(String incidentId, String targetService, String faultType,
+                                        String experimentName, Instant timestamp) {
+        return new Evidence(
+                "ev-chaos-fault-" + incidentId,
+                incidentId,
+                "chaos",
+                "chaos_fault_injected",
+                targetService,
+                timestamp,
+                "Chaos experiment injected " + faultType + " into " + targetService,
+                Map.of(
+                        "faultType", faultType != null ? faultType : "unknown",
+                        "faultTargetService", targetService,
+                        "experimentName", experimentName != null ? experimentName : ""
+                ),
+                1.0
+        );
     }
 
     public Optional<String> getReport(String incidentId) {
@@ -215,7 +417,9 @@ public class IncidentService {
         InvestigationResult rca = record.rcaResult;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("scenarioId", rca.incidentId());
-        result.put("scenarioName", "Alert-driven: " + record.sourceAlert.alertName());
+        result.put("scenarioName", record.sourceAlert != null
+                ? "Alert-driven: " + record.sourceAlert.alertName()
+                : "Fault injection: " + rca.incidentId());
         result.put("status", "COMPLETED");
         result.put("phase", "completed");
         result.put("incidentId", rca.incidentId());
@@ -264,6 +468,49 @@ public class IncidentService {
                     .findFirst();
         }
         return Optional.empty();
+    }
+
+    /**
+     * Bug #4: If latency fault coexists with restart evidence, the pod restart is
+     * likely caused by K8s liveness probe timeout, not a real application crash.
+     * Adds a synthetic {@code liveness_probe_failure} evidence item so that the
+     * {@code liveness_probe_timeout} pattern can rank above {@code pod_crash_loop}.
+     */
+    private void addLivenessProbeFailureEvidence(List<Evidence> allEvidence, String faultType,
+                                                  String incidentId, String service, String ns) {
+        // Check if latency context exists (from fault config or labels)
+        boolean hasLatencyContext = "latency".equalsIgnoreCase(faultType);
+        if (!hasLatencyContext) {
+            // Also check evidence for latency spike (alert-driven path lacks faultType)
+            hasLatencyContext = allEvidence.stream()
+                    .anyMatch(e -> "metric_latency_p95_spike".equals(e.evidenceType()));
+        }
+        if (!hasLatencyContext) return;
+
+        // Check if restart evidence exists
+        boolean hasRestartEvidence = allEvidence.stream()
+                .anyMatch(e -> "metric_restart_rate_increased".equals(e.evidenceType())
+                        || "pod_restart_count_increased".equals(e.evidenceType()));
+        if (!hasRestartEvidence) return;
+
+        // Already has liveness_probe_failure? skip duplicate
+        boolean alreadyHasLiveness = allEvidence.stream()
+                .anyMatch(e -> "liveness_probe_failure".equals(e.evidenceType()));
+        if (alreadyHasLiveness) return;
+
+        Evidence livenessEvidence = new Evidence(
+                "ev-liveness-" + incidentId.substring(0, 8),
+                incidentId,
+                "kubernetes",
+                "liveness_probe_failure",
+                service,
+                Instant.now(),
+                "Pod restarted due to liveness probe timeout — latency spike caused probe to fail, not an application crash",
+                Map.of("reason", "LivenessProbeTimeout", "faultType", faultType != null ? faultType : "unknown"),
+                0.75
+        );
+        allEvidence.add(livenessEvidence);
+        log.info("Bug #4: Added liveness_probe_failure evidence — restarts likely probe-induced, not crash-loop");
     }
 
     /**

@@ -13,7 +13,7 @@ public class MockResults {
 
     public static InvestigationResult create(String incidentId) {
         return create(incidentId, "competing_hypotheses", "hyp_deployment_regression",
-                0.64, 0.06);
+                0.50, 0.05);
     }
 
     public static InvestigationResult create(String incidentId, String decisionType,

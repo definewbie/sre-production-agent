@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RCA Topology Impact Prototype</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f9fbfd;
+      --line: #d9e2ef;
+      --line-soft: #edf2f7;
+      --text: #25324a;
+      --muted: #68758d;
+      --faint: #8b98aa;
+      --title: #101828;
+      --blue: #2563eb;
+      --green: #059669;
+      --amber: #d97706;
+      --red: #dc2626;
+      --purple: #7c3aed;
+      --cyan: #0891b2;
+      --shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+    }
+
+    .rail {
+      background: #111827;
+      color: #e5e7eb;
+      padding: 18px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: #fff;
+      color: #111827;
+      display: grid;
+      place-items: center;
+      font-weight: 820;
+      margin-bottom: 12px;
+    }
+
+    .rail-item {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #cbd5e1;
+      font-size: 17px;
+    }
+
+    .rail-item.active {
+      background: #273346;
+      color: #fff;
+    }
+
+    .main {
+      padding: 22px;
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      color: var(--title);
+      font-size: 26px;
+      line-height: 1.2;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-weight: 680;
+      font-size: 13px;
+    }
+
+    button.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .panel-title {
+      color: var(--title);
+      font-size: 15px;
+      font-weight: 780;
+      margin: 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .badge.red { color: #b91c1c; background: #fee2e2; border-color: #fecaca; }
+    .badge.amber { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+    .badge.green { color: #047857; background: #d1fae5; border-color: #a7f3d0; }
+    .badge.blue { color: #1d4ed8; background: #dbeafe; border-color: #bfdbfe; }
+    .badge.gray { color: #4b5563; background: #f3f4f6; border-color: #e5e7eb; }
+    .badge.purple { color: #5b21b6; background: #ede9fe; border-color: #ddd6fe; }
+
+    .map-shell {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: 760px;
+    }
+
+    .tier-list {
+      border-right: 1px solid var(--line-soft);
+      background: #fbfdff;
+      padding: 12px;
+    }
+
+    .tier {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      padding: 11px;
+      margin-bottom: 10px;
+      background: #fff;
+    }
+
+    .tier.active {
+      border-color: #bfdbfe;
+      background: #eff6ff;
+    }
+
+    .tier-name {
+      color: var(--title);
+      font-size: 13px;
+      font-weight: 780;
+      margin-bottom: 4px;
+    }
+
+    .tier-desc {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .map {
+      position: relative;
+      padding: 18px;
+      overflow: auto;
+      background:
+        linear-gradient(#ffffff, #ffffff) padding-box,
+        repeating-linear-gradient(0deg, transparent, transparent 59px, #f2f5fa 60px),
+        repeating-linear-gradient(90deg, transparent, transparent 99px, #f2f5fa 100px);
+    }
+
+    .canvas {
+      position: relative;
+      min-width: 980px;
+      min-height: 690px;
+    }
+
+    .swimlane {
+      position: absolute;
+      left: 0;
+      right: 0;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: rgba(249, 251, 253, 0.72);
+    }
+
+    .lane-label {
+      position: absolute;
+      left: 12px;
+      top: 8px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 780;
+      text-transform: uppercase;
+    }
+
+    .lane-region { top: 0; height: 96px; }
+    .lane-compute { top: 116px; height: 128px; }
+    .lane-runtime { top: 264px; height: 128px; }
+    .lane-service { top: 412px; height: 128px; }
+    .lane-dependency { top: 560px; height: 128px; }
+
+    .node {
+      position: absolute;
+      min-width: 148px;
+      min-height: 70px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px 11px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+      z-index: 2;
+    }
+
+    .node.good { border-color: #a7f3d0; background: #f0fdf4; }
+    .node.warn { border-color: #fde68a; background: #fffbeb; }
+    .node.bad { border-color: #fecaca; background: #fff1f2; }
+    .node.focus { border-width: 2px; border-color: var(--blue); background: #eff6ff; }
+    .node.external { border-style: dashed; }
+
+    .node-type {
+      color: var(--faint);
+      font-size: 11px;
+      font-weight: 780;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .node-title {
+      color: var(--title);
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1.25;
+      margin-bottom: 5px;
+    }
+
+    .node-metric {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .node-icon {
+      position: absolute;
+      top: 9px;
+      right: 10px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .edge-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .edge {
+      fill: none;
+      stroke: #94a3b8;
+      stroke-width: 2;
+      marker-end: url(#arrow);
+    }
+
+    .edge.critical {
+      stroke: var(--red);
+      stroke-width: 4;
+      marker-end: url(#arrow-red);
+    }
+
+    .edge.warn {
+      stroke: var(--amber);
+      stroke-width: 3;
+      marker-end: url(#arrow-amber);
+      stroke-dasharray: 7 5;
+    }
+
+    .edge.ok {
+      stroke: var(--green);
+      marker-end: url(#arrow-green);
+    }
+
+    .edge.dependency {
+      stroke: #64748b;
+      stroke-width: 2;
+      stroke-dasharray: 4 4;
+      marker-end: url(#arrow);
+    }
+
+    .edge.stack {
+      stroke: #7c3aed;
+      stroke-width: 2;
+      stroke-dasharray: 2 5;
+      marker-end: none;
+    }
+
+    .edge-label {
+      position: absolute;
+      z-index: 3;
+      background: #fff;
+      border: 1px solid var(--line-soft);
+      border-radius: 999px;
+      padding: 3px 8px;
+      color: var(--muted);
+      font-size: 12px;
+      box-shadow: 0 5px 12px rgba(15, 23, 42, 0.06);
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line-soft);
+      background: #fbfdff;
+    }
+
+    .side {
+      display: grid;
+      gap: 16px;
+      position: sticky;
+      top: 18px;
+    }
+
+    .side-section {
+      padding: 15px;
+    }
+
+    .side-section h2 {
+      color: var(--title);
+      font-size: 14px;
+      margin: 0 0 12px;
+      font-weight: 780;
+    }
+
+    .summary {
+      display: grid;
+      gap: 10px;
+    }
+
+    .summary-item {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      padding: 11px;
+      background: var(--surface-soft);
+    }
+
+    .summary-title {
+      color: var(--title);
+      font-size: 13px;
+      font-weight: 780;
+      margin-bottom: 5px;
+    }
+
+    .summary-text {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .mini-table {
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .key { color: var(--faint); }
+    .val { color: var(--text); font-weight: 650; }
+
+    .drawer {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .drawer-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px;
+      box-shadow: var(--shadow);
+    }
+
+    .drawer-card h3 {
+      color: var(--title);
+      font-size: 13px;
+      margin: 0 0 8px;
+      font-weight: 780;
+    }
+
+    .drawer-card p {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    @media (max-width: 1280px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .side {
+        position: static;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 920px) {
+      .app { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .map-shell { grid-template-columns: 1fr; }
+      .tier-list {
+        border-right: 0;
+        border-bottom: 1px solid var(--line-soft);
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .tier { margin-bottom: 0; }
+      .side,
+      .drawer {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <nav class="rail">
+      <div class="logo">S</div>
+      <div class="rail-item">●</div>
+      <div class="rail-item active">⌘</div>
+      <div class="rail-item">↗</div>
+      <div class="rail-item">≡</div>
+      <div class="rail-item">?</div>
+    </nav>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h1>Topology Impact Map</h1>
+          <p class="subtitle">从业务入口到服务、进程、计算资源、区域和外部依赖，展示故障传播路径。</p>
+        </div>
+        <div class="toolbar">
+          <button>Show impacted only</button>
+          <button>Compare before incident</button>
+          <button class="primary">Open selected entity</button>
+        </div>
+      </div>
+
+      <div class="layout">
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Checkout incident topology</h2>
+            <div>
+              <span class="badge red">impact propagation highlighted</span>
+              <span class="badge blue">dependency direction separated</span>
+            </div>
+          </div>
+
+          <div class="map-shell">
+            <aside class="tier-list">
+              <div class="tier active">
+                <div class="tier-name">Business / User Journey</div>
+                <div class="tier-desc">Checkout, user impact, entry point.</div>
+              </div>
+              <div class="tier active">
+                <div class="tier-name">Services</div>
+                <div class="tier-desc">order-service, payment-service, inventory-service.</div>
+              </div>
+              <div class="tier">
+                <div class="tier-name">Runtime</div>
+                <div class="tier-desc">process, container, workload, task.</div>
+              </div>
+              <div class="tier">
+                <div class="tier-name">Compute</div>
+                <div class="tier-desc">pod, VM, bare metal host, node.</div>
+              </div>
+              <div class="tier">
+                <div class="tier-name">Region / Zone</div>
+                <div class="tier-desc">AZ, region, cluster, data center.</div>
+              </div>
+              <div class="tier">
+                <div class="tier-name">Dependencies</div>
+                <div class="tier-desc">DB, cache, queue, LB, network, external provider.</div>
+              </div>
+            </aside>
+
+            <div class="map">
+              <div class="canvas">
+                <div class="swimlane lane-region"><span class="lane-label">Region / zone / cluster</span></div>
+                <div class="swimlane lane-compute"><span class="lane-label">Compute: pod / vm / bare metal / node</span></div>
+                <div class="swimlane lane-runtime"><span class="lane-label">Runtime: process / container / workload</span></div>
+                <div class="swimlane lane-service"><span class="lane-label">Services and entry points</span></div>
+                <div class="swimlane lane-dependency"><span class="lane-label">Shared dependencies</span></div>
+
+                <svg class="edge-layer" viewBox="0 0 980 690" preserveAspectRatio="none">
+                  <defs>
+                    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                      <path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8"></path>
+                    </marker>
+                    <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                      <path d="M0,0 L8,4 L0,8 Z" fill="#dc2626"></path>
+                    </marker>
+                    <marker id="arrow-amber" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                      <path d="M0,0 L8,4 L0,8 Z" fill="#d97706"></path>
+                    </marker>
+                    <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                      <path d="M0,0 L8,4 L0,8 Z" fill="#059669"></path>
+                    </marker>
+                  </defs>
+
+                  <path class="edge dependency" d="M170 475 C265 475 265 475 360 475"></path>
+                  <path class="edge dependency" d="M500 475 C590 475 590 475 680 475"></path>
+                  <path class="edge critical" d="M680 506 C590 532 275 532 170 506"></path>
+                  <path class="edge critical" d="M680 470 C590 470 590 470 500 470"></path>
+                  <path class="edge critical" d="M360 470 C265 470 265 470 170 470"></path>
+                  <path class="edge warn" d="M804 596 C820 540 800 515 760 506"></path>
+                  <path class="edge warn" d="M760 506 C770 560 705 594 625 606"></path>
+                  <path class="edge ok" d="M440 514 C445 585 465 598 510 606"></path>
+                  <path class="edge stack" d="M440 434 C450 382 452 364 480 342"></path>
+                  <path class="edge stack" d="M760 434 C770 383 770 364 752 342"></path>
+                  <path class="edge stack" d="M480 304 C470 245 456 225 430 204"></path>
+                  <path class="edge stack" d="M752 304 C740 250 732 225 710 204"></path>
+                  <path class="edge stack" d="M430 166 C420 108 412 80 392 48"></path>
+                  <path class="edge stack" d="M710 166 C700 108 690 80 668 48"></path>
+                </svg>
+
+                <div class="node good" style="left: 250px; top: 18px;">
+                  <span class="node-icon">☁</span>
+                  <div class="node-type">Region</div>
+                  <div class="node-title">us-east-1a</div>
+                  <div class="node-metric">cluster: prod-checkout</div>
+                </div>
+
+                <div class="node warn" style="left: 530px; top: 18px;">
+                  <span class="node-icon">☁</span>
+                  <div class="node-type">Region</div>
+                  <div class="node-title">us-east-1b</div>
+                  <div class="node-metric">higher network RTT</div>
+                </div>
+
+                <div class="node good" style="left: 290px; top: 166px;">
+                  <span class="node-icon">◫</span>
+                  <div class="node-type">Pod / VM</div>
+                  <div class="node-title">order-pod-7df</div>
+                  <div class="node-metric">CPU 42%, restart 0</div>
+                </div>
+
+                <div class="node bad" style="left: 570px; top: 166px;">
+                  <span class="node-icon">◫</span>
+                  <div class="node-type">Pod / VM</div>
+                  <div class="node-title">payment-pod-9ab</div>
+                  <div class="node-metric">latency + saturation</div>
+                </div>
+
+                <div class="node good" style="left: 340px; top: 304px;">
+                  <span class="node-icon">▣</span>
+                  <div class="node-type">Process</div>
+                  <div class="node-title">order JVM</div>
+                  <div class="node-metric">waiting on payment call</div>
+                </div>
+
+                <div class="node bad" style="left: 610px; top: 304px;">
+                  <span class="node-icon">▣</span>
+                  <div class="node-type">Process</div>
+                  <div class="node-title">payment JVM</div>
+                  <div class="node-metric">p95 2.4s, errors low</div>
+                </div>
+
+                <div class="node focus" style="left: 28px; top: 434px;">
+                  <span class="node-icon">↳</span>
+                  <div class="node-type">Entry</div>
+                  <div class="node-title">ALB checkout</div>
+                  <div class="node-metric">5xx 12%, p95 4.8s</div>
+                </div>
+
+                <div class="node warn" style="left: 360px; top: 434px;">
+                  <span class="node-icon">S</span>
+                  <div class="node-type">Service</div>
+                  <div class="node-title">order-service</div>
+                  <div class="node-metric">checkout timeout</div>
+                </div>
+
+                <div class="node bad" style="left: 680px; top: 434px;">
+                  <span class="node-icon">S</span>
+                  <div class="node-type">Service</div>
+                  <div class="node-title">payment-service</div>
+                  <div class="node-metric">likely starting point</div>
+                </div>
+
+                <div class="node good" style="left: 850px; top: 434px;">
+                  <span class="node-icon">S</span>
+                  <div class="node-type">Service</div>
+                  <div class="node-title">inventory-service</div>
+                  <div class="node-metric">healthy, low latency</div>
+                </div>
+
+                <div class="node good" style="left: 370px; top: 596px;">
+                  <span class="node-icon">▤</span>
+                  <div class="node-type">Database</div>
+                  <div class="node-title">orders-db</div>
+                  <div class="node-metric">normal query latency</div>
+                </div>
+
+                <div class="node warn" style="left: 550px; top: 596px;">
+                  <span class="node-icon">▦</span>
+                  <div class="node-type">Queue</div>
+                  <div class="node-title">payment-events</div>
+                  <div class="node-metric">consumer lag rising</div>
+                </div>
+
+                <div class="node external warn" style="left: 730px; top: 596px;">
+                  <span class="node-icon">◇</span>
+                  <div class="node-type">External</div>
+                  <div class="node-title">payment gateway</div>
+                  <div class="node-metric">provider RTT elevated</div>
+                </div>
+
+                <div class="edge-label" style="left: 225px; top: 449px;">dependency: ALB -> order</div>
+                <div class="edge-label" style="left: 540px; top: 449px;">dependency: order -> payment</div>
+                <div class="edge-label" style="left: 395px; top: 508px;">impact: payment -> order -> checkout</div>
+                <div class="edge-label" style="left: 770px; top: 536px;">source: gateway -> payment</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="legend">
+            <span class="badge red">red: fault impact propagation direction</span>
+            <span class="badge gray">dashed gray: runtime dependency direction</span>
+            <span class="badge purple">purple dotted: entity stack, not causality</span>
+            <span class="badge amber">amber: degraded or impacted</span>
+            <span class="badge green">green: healthy counter-signal</span>
+            <span class="badge blue">blue border: selected entity</span>
+            <span class="badge gray">dashed node: external / partially observed</span>
+          </div>
+        </section>
+
+        <aside class="side">
+          <section class="panel side-section">
+            <h2>Selected path summary</h2>
+            <div class="summary">
+              <div class="summary-item">
+                <div class="summary-title">Probable starting point</div>
+                <div class="summary-text">payment-service in us-east-1b, backed by process and pod-level latency evidence.</div>
+              </div>
+              <div class="summary-item">
+                <div class="summary-title">First visible failure</div>
+                <div class="summary-text">order-service checkout timeout, observed after payment latency begins.</div>
+              </div>
+              <div class="summary-item">
+                <div class="summary-title">User impact</div>
+                <div class="summary-text">ALB checkout 5xx and SLO burn. Inventory stays green and acts as a counter-signal.</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel side-section">
+            <h2>Entity drilldown</h2>
+            <div class="mini-table">
+              <div class="row"><div class="key">Entity</div><div class="val">payment-service</div></div>
+              <div class="row"><div class="key">Runtime</div><div class="val">payment JVM</div></div>
+              <div class="row"><div class="key">Compute</div><div class="val">payment-pod-9ab</div></div>
+              <div class="row"><div class="key">Location</div><div class="val">us-east-1b</div></div>
+              <div class="row"><div class="key">Dependencies</div><div class="val">payment gateway, queue</div></div>
+              <div class="row"><div class="key">Owner</div><div class="val">payments team</div></div>
+            </div>
+          </section>
+
+          <section class="panel side-section">
+            <h2>View controls</h2>
+            <div class="summary">
+              <div class="summary-item">
+                <div class="summary-title">Lens</div>
+                <div class="summary-text">Business impact / service dependency / runtime / infrastructure / network.</div>
+              </div>
+              <div class="summary-item">
+                <div class="summary-title">Collapse rules</div>
+                <div class="summary-text">Hide healthy siblings by default; keep counter-signals visible on demand.</div>
+              </div>
+              <div class="summary-item">
+                <div class="summary-title">Evidence overlay</div>
+                <div class="summary-text">Color from decision role: starting point, failure, impact, counter-signal, unknown.</div>
+              </div>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <section class="drawer">
+        <div class="drawer-card">
+          <h3>Topology sources</h3>
+          <p>Configured service catalog, traces, Kubernetes ownership, cloud inventory, LB target groups, DNS and network flow logs.</p>
+        </div>
+        <div class="drawer-card">
+          <h3>Supported entities</h3>
+          <p>Service, endpoint, process, container, pod, VM, bare metal host, node, AZ, region, DB, cache, queue, LB, external provider.</p>
+        </div>
+        <div class="drawer-card">
+          <h3>RCA overlay</h3>
+          <p>Each node and edge can carry role, health, confidence language, first seen time, evidence count, and owner.</p>
+        </div>
+        <div class="drawer-card">
+          <h3>Interaction model</h3>
+          <p>Click a node to drill down; switch lens; compare before incident; filter impacted-only; open runbook or owner handoff.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

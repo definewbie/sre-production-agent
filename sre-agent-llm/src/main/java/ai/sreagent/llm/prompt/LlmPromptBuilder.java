@@ -38,8 +38,8 @@ public class LlmPromptBuilder {
             """;
 
     private static final String EVIDENCE_SCOPE_NOTE =
-            "This explanation is based only on verified structured evidence currently available to the workflow. " +
-            "Future evidence providers may include K8s, EC2, RDS, ElastiCache, ALB, CMDB, and service topology.";
+            "此解释仅基于当前工作流可获取的已验证结构化证据。" +
+            "未来证据来源可能包括 K8s、EC2、RDS、ElastiCache、ALB、CMDB 和服务拓扑。";
 
     public LlmRequest build(InvestigationResult result) {
         String userPrompt = buildUserPrompt(result);
@@ -138,9 +138,9 @@ public class LlmPromptBuilder {
 
         // 9. Constraints reminder
         sb.append("## Constraints\n");
-        sb.append("- Treat only provided structured evidence as available facts.\n");
-        sb.append("- Do not infer missing K8s, EC2, RDS, ElastiCache, ALB, or CMDB facts.\n");
-        sb.append("- If discussing future investigation, label it as an unverified proposal.\n");
+        sb.append("- 仅将提供的结构化证据视为可用事实。\n");
+        sb.append("- 不得推测缺失的 K8s、EC2、RDS、ElastiCache、ALB 或 CMDB 事实。\n");
+        sb.append("- 如讨论未来调查，请标注为未验证建议。\n");
         sb.append("- LLM can assist, but cannot adjudicate.\n\n");
 
         // 10. Output format

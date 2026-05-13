@@ -45,7 +45,7 @@ class ScenarioEProbeExecutionTest {
         assertThat(baseResult.decision()).isNotNull();
         InvestigationDecision baseDecision = baseResult.decision();
         String decisionType = baseDecision.decisionType();
-        assertThat(decisionType).isEqualTo("competing_hypotheses");
+        assertThat(decisionType).isEqualTo("uncertain_requires_more_evidence");
 
         // 2. Generate LLM hypothesis proposals
         MockLlmHypothesisProposer proposer = new MockLlmHypothesisProposer();

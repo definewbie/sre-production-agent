@@ -20,7 +20,8 @@ public class MarkdownReporter {
             List<ConfidenceResult> confidenceResults,
             HypothesisComparison comparison,
             InvestigationDecision decision,
-            List<Evidence> evidence) {
+            List<Evidence> evidence,
+            ProblemWindow problemWindow) {
 
         StringBuilder sb = new StringBuilder();
 
@@ -65,6 +66,136 @@ public class MarkdownReporter {
                 .forEach(c -> sb.append(String.format("| %s | %.2f | %s | %s |\n",
                         hypothesisTitleZh(c.hypothesisId()), c.score(), levelZh(c.level()), decisionZh(c.decision()))));
         sb.append("\n");
+
+        // Observability quality
+        sb.append("## 可观测性质量\n\n");
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            List<String> blindProviders = c.providerBlindness();
+            sb.append("- ").append(hypothesisTitleZh(c.hypothesisId()))
+                    .append(": ").append(c.diagnosticQuality() != null ? c.diagnosticQuality() : "FULL");
+            if (blindProviders != null && !blindProviders.isEmpty()) {
+                sb.append("（blind providers: ").append(String.join(", ", blindProviders)).append("）");
+            }
+            sb.append("\n");
+        }
+        sb.append("\n");
+
+        // ── V.2-RCA-1A.3: Temporal Alignment Analysis ──
+        sb.append("## 时间对齐分析\n\n");
+        sb.append("Temporal alignment 评估证据时间戳是否支持各假设的因果顺序")
+                .append("（candidate 异常先于 impacted 服务异常）。\n\n");
+
+        // Problem Window status
+        if (problemWindow != null && problemWindow.isValid()) {
+            sb.append("**Problem Window**: ")
+                    .append(problemWindow.problemStart().toString()).append(" → ")
+                    .append(problemWindow.problemEnd().toString())
+                    .append("（来源: ").append(problemWindow.source())
+                    .append(", lookback: ").append(problemWindow.lookbackWindow().toMinutes()).append("min")
+                    .append(", lookahead: ").append(problemWindow.lookaheadWindow().toMinutes()).append("min）\n\n");
+        } else {
+            sb.append("> ⚠️ **PARTIAL** — Problem Window 尚未接入报告层。")
+                    .append("当前为无 temporal 路径（score=0, confidence=UNKNOWN），")
+                    .append("不代表 TemporalAligner 不可用，而是调用链未贯通。\n\n");
+        }
+
+        sb.append("| 假设 | Temporal Score | Temporal 置信度 | Candidate First Seen | Impacted First Seen |\n");
+        sb.append("|---|---|---|---:|---:|\n");
+        confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .forEach(c -> sb.append(String.format("| %s | %+.2f | %s | %s | %s |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        c.temporalAlignmentScore(),
+                        temporalConfidenceZh(c.temporalConfidence()),
+                        c.candidateFirstSeen() != null ? c.candidateFirstSeen().toString() : "N/A",
+                        c.impactedFirstSeen() != null ? c.impactedFirstSeen().toString() : "N/A")));
+        sb.append("\n");
+
+        if (problemWindow == null || !problemWindow.isValid()) {
+            sb.append("> ⚠️ 以上 temporal 数据来自 ConfidenceResult（由 ConfidenceScorer 注入）。")
+                    .append("若为全部默认值则说明调用链未传入 TemporalAlignmentResult。\n\n");
+        }
+
+        // Per-hypothesis temporal detail
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            sb.append("### ").append(hypothesisTitleZh(c.hypothesisId()))
+                    .append(" 时间对齐详情\n\n");
+            sb.append("- **Temporal Score**: ").append(String.format("%+.2f", c.temporalAlignmentScore())).append("\n");
+            sb.append("- **Temporal 置信度**: ").append(temporalConfidenceZh(c.temporalConfidence())).append("\n");
+            sb.append("- **Candidate First Seen**: ")
+                    .append(c.candidateFirstSeen() != null ? c.candidateFirstSeen().toString() : "N/A").append("\n");
+            sb.append("- **Impacted First Seen**: ")
+                    .append(c.impactedFirstSeen() != null ? c.impactedFirstSeen().toString() : "N/A").append("\n");
+            String explanation = c.temporalExplanation();
+            sb.append("- **Temporal 说明**: ")
+                    .append(explanation != null && !explanation.isEmpty() ? explanation : "N/A（无 temporal alignment 数据）")
+                    .append("\n\n");
+        }
+
+        // ── V.2-RCA-1A.4: Topology Edge Analysis ──
+        sb.append("## 拓扑分析\n\n");
+        sb.append("Topology edge 描述候选假设中涉及的**服务间调用/依赖关系**及其发现方式；Propagation Score 描述该路径对根因传播解释的有界加分。\n\n");
+        sb.append("| 假设 | Topology Score | Propagation Score | Edge Source | Edge Confidence | Direction | Path Length | 说明 |\n");
+        sb.append("|---|---:|---:|---|---|---|---:|---|\n");
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            TopologyEdge edge = c.topologyEdge();
+            if (edge != null && edge.isPresent()) {
+                sb.append(String.format("| %s | %+.2f | %+.2f | %s | %s | %s | %d | %s |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        c.topologyCausalityScore(),
+                        c.propagationScore(),
+                        topologyEdgeSourceZh(edge.edgeSource()),
+                        topologyEdgeConfidenceZh(edge.edgeConfidence()),
+                        propagationDirectionZh(edge.direction()),
+                        edge.pathLength(),
+                        edge.explanation() != null ? edge.explanation() : "—"));
+            } else {
+                sb.append(String.format("| %s | %+.2f | %+.2f | — | — | — | — | ⚠️ 无拓扑证据：无法确认服务间依赖关系 |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        c.topologyCausalityScore(),
+                        c.propagationScore()));
+            }
+        }
+        sb.append("\n");
+
+        sb.append("### 传播路径\n\n");
+        sb.append("| 假设 | Path Confidence | Path Length | Services | 说明 |\n");
+        sb.append("|---|---|---:|---|---|\n");
+        for (ConfidenceResult c : confidenceResults.stream()
+                .sorted(Comparator.comparingDouble(ConfidenceResult::score).reversed())
+                .toList()) {
+            PropagationPath path = c.propagationPath();
+            if (path != null && path.isPresent()) {
+                sb.append(String.format("| %s | %s | %d | %s | %s |\n",
+                        hypothesisTitleZh(c.hypothesisId()),
+                        topologyEdgeConfidenceZh(path.pathConfidence()),
+                        path.pathLength(),
+                        String.join(" → ", path.services()),
+                        path.explanation() != null ? path.explanation() : "—"));
+            } else {
+                sb.append(String.format("| %s | — | — | — | ⚠️ 无传播路径 |\n",
+                        hypothesisTitleZh(c.hypothesisId())));
+            }
+        }
+        sb.append("\n");
+
+        boolean hasTopology = confidenceResults.stream()
+                .anyMatch(c -> {
+                    TopologyEdge e = c.topologyEdge();
+                    return e != null && e.isPresent();
+                });
+
+        if (!hasTopology) {
+            sb.append("> ⚠️ **NO-TOPOLOGY GUARDRAIL**：所有假设均缺少拓扑证据。\n");
+            sb.append("> 在没有拓扑信息支持的情况下，仅凭 temporal alignment 不能将假设判定为\n");
+            sb.append("> `likely_root_cause` 或 `probable_root_cause`。需要补充服务依赖关系证据后才可信赖。\n\n");
+        }
 
         // Leading Hypothesis
         sb.append("## 领先假设\n\n");
@@ -202,6 +333,41 @@ public class MarkdownReporter {
             case "uncertain" -> "不确定";
             case "insufficient_evidence" -> "证据不足";
             default -> decision != null ? decision : "-";
+        };
+    }
+
+    private String temporalConfidenceZh(String confidence) {
+        return switch (confidence) {
+            case "HIGH" -> "高";
+            case "MEDIUM" -> "中";
+            case "LOW" -> "低";
+            case "UNKNOWN" -> "未知";
+            default -> confidence != null ? confidence : "未知";
+        };
+    }
+
+    private String topologyEdgeSourceZh(TopologyEdgeSource source) {
+        return switch (source) {
+            case TRACE -> "追踪";
+            case OBSERVED_DEPENDENCY -> "观测依赖";
+            case CONFIGURED_TOPOLOGY -> "配置拓扑";
+            case STATIC_FALLBACK -> "静态回退";
+        };
+    }
+
+    private String topologyEdgeConfidenceZh(TopologyEdgeConfidence confidence) {
+        return switch (confidence) {
+            case HIGH -> "🔴 高";
+            case MEDIUM -> "🟡 中";
+            case LOW -> "⚪ 低";
+        };
+    }
+
+    private String propagationDirectionZh(PropagationDirection direction) {
+        return switch (direction) {
+            case UPSTREAM_TO_DOWNSTREAM -> "上游→下游";
+            case DOWNSTREAM_TO_UPSTREAM_IMPACT -> "下游影响上游";
+            case UNKNOWN -> "未知";
         };
     }
 }
